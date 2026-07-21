@@ -1,9 +1,11 @@
 import { MongoClient, type Collection, type Db, type IndexDescriptionInfo } from 'mongodb';
 import type { ProjectState, SiteBoundary, SiteValidation } from '../src/types.js';
+import { normalizeEconomicConfiguration } from '../src/data/economicProfiles.js';
+import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
 import { normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
 
-const SOLARAF_HOST = 'b062e978-4d93-4760-9d00-907071c84bbe.europe-west1.firestore.goog';
-const SOLARAF_DATABASE = 'solaraf';
+const EXISTING_MONGO_HOST = 'b062e978-4d93-4760-9d00-907071c84bbe.europe-west1.firestore.goog';
+const EXISTING_MONGO_DATABASE = 'solaraf';
 const USERS_COLLECTION = 'growaf_users';
 const PROJECTS_COLLECTION = 'growaf_projects';
 
@@ -52,19 +54,19 @@ type ProjectDocument = {
 let client: MongoClient | null = null;
 let database: Db | null = null;
 
-export function solarafConnectionUri(): string {
+export function existingMongoConnectionUri(): string {
   const value = process.env.MONGODB_URI?.trim();
-  if (!value) throw new Error('MONGODB_URI is required for the existing solaraf database.');
+  if (!value) throw new Error('MONGODB_URI is required for the existing Mongo-compatible database.');
   const parsed = new URL(value);
-  if (parsed.protocol !== 'mongodb:' || parsed.hostname !== SOLARAF_HOST || parsed.pathname !== `/${SOLARAF_DATABASE}`) {
-    throw new Error('MONGODB_URI must target the existing solaraf Firestore Enterprise database.');
+  if (parsed.protocol !== 'mongodb:' || parsed.hostname !== EXISTING_MONGO_HOST || parsed.pathname !== `/${EXISTING_MONGO_DATABASE}`) {
+    throw new Error('MONGODB_URI must target the configured existing Firestore Enterprise database.');
   }
   return value;
 }
 
 export async function mongoDatabase(): Promise<Db> {
   if (database) return database;
-  client = new MongoClient(solarafConnectionUri(), {
+  client = new MongoClient(existingMongoConnectionUri(), {
     maxPoolSize: 12,
     minPoolSize: 0,
     maxIdleTimeMS: 30_000,
@@ -72,7 +74,7 @@ export async function mongoDatabase(): Promise<Db> {
     connectTimeoutMS: 10_000,
   });
   await client.connect();
-  database = client.db(SOLARAF_DATABASE);
+  database = client.db(EXISTING_MONGO_DATABASE);
   return database;
 }
 
@@ -190,7 +192,13 @@ function userFromDocument(document: UserDocument): GrowafUser {
 }
 
 function normalizeProject(project: ProjectState): ProjectState {
-  return { ...project, site: normalizeSiteBoundary(project.site) };
+  const countryCode = project.siteProfile?.location.countryCode ?? '';
+  return {
+    ...project,
+    site: normalizeSiteBoundary(project.site),
+    irrigationConfiguration: normalizeIrrigationConfiguration(project.irrigationConfiguration),
+    economicConfiguration: normalizeEconomicConfiguration(project.economicConfiguration, countryCode),
+  };
 }
 
 function databaseError(code: number, status: string, message: string) {

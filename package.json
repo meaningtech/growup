@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,green \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
+    "dev:test": "concurrently -k -n api,web -c cyan,green \"tsx watch server/index.ts\" \"vite --host 127.0.0.1 --port 52174 --strictPort\"",
+    "start": "tsx server/index.ts",
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:watch": "vitest",

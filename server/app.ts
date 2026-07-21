@@ -1,9 +1,10 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies.js';
-import { RAGUSA_IBLA_TEST_SITE } from '../src/data/ragusaIblaSite.js';
 import { calculateEstablishmentCost } from '../src/lib/costs.js';
-import { generateLayoutVariants, normalizeDesignConfiguration } from '../src/lib/layout.js';
+import { generateLayoutVariants, normalizeDesignConfiguration, regenerateLayoutVariant } from '../src/lib/layout.js';
 import { calculateIrrigation } from '../src/lib/irrigation.js';
 import { normalizeDesignObjectives } from '../src/lib/objectives.js';
 import { rankSpecies, recommendedPalette } from '../src/lib/recommendations.js';
@@ -22,6 +23,8 @@ import {
 } from './auth.js';
 import { catalogueStats, searchCatalogue } from './catalog.js';
 import { databaseHealth, geometryMetrics, migrateDatabase } from './db.js';
+import { resolveEconomicConfiguration, type EconomicProviderConfig } from './economics.js';
+import { exportProjectCsv, exportProjectGeoJson } from './export.js';
 import {
   assertMongoIndexesReady,
   getProject,
@@ -34,9 +37,10 @@ import {
 } from './mongo.js';
 import { buildSiteProfile, searchLocations, type SiteProviderConfig } from './site.js';
 
-export type GrowafAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & {
+export type GrowafAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & {
   skipDatabaseMigration?: boolean;
   database?: GrowafDatabase;
+  staticRoot?: string | null;
 };
 
 export function createApp(config: GrowafAppConfig = {}) {
@@ -62,7 +66,10 @@ export function createApp(config: GrowafAppConfig = {}) {
   app.get('/api/config', (_req: Request, res: Response) => {
     res.json({
       googleMapsApiKey: process.env.GOOGLE_MAPS_BROWSER_API_KEY ?? '',
-      defaultSite: RAGUSA_IBLA_TEST_SITE,
+      initialMapViewport: {
+        center: { lat: 0, lng: 0 },
+        zoom: 2,
+      },
       climatePeriod: '2021–2025',
       modelVersion: 'growaf-0.1.0',
       assistant: assistantStatus(config),
@@ -143,6 +150,13 @@ export function createApp(config: GrowafAppConfig = {}) {
     });
   });
 
+  app.post('/api/economics/profile', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const siteProfile = requireSiteProfile(req.body?.siteProfile);
+      return resolveEconomicConfiguration(siteProfile.location.countryCode, config);
+    });
+  });
+
   app.post('/api/recommendations', async (req: Request, res: Response) => {
     await handle(res, async () => {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
@@ -164,21 +178,61 @@ export function createApp(config: GrowafAppConfig = {}) {
     });
   });
 
+  app.post('/api/layout/regenerate', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const site = requireBoundary(req.body?.site);
+      const siteProfile = requireSiteProfile(req.body?.siteProfile);
+      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
+      const previousVariant = requireVariant(req.body?.previousVariant);
+      const designConfiguration = normalizeDesignConfiguration(req.body?.designConfiguration ?? previousVariant.design);
+      return { variant: regenerateLayoutVariant(site, siteProfile, selectedSpecies, previousVariant, designConfiguration) };
+    });
+  });
+
   app.post('/api/irrigation/calculate', async (req: Request, res: Response) => {
     await handle(res, async () => {
       const variant = requireVariant(req.body?.variant);
+      const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
-      return calculateIrrigation(variant, selectedSpecies, siteProfile, Number(req.body?.designYear ?? 5));
+      return calculateIrrigation(variant, selectedSpecies, site, siteProfile, Number(req.body?.designYear ?? 5), req.body?.irrigationConfiguration, req.body?.economicConfiguration);
     });
   });
 
   app.post('/api/costs/calculate', async (req: Request, res: Response) => {
     await handle(res, async () => {
       const variant = requireVariant(req.body?.variant);
+      const site = requireBoundary(req.body?.site);
       const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
-      const irrigation = calculateIrrigation(variant, selectedSpecies, requireSiteProfile(req.body?.siteProfile), Number(req.body?.designYear ?? 5));
-      return { irrigation, establishment: calculateEstablishmentCost(variant, selectedSpecies, irrigation) };
+      const siteProfile = requireSiteProfile(req.body?.siteProfile);
+      const designYear = Number(req.body?.designYear ?? 5);
+      const irrigation = calculateIrrigation(variant, selectedSpecies, site, siteProfile, designYear, req.body?.irrigationConfiguration, req.body?.economicConfiguration);
+      const baselineIrrigation = designYear === 5
+        ? irrigation
+        : calculateIrrigation(variant, selectedSpecies, site, siteProfile, 5, req.body?.irrigationConfiguration, req.body?.economicConfiguration);
+      let cumulativeOperatingCost = 0;
+      const finalProjectionYear = Math.max(30, designYear);
+      const timeline = Array.from({ length: finalProjectionYear }, (_, index) => index + 1).map((year) => {
+        const yearlyIrrigation = year === designYear
+          ? irrigation
+          : year === 5
+            ? baselineIrrigation
+            : calculateIrrigation(variant, selectedSpecies, site, siteProfile, year, req.body?.irrigationConfiguration, req.body?.economicConfiguration);
+        const yearlyCosts = calculateEstablishmentCost(variant, selectedSpecies, baselineIrrigation, irrigation.economics, year, yearlyIrrigation);
+        cumulativeOperatingCost += yearlyIrrigation.annualOperation.totalCost;
+        return {
+          year,
+          activePlantCount: yearlyIrrigation.activePlantCount,
+          annualWaterM3: yearlyIrrigation.annualWaterM3,
+          waterAndEnergyCost: Number((yearlyIrrigation.annualOperation.waterCost + yearlyIrrigation.annualOperation.energyCost).toFixed(2)),
+          managementLaborCost: yearlyIrrigation.annualOperation.managementLaborCost,
+          maintenanceCost: yearlyIrrigation.annualOperation.maintenanceCost,
+          annualOperatingCost: yearlyIrrigation.annualOperation.totalCost,
+          activeReplacementCost: yearlyCosts.activeSystem.totalReplacementCost,
+          cumulativeOperatingCost: Number(cumulativeOperatingCost.toFixed(2)),
+        };
+      });
+      return { irrigation, establishment: calculateEstablishmentCost(variant, selectedSpecies, baselineIrrigation, irrigation.economics, designYear, irrigation, timeline) };
     });
   });
 
@@ -212,18 +266,33 @@ export function createApp(config: GrowafAppConfig = {}) {
       const user = await requireAuthenticatedUser(req, database, config);
       const project = await database.getProject(user.id, paramValue(req.params.id));
       if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
-      const variant = project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0];
-      const features = [
-        { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...project.site.polygon.map((point) => [point.lng, point.lat]), [project.site.polygon[0].lng, project.site.polygon[0].lat]]] }, properties: { kind: 'site', name: project.site.name } },
-        ...project.site.exclusions.map((polygon, index) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...polygon.map((point) => [point.lng, point.lat]), [polygon[0].lng, polygon[0].lat]]] }, properties: { kind: 'manual_exclusion', index: index + 1 } })),
-        ...(project.siteProfile?.satellite.existingVegetation.patches ?? []).map((patch) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...patch.polygon.map((point) => [point.lng, point.lat]), [patch.polygon[0].lng, patch.polygon[0].lat]]] }, properties: { kind: 'existing_woody_vegetation', id: patch.id, confidence: patch.confidence, currentNdvi: patch.currentNdvi, protectedAreaM2: patch.protectedAreaM2 } })),
-        ...(variant?.trees ?? []).map((tree) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [tree.coordinate.lng, tree.coordinate.lat] }, properties: { kind: 'tree', id: tree.id, speciesId: tree.speciesId, plantedYear: tree.plantedYear, removedYear: tree.removedYear } })),
-      ];
       res.setHeader('Content-Type', 'application/geo+json');
       res.setHeader('Content-Disposition', `attachment; filename="${project.id}.geojson"`);
-      res.json({ type: 'FeatureCollection', features });
+      res.json(exportProjectGeoJson(project));
     } catch (error) { sendError(res, error); }
   });
+
+  app.get('/api/projects/:id/export.csv', async (req: Request, res: Response) => {
+    try {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const project = await database.getProject(user.id, paramValue(req.params.id));
+      if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${project.id}.csv"`);
+      res.send(exportProjectCsv(project));
+    } catch (error) { sendError(res, error); }
+  });
+
+  const staticRoot = config.staticRoot === undefined
+    ? process.env.NODE_ENV === 'production' ? resolve(process.cwd(), 'dist') : null
+    : config.staticRoot;
+  if (staticRoot && existsSync(resolve(staticRoot, 'index.html'))) {
+    app.use(express.static(staticRoot, { index: false }));
+    app.use((req: Request, res: Response, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+      return res.sendFile(resolve(staticRoot, 'index.html'));
+    });
+  }
 
   return app;
 }

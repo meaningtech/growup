@@ -1,4 +1,5 @@
 import type { DesignObjectives, DesignSpecies, SiteProfile, SpeciesRecommendation, SuitabilityComponent } from '../types';
+import { siteNativeness } from './biogeography';
 import { DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives } from './objectives';
 
 type SuitabilityKey = 'climate' | 'soil' | 'water' | 'native' | 'purpose' | 'syntropic' | 'maintenance' | 'evidence';
@@ -55,10 +56,14 @@ export function suitabilityWeights(objectives: DesignObjectives): Record<Suitabi
 }
 
 function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives: DesignObjectives): SpeciesRecommendation {
+  const countryCode = site.location?.countryCode ?? null;
+  const jurisdictionName = countryCode ?? site.location?.displayName ?? 'the selected country';
   if (species.invasiveStatus === 'blocked') {
+    const jurisdiction = species.invasiveNote
+      ?? `Jurisdiction-specific invasive-species clearance is unavailable for ${jurisdictionName}; this species is excluded from automatic designs pending local verification.`;
     const blocked: SuitabilityComponent = {
       key: 'safety', label: 'Jurisdictional safety', score: 0, weight: 1, status: 'blocked',
-      explanation: species.invasiveNote ?? 'This species is blocked for the project jurisdiction.',
+      explanation: jurisdiction ?? 'This species is blocked for the project jurisdiction.',
     };
     return { species, score: 0, status: 'blocked', components: [blocked], reasons: [], mitigations: [blocked.explanation] };
   }
@@ -73,10 +78,10 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
   const aridityDemand = site.climate.annualEt0Mm > 0 ? site.climate.annualPrecipitationMm / site.climate.annualEt0Mm : null;
   const droughtScore = species.droughtTolerance * 20;
   const waterScore = Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
-  const nativeScore = species.nativeItaly ? 100 : species.nativeMediterranean ? 82 : 48;
+  const nativeness = siteNativeness(species, site);
   const productive = species.productiveFromYear !== null || species.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role));
   const productionScore = productive ? Math.max(68, 100 - Math.max(0, (species.productiveFromYear ?? 5) - 1) * 5) : species.roles.includes('timber') ? 62 : 30;
-  const biodiversityScore = Math.min(100, 42 + species.roles.length * 8 + (species.nitrogenFixer ? 15 : 0) + (species.nativeItaly ? 10 : 0));
+  const biodiversityScore = Math.min(100, 42 + species.roles.length * 8 + (species.nitrogenFixer ? 15 : 0) + (nativeness.verified && nativeness.score === 100 ? 10 : 0));
   const purposeScore = Math.round((productionScore * objectives.production + biodiversityScore * objectives.biodiversity) / Math.max(1, objectives.production + objectives.biodiversity));
   const syntropicScore = Math.min(100, 48 + (species.nitrogenFixer ? 24 : 0) + (species.roles.includes('biomass') ? 16 : 0) + (species.succession === 'placenta' ? 10 : 0));
   const maintenanceScore = Math.round(clamp(86 + droughtScore * 0.16 - species.growthRate * 65 - (species.roles.includes('biomass') ? 8 : 0), 15, 100));
@@ -86,7 +91,7 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
     component('climate', 'Climate fit', climateScore, weights.climate, `Observed ${site.climate.absoluteMinTemperatureC}–${site.climate.absoluteMaxTemperatureC} °C; supported envelope ${species.minTemperatureC}–${species.maxTemperatureC} °C.`),
     component('soil', 'Soil reaction', soilScore, weights.soil, site.soil.ph === null ? 'Soil pH is unavailable; a representative field test is required before recommendation.' : `SoilGrids pH ${site.soil.ph}; supported range ${species.phMin}–${species.phMax}.`),
     component('water', 'Water resilience', waterScore, weights.water, `${site.climate.annualPrecipitationMm} mm annual rain versus ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.`),
-    component('native', 'Native habitat value', nativeScore, weights.native, species.nativeItaly ? 'Native in Italy.' : species.nativeMediterranean ? 'Native within the Mediterranean basin.' : 'Introduced crop; ecological spread and habitat fit require management.'),
+    component('native', 'Native habitat value', nativeness.score, weights.native, nativeness.explanation),
     component('purpose', 'Objective value', purposeScore, weights.purpose, `${productive ? 'Productive' : 'Support'} species; functions: ${species.roles.join(', ')}.`),
     component('syntropic', 'Successional function', syntropicScore, weights.syntropic, `${species.stratum} stratum, ${species.succession} succession${species.nitrogenFixer ? ', nitrogen fixer' : ''}.`),
     component('maintenance', 'Maintenance demand', maintenanceScore, weights.maintenance, `Growth coefficient ${species.growthRate.toFixed(2)}, drought tolerance ${species.droughtTolerance}/5${species.roles.includes('biomass') ? ', planned biomass management' : ''}.`),
@@ -102,7 +107,10 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
   if ((criticalUnknown || species.invasiveStatus === 'monitor') && status === 'recommended') status = 'conditional';
   const reasons = components.filter((item) => item.status === 'good').sort((a, b) => b.weight - a.weight).map((item) => item.explanation).slice(0, 3);
   const mitigations = components.filter((item) => item.status === 'poor' || item.status === 'unknown').map((item) => item.explanation);
-  if (species.invasiveStatus === 'monitor' && species.invasiveNote) mitigations.unshift(species.invasiveNote);
+  if (species.invasiveStatus === 'monitor') {
+    mitigations.unshift(species.invasiveNote
+      ?? `Verify invasive-species status and permitted use with authorities in ${jurisdictionName}.`);
+  }
   if (criticalMismatch) mitigations.unshift('A critical climate or water mismatch prevents recommendation for this site.');
 
   return { species, score, status, components, reasons, mitigations };

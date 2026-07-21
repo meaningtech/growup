@@ -6,21 +6,22 @@ The implementation specification is in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.
 
 ## Current status
 
-The Ragusa Ibla pilot workflow is implemented and runtime-tested on a real 2,746 m² arable parcel. It includes:
+The workflow is location-independent and starts with an empty workspace. Runtime tests import explicit temperate and equatorial field fixtures, and cover:
 
 - editable Google satellite boundaries and no-plant exclusions;
 - Open-Meteo climate and terrain, SoilGrids soil properties, Nominatim and OSM context;
 - Sentinel-2 NDVI/NDMI/NDWI/BSI and Sentinel-1 same-orbit moisture-context signals;
 - existing woody-vegetation protection using seasonally separated Sentinel-2 observations, 2021–2023 annual tree classes, ESA WorldCover and the Copernicus 5 m Woody Vegetation Layer;
 - objective-weighted, evidence-ranked species selection with explainable components, invasive-species safety gates and linked sources;
-- six planting systems, full-field and perimeter planting, three deterministic layouts, solar/shade assessment and composition targets;
-- irrigation sizing, annual water/energy cost, plant purchase cost and planting person-hours;
+- six planting systems, full-field and perimeter planting, three deterministic layouts, locked partial regeneration, species-parameterized growth uncertainty, solar/shade assessment and composition targets;
+- independently switchable boundary, constraint, infrastructure, existing-vegetation, planned-tree, machinery, irrigation and satellite map layers;
+- editable irrigation sizing, pipe routing and bill of materials, annual water/energy cost, plant purchase cost and planting person-hours;
 - PostGIS geometry validation plus owner-isolated project persistence in Growaf-specific collections on the existing Mongo-compatible database instance;
 - optional Google sign-in: anonymous users can analyse and design, while authenticated users can save private projects;
-- GeoJSON export of the site, exclusions, protected vegetation and plants;
+- reproducible GeoJSON and per-tree CSV exports with site infrastructure, protected vegetation, machinery, irrigation, model metadata, growth ranges and unit planting costs;
 - a provider-agnostic AI planning assistant that can propose catalogue-backed species and project changes, while Growaf validates every action and requires explicit confirmation before applying it.
 
-The default pilot parcel lies south of an existing hedgerow. The hedgerow is visibly outside the planting boundary. A nearby wooded parcel is retained as a regression fixture to prove that known trees are detected and excluded from all generated layouts.
+No pilot parcel is loaded in production. The design-ready ecological catalogue is a deliberately validated subset of the much larger global taxonomy search index. Jurisdiction-level nativeness and invasiveness are reported only where supporting evidence exists; unknown regions remain explicitly unclassified. Contrasting field geometries are isolated test fixtures used to prove that location, economics, terrain, satellite and irrigation logic are selected dynamically.
 
 ## Run locally
 

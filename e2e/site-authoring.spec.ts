@@ -3,8 +3,8 @@ import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/l
 import { distanceToSiteBoundaryM, distanceToSitePathM, importSiteGeoJson, siteContainsCoordinate } from '../src/lib/siteGeometry';
 import type { LayoutVariant, SiteProfile } from '../src/types';
 
-test('imports and validates complete site infrastructure before generating on the Ragusa field', async ({ page }) => {
-  const geojson = ragusaInfrastructureGeoJson();
+test('imports and validates complete site infrastructure before generating a design', async ({ page }) => {
+  const geojson = completeInfrastructureGeoJson();
   const expectedSite = importSiteGeoJson(geojson);
   const multiSite = importSiteGeoJson({
     type: 'MultiPolygon',
@@ -22,8 +22,8 @@ test('imports and validates complete site infrastructure before generating on th
 
   await page.goto('/');
   await expect(page.locator('.gm-style')).toBeVisible({ timeout: 15_000 });
-  await page.getByLabel('Import site GeoJSON').setInputFiles({
-    name: 'ragusa-complete-site.geojson',
+  await page.getByLabel('Import GeoJSON').setInputFiles({
+    name: 'complete-site.geojson',
     mimeType: 'application/geo+json',
     buffer: Buffer.from(JSON.stringify(geojson)),
   });
@@ -32,6 +32,32 @@ test('imports and validates complete site infrastructure before generating on th
   await expect(page.getByText('1 planting region')).toBeVisible();
   await expect(page.getByText('Management path 1')).toBeVisible();
   await expect(page.getByText('Observed tree 1')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  const layerPanel = page.getByTestId('map-layer-panel');
+  const boundaryLayer = layerPanel.getByRole('button', { name: 'Show or hide the field boundary' });
+  const exclusionLayer = layerPanel.getByRole('button', { name: 'Show or hide no-plant areas' });
+  const pathLayer = layerPanel.getByRole('button', { name: 'Show or hide management paths' });
+  const infrastructureLayer = layerPanel.getByRole('button', { name: 'Show or hide infrastructure points' });
+  const observedTreeLayer = layerPanel.getByRole('button', { name: 'Show or hide registered existing trees' });
+  for (const toggle of [boundaryLayer, exclusionLayer, pathLayer, infrastructureLayer, observedTreeLayer]) {
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  }
+  await boundaryLayer.click();
+  await exclusionLayer.click();
+  await infrastructureLayer.click();
+  await observedTreeLayer.click();
+  await expect(boundaryLayer).toHaveAttribute('aria-pressed', 'false');
+  await expect(exclusionLayer).toHaveAttribute('aria-pressed', 'false');
+  await expect(pathLayer).toHaveAttribute('aria-pressed', 'true');
+  await expect(infrastructureLayer).toHaveAttribute('aria-pressed', 'false');
+  await expect(observedTreeLayer).toHaveAttribute('aria-pressed', 'false');
+  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-management-path-only.png', fullPage: false });
+  await boundaryLayer.click();
+  await exclusionLayer.click();
+  await infrastructureLayer.click();
+  await observedTreeLayer.click();
+  await page.getByRole('button', { name: 'Close map layers' }).click();
 
   await page.getByRole('button', { name: 'Remove hole 1' }).click();
   await expect(page.getByRole('button', { name: 'Remove hole 1' })).toHaveCount(0);
@@ -88,14 +114,14 @@ test('imports and validates complete site infrastructure before generating on th
   }
 });
 
-function ragusaInfrastructureGeoJson() {
+function completeInfrastructureGeoJson() {
   const ring = (points: number[][]) => [...points, points[0]];
   return {
     type: 'FeatureCollection',
     features: [
       {
         type: 'Feature',
-        properties: { kind: 'site', id: 'ragusa-infrastructure-e2e', name: 'Ragusa infrastructure validation', setbackM: 1.5 },
+        properties: { kind: 'site', id: 'complete-infrastructure-e2e', name: 'Infrastructure validation field', setbackM: 1.5 },
         geometry: {
           type: 'Polygon',
           coordinates: [

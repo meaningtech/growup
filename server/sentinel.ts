@@ -80,10 +80,16 @@ export async function fetchSatelliteProfile(
   const now = config.now?.() ?? new Date();
   const stacUrl = trimSlash(config.planetaryComputerStacUrl ?? process.env.PLANETARY_COMPUTER_STAC_URL ?? DEFAULT_STAC_URL);
   const dataUrl = trimSlash(config.planetaryComputerDataUrl ?? process.env.PLANETARY_COMPUTER_DATA_URL ?? DEFAULT_DATA_URL);
-  const [optical, radar] = await Promise.all([
-    fetchOptical(site, now, fetchImpl, stacUrl, dataUrl).catch(() => null),
-    fetchRadar(site, now, fetchImpl, stacUrl, dataUrl).catch(() => null),
+  const [opticalResult, radarResult] = await Promise.allSettled([
+    fetchOptical(site, now, fetchImpl, stacUrl, dataUrl),
+    fetchRadar(site, now, fetchImpl, stacUrl, dataUrl),
   ]);
+  const optical = opticalResult.status === 'fulfilled' ? opticalResult.value : null;
+  const radar = radarResult.status === 'fulfilled' ? radarResult.value : null;
+  const providerDiagnostics = [
+    opticalResult.status === 'rejected' ? `Sentinel-2 processing unavailable: ${errorMessage(opticalResult.reason)}` : null,
+    radarResult.status === 'rejected' ? `Sentinel-1 processing unavailable: ${errorMessage(radarResult.reason)}` : null,
+  ].filter((item): item is string => Boolean(item));
   const generatedAt = now.toISOString();
   const status = optical && radar ? 'available' : optical || radar ? 'partial' : 'unavailable';
   const scheduling = irrigationScheduling(optical?.history[0] ?? null, radar?.observations ?? []);
@@ -116,6 +122,7 @@ export async function fetchSatelliteProfile(
       'Sentinel-1 backscatter also responds to vegetation, roughness, row geometry and recent field operations. The signal is a same-orbit anomaly, not a calibrated moisture percentage.',
       'Use field probes and soil samples to calibrate irrigation execution; satellite data is used here to prioritize inspection and scheduling zones.',
       'Annual irrigation volume remains climate- and crop-coefficient-based. A current satellite scene only adjusts the next scheduling recommendation.',
+      ...providerDiagnostics,
     ],
   };
 }
@@ -399,9 +406,8 @@ async function classifyExistingVegetation(
   const fieldAreaM2 = sitePolygons(site).reduce((sum, polygon) => sum + polygonAreaApproxM2(polygon), 0)
     - site.holes.reduce((sum, polygon) => sum + polygonAreaApproxM2(polygon), 0);
   const detectedAreaM2 = patches.reduce((sum, patch) => sum + patch.detectedAreaM2, 0);
-  const protectedAreaM2 = patches.reduce((sum, patch) => sum + patch.protectedAreaM2, 0);
   const detectedCoverPercent = round(Math.min(100, detectedAreaM2 / fieldAreaM2 * 100), 1);
-  const protectedCoverPercent = round(Math.min(100, protectedAreaM2 / fieldAreaM2 * 100), 1);
+  const protectedCoverPercent = protectedUnionCoverPercent(site, patches);
   const sourceCount = landCover.annual.length + (landCover.worldCover ? 1 : 0) + (landCover.woodyVegetation ? 1 : 0);
   const status: ExistingVegetationProfile['status'] = opticalScenes.length >= 3 && sourceCount >= 2
     ? 'available'
@@ -432,6 +438,40 @@ async function classifyExistingVegetation(
     evidence: existingVegetationEvidence(observedAt),
     conclusion,
   };
+}
+
+export function protectedUnionCoverPercent(site: SiteBoundary, patches: ExistingVegetationPatch[], resolution = 120) {
+  if (!patches.length) return 0;
+  const projection = createLocalProjection(polygonCentroid(site.polygon));
+  const fieldPoints = sitePolygons(site).flat().map(projection.project);
+  const minX = Math.min(...fieldPoints.map((point) => point.x));
+  const maxX = Math.max(...fieldPoints.map((point) => point.x));
+  const minY = Math.min(...fieldPoints.map((point) => point.y));
+  const maxY = Math.max(...fieldPoints.map((point) => point.y));
+  const localPatches = patches.map((patch) => {
+    const polygon = patch.polygon.map(projection.project);
+    return {
+      polygon,
+      minX: Math.min(...polygon.map((point) => point.x)),
+      maxX: Math.max(...polygon.map((point) => point.x)),
+      minY: Math.min(...polygon.map((point) => point.y)),
+      maxY: Math.max(...polygon.map((point) => point.y)),
+    };
+  });
+  let fieldSamples = 0;
+  let protectedSamples = 0;
+  for (let yIndex = 0; yIndex < resolution; yIndex += 1) {
+    for (let xIndex = 0; xIndex < resolution; xIndex += 1) {
+      const point = {
+        x: minX + (xIndex + 0.5) / resolution * (maxX - minX),
+        y: minY + (yIndex + 0.5) / resolution * (maxY - minY),
+      };
+      if (!siteContainsCoordinate(site, projection.unproject(point))) continue;
+      fieldSamples += 1;
+      if (localPatches.some((patch) => point.x >= patch.minX && point.x <= patch.maxX && point.y >= patch.minY && point.y <= patch.maxY && pointInPolygon(point, patch.polygon))) protectedSamples += 1;
+    }
+  }
+  return round(protectedSamples / Math.max(1, fieldSamples) * 100, 1);
 }
 
 async function loadIndependentLandCover(
@@ -541,19 +581,21 @@ async function loadLandCoverRaster(
   };
 }
 
-function vegetationPatches(
-  candidates: Map<number, {
-    coordinate: Coordinate;
-    currentNdvi: number;
-    medianNdvi: number;
-    persistentGreenFraction: number;
-    annualTreeVotes: number;
-    worldCoverTree: boolean;
-    copernicusWoody: boolean;
-    confidence: Evidence['confidence'];
-    signals: string[];
-  }>,
-  raster: OpticalRasterResult,
+export type VegetationCandidate = {
+  coordinate: Coordinate;
+  currentNdvi: number;
+  medianNdvi: number;
+  persistentGreenFraction: number;
+  annualTreeVotes: number;
+  worldCoverTree: boolean;
+  copernicusWoody: boolean;
+  confidence: Evidence['confidence'];
+  signals: string[];
+};
+
+export function vegetationPatches(
+  candidates: Map<number, VegetationCandidate>,
+  raster: Pick<OpticalRasterResult, 'bounds' | 'width' | 'height'>,
 ): ExistingVegetationPatch[] {
   if (!candidates.size) return [];
   const remaining = new Set(candidates.keys());
@@ -570,7 +612,7 @@ function vegetationPatches(
       const y = Math.floor(current / raster.width);
       for (let dy = -1; dy <= 1; dy += 1) {
         for (let dx = -1; dx <= 1; dx += 1) {
-          if (dx === 0 && dy === 0) continue;
+          if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
           const nx = x + dx;
           const ny = y + dy;
           if (nx < 0 || ny < 0 || nx >= raster.width || ny >= raster.height) continue;
@@ -586,35 +628,56 @@ function vegetationPatches(
   const cellWidthM = (raster.bounds[2] - raster.bounds[0]) * 111_320 * Math.cos(meanLat * Math.PI / 180) / raster.width;
   const cellHeightM = (raster.bounds[3] - raster.bounds[1]) * 111_320 / raster.height;
   const cellAreaM2 = cellWidthM * cellHeightM;
-  const projection = createLocalProjection(polygonCentroid(Array.from(candidates.values()).map((item) => item.coordinate)));
+  const candidateCoordinates = Array.from(candidates.values()).map((item) => item.coordinate);
+  const projection = createLocalProjection({
+    lat: average(candidateCoordinates.map((coordinate) => coordinate.lat)),
+    lng: average(candidateCoordinates.map((coordinate) => coordinate.lng)),
+  });
+  const canopyClusters = components.flatMap((component) => splitCanopyComponent(component, raster.width));
 
-  return components.map((component, componentIndex) => {
+  const patches = canopyClusters.map((component) => {
     const samples = component.map((index) => candidates.get(index)!);
     const local = samples.map((sample) => projection.project(sample.coordinate));
-    const minX = Math.min(...local.map((point) => point.x)) - cellWidthM / 2 - 2.5;
-    const maxX = Math.max(...local.map((point) => point.x)) + cellWidthM / 2 + 2.5;
-    const minY = Math.min(...local.map((point) => point.y)) - cellHeightM / 2 - 2.5;
-    const maxY = Math.max(...local.map((point) => point.y)) + cellHeightM / 2 + 2.5;
-    const polygon = [
-      projection.unproject({ x: minX, y: minY }),
-      projection.unproject({ x: maxX, y: minY }),
-      projection.unproject({ x: maxX, y: maxY }),
-      projection.unproject({ x: minX, y: maxY }),
-    ];
+    const center = {
+      x: average(local.map((point) => point.x)),
+      y: average(local.map((point) => point.y)),
+    };
+    const covariance = local.reduce((result, point) => {
+      const dx = point.x - center.x;
+      const dy = point.y - center.y;
+      return { xx: result.xx + dx * dx, yy: result.yy + dy * dy, xy: result.xy + dx * dy };
+    }, { xx: 0, yy: 0, xy: 0 });
+    const angle = local.length === 1 ? 0 : 0.5 * Math.atan2(2 * covariance.xy, covariance.xx - covariance.yy);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const projected = local.map((point) => ({
+      major: (point.x - center.x) * cos + (point.y - center.y) * sin,
+      minor: -(point.x - center.x) * sin + (point.y - center.y) * cos,
+    }));
+    const cellMajorRadiusM = Math.abs(cos) * cellWidthM / 2 + Math.abs(sin) * cellHeightM / 2;
+    const cellMinorRadiusM = Math.abs(sin) * cellWidthM / 2 + Math.abs(cos) * cellHeightM / 2;
+    const majorRadiusM = Math.max(cellMajorRadiusM + 2.5, ...projected.map((point) => Math.abs(point.major) + cellMajorRadiusM + 2.5));
+    const minorRadiusM = Math.max(cellMinorRadiusM + 2.5, ...projected.map((point) => Math.abs(point.minor) + cellMinorRadiusM + 2.5));
+    const polygon = Array.from({ length: 24 }, (_, index) => {
+      const theta = index / 24 * Math.PI * 2;
+      const major = Math.cos(theta) * majorRadiusM;
+      const minor = Math.sin(theta) * minorRadiusM;
+      return projection.unproject({
+        x: center.x + major * cos - minor * sin,
+        y: center.y + major * sin + minor * cos,
+      });
+    });
     const confidence = samples.some((sample) => sample.confidence === 'high')
       ? 'high' as const
       : samples.some((sample) => sample.confidence === 'medium')
         ? 'medium' as const
         : 'low' as const;
     return {
-      id: `existing-woody-${componentIndex + 1}`,
-      centroid: projection.unproject({
-        x: average(local.map((point) => point.x)),
-        y: average(local.map((point) => point.y)),
-      }),
+      id: '',
+      centroid: projection.unproject(center),
       polygon,
       detectedAreaM2: round(component.length * cellAreaM2, 1),
-      protectedAreaM2: round((maxX - minX) * (maxY - minY), 1),
+      protectedAreaM2: round(Math.PI * majorRadiusM * minorRadiusM, 1),
       pixelCount: component.length,
       currentNdvi: round(average(samples.map((sample) => sample.currentNdvi)), 3),
       medianNdvi: round(average(samples.map((sample) => sample.medianNdvi)), 3),
@@ -626,6 +689,38 @@ function vegetationPatches(
       signals: Array.from(new Set(samples.flatMap((sample) => sample.signals))),
     };
   }).sort((a, b) => b.protectedAreaM2 - a.protectedAreaM2);
+  return patches.map((patch, index) => ({ ...patch, id: `existing-woody-${index + 1}` }));
+}
+
+function splitCanopyComponent(component: number[], rasterWidth: number): number[][] {
+  if (component.length <= 3) return [component];
+  const remaining = new Set(component);
+  const clusters: number[][] = [];
+  while (remaining.size) {
+    const start = remaining.values().next().value as number;
+    remaining.delete(start);
+    const cluster = [start];
+    const frontier = [start];
+    while (frontier.length && cluster.length < 3) {
+      const current = frontier.shift()!;
+      const x = current % rasterWidth;
+      const y = Math.floor(current / rasterWidth);
+      const neighbours = [
+        y * rasterWidth + x - 1,
+        y * rasterWidth + x + 1,
+        (y - 1) * rasterWidth + x,
+        (y + 1) * rasterWidth + x,
+      ].filter((index) => remaining.has(index));
+      for (const neighbour of neighbours) {
+        if (cluster.length >= 3) break;
+        remaining.delete(neighbour);
+        cluster.push(neighbour);
+        frontier.push(neighbour);
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
 }
 
 function polygonAreaApproxM2(polygon: Coordinate[]) {
@@ -989,5 +1084,6 @@ function standardDeviation(values: number[]) {
 }
 function toDb(value: number) { return 10 * Math.log10(value); }
 function round(value: number, digits: number) { return Number(value.toFixed(digits)); }
+function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'provider request failed'; }
 function clamp(value: number, minimum: number, maximum: number) { return Math.min(maximum, Math.max(minimum, value)); }
 function trimSlash(value: string) { return value.replace(/\/$/, ''); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RAGUSA_IBLA_TEST_SITE } from '../data/ragusaIblaSite';
+import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../../test/fixtures/sites';
 import {
   boundaryGeoJsonGeometry,
   distanceToSiteBoundaryM,
@@ -11,7 +11,7 @@ import {
 
 describe('site geometry', () => {
   it('imports a complete Polygon project with holes and infrastructure features', () => {
-    const outer = closed(RAGUSA_IBLA_TEST_SITE.polygon);
+    const outer = closed(TEMPERATE_OPEN_FIELD_FIXTURE.polygon);
     const hole = closed([
       { lat: 36.92096, lng: 14.75319 },
       { lat: 36.92096, lng: 14.75325 },
@@ -47,10 +47,10 @@ describe('site geometry', () => {
   });
 
   it('preserves every region of an imported MultiPolygon', () => {
-    const second = RAGUSA_IBLA_TEST_SITE.polygon.map((point) => ({ lat: point.lat + 0.001, lng: point.lng + 0.001 }));
+    const second = TEMPERATE_OPEN_FIELD_FIXTURE.polygon.map((point) => ({ lat: point.lat + 0.001, lng: point.lng + 0.001 }));
     const site = importSiteGeoJson({
       type: 'MultiPolygon',
-      coordinates: [[closed(RAGUSA_IBLA_TEST_SITE.polygon)], [closed(second)]],
+      coordinates: [[closed(TEMPERATE_OPEN_FIELD_FIXTURE.polygon)], [closed(second)]],
     });
     expect(site.additionalPolygons).toHaveLength(1);
     expect(boundaryGeoJsonGeometry(site).type).toBe('MultiPolygon');
@@ -62,7 +62,7 @@ describe('site geometry', () => {
 
   it('rejects self-intersecting and out-of-bound constraints', () => {
     const selfIntersecting = {
-      ...RAGUSA_IBLA_TEST_SITE,
+      ...TEMPERATE_OPEN_FIELD_FIXTURE,
       polygon: [
         { lat: 36.9213, lng: 14.753 },
         { lat: 36.9208, lng: 14.7536 },
@@ -73,7 +73,7 @@ describe('site geometry', () => {
     expect(localSiteValidation(selfIntersecting).valid).toBe(false);
 
     const outsideAccess = {
-      ...RAGUSA_IBLA_TEST_SITE,
+      ...TEMPERATE_OPEN_FIELD_FIXTURE,
       accessPoints: [{ id: 'outside', name: 'Outside', coordinate: { lat: 36.925, lng: 14.76 } }],
     };
     expect(localSiteValidation(outsideAccess)).toEqual({ valid: false, reason: 'Access, water and existing-tree points must lie inside the site.' });

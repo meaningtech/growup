@@ -276,8 +276,6 @@ export type DesignSpecies = {
   commonName: string;
   family: string;
   treeLike: boolean;
-  nativeMediterranean: boolean;
-  nativeItaly: boolean;
   invasiveStatus: 'none' | 'monitor' | 'blocked';
   invasiveNote?: string;
   stratum: Stratum;
@@ -307,8 +305,8 @@ export type DesignSpecies = {
   kcLate: number;
   rootDepthM: number;
   stockClass: StockClass;
-  purchasePriceEur: number;
-  purchasePriceRangeEur: [number, number];
+  referencePurchasePrice: number;
+  referencePurchasePriceRange: [number, number];
   plantingLaborHours: number;
   color: string;
   sources: SpeciesSource[];
@@ -358,6 +356,18 @@ export type TreeInstance = {
 export type DesignSystemId = 'syntropic' | 'alley-cropping' | 'mixed-orchard' | 'monoculture' | 'windbreak' | 'boundary-buffer';
 export type PlantingExtent = 'full-field' | 'perimeter-band' | 'selected-edges';
 export type OrientationObjective = 'solar-crop' | 'contour' | 'operations' | 'wind-protection' | 'custom';
+export type AgriculturalMachinePresetId = 'bcs-740' | 'john-deere-1025r' | 'john-deere-3033r' | 'new-holland-t4f';
+
+export type MachineryConfiguration = {
+  enabled: boolean;
+  presetId: AgriculturalMachinePresetId;
+  widthM: number;
+  lengthM: number;
+  turningRadiusM: number;
+  implementWidthM: number;
+  safetyClearanceM: number;
+  protectPipeCrossings: boolean;
+};
 
 export type DesignObjectives = {
   production: number;
@@ -379,6 +389,7 @@ export type DesignConfiguration = {
   monocultureSpeciesId: string | null;
   seed: number;
   objectives: DesignObjectives;
+  machinery: MachineryConfiguration;
 };
 
 export type SolarOrientationAssessment = {
@@ -396,6 +407,53 @@ export type SolarOrientationAssessment = {
   limitations: string[];
 };
 
+export type LayoutGenerationConflict = {
+  code: 'LOCKED_TREE_SPACING' | 'LOCKED_TREE_SKIPPED_CANDIDATE';
+  severity: 'warning';
+  message: string;
+  treeIds: string[];
+};
+
+export type LayoutGenerationAudit = {
+  engineVersion: string;
+  mode: 'full' | 'partial';
+  seed: number;
+  lockedTreeCount: number;
+  generatedTreeCount: number;
+  assumptions: Array<{ label: string; value: string }>;
+  conflicts: LayoutGenerationConflict[];
+};
+
+export type MachineryCorridor = {
+  id: string;
+  points: Coordinate[];
+  widthM: number;
+};
+
+export type MachineryTurningArea = {
+  id: string;
+  center: Coordinate;
+  radiusM: number;
+  rowIndexes: number[];
+};
+
+export type MachineryPlan = {
+  enabled: boolean;
+  presetId: AgriculturalMachinePresetId;
+  machineWidthM: number;
+  machineLengthM: number;
+  implementWidthM: number;
+  safetyClearanceM: number;
+  requiredCorridorWidthM: number;
+  headlandDepthM: number;
+  effectiveRowSpacingM: number;
+  reservedAreaM2: number;
+  corridors: MachineryCorridor[];
+  turningAreas: MachineryTurningArea[];
+  clearanceSatisfied: boolean;
+  notes: string[];
+};
+
 export type LayoutVariant = {
   id: string;
   name: string;
@@ -408,11 +466,14 @@ export type LayoutVariant = {
   score: number;
   trees: TreeInstance[];
   warnings: string[];
+  generation: LayoutGenerationAudit;
+  machinery: MachineryPlan;
   composition: {
     byStratum: Partial<Record<Stratum, number>>;
     bySuccession: Partial<Record<SuccessionPhase, number>>;
     productivePercent: number;
-    nativePercent: number;
+    nativePercent: number | null;
+    nativeDataAvailable: boolean;
     nitrogenFixerPercent: number;
     targets: {
       productivePercent: number;
@@ -436,30 +497,148 @@ export type GrowthState = {
   heightM: number;
   crownDiameterM: number;
   active: boolean;
+  uncertainty: {
+    heightLowM: number;
+    heightHighM: number;
+    crownDiameterLowM: number;
+    crownDiameterHighM: number;
+  };
+  model: {
+    version: string;
+    level: 'species-parameterized';
+    confidence: Evidence['confidence'];
+    sourceLabels: string[];
+  };
+};
+
+export type IrrigationSourceType = 'network' | 'well' | 'tank' | 'reservoir';
+
+export type IrrigationConfiguration = {
+  sourceType: IrrigationSourceType;
+  sourcePointId: string | null;
+  availableFlowM3Hour: number;
+  inletPressureBar: number;
+  wellLiftM: number;
+  tankCapacityM3: number;
+  emitterFlowLHour: number;
+  emittersPerPlant: number;
+  distributionEfficiencyPercent: number;
+  targetVelocityMS: number;
+  maxZoneRuntimeHours: number;
+  lineOverrides: Record<string, Coordinate[]>;
+};
+
+export type EconomicConfiguration = {
+  countryCode: string;
+  currencyCode: string;
+  currencyLocale: string;
+  baseCurrencyCode: 'USD';
+  exchangeRateToLocal: number;
+  laborCostPerHour: number;
+  waterCostPerM3: number;
+  electricityCostPerKwh: number;
+  plantReferenceMultiplier: number;
+  irrigationReferenceMultiplier: number;
+  smallProtectionUnitCost: number;
+  largeProtectionUnitCost: number;
+  pricingStatus: 'usd-estimate' | 'currency-converted-estimate' | 'user-supplied';
+  missingLocalRates: string[];
+  sourceSummary: string;
+  sourceVersion: string;
+  sourceObservedAt: string;
+  confidence: Evidence['confidence'];
+};
+
+export type IrrigationLine = {
+  id: string;
+  kind: 'mainline' | 'submain' | 'lateral' | 'protected-crossing';
+  zoneId: string | null;
+  points: Coordinate[];
+  lengthM: number;
+  diameterMm: number;
+  designFlowM3Hour: number;
+  velocityMS: number;
+  headLossM: number;
+  startElevationM: number;
+  endElevationM: number;
+};
+
+export type IrrigationComponent = {
+  id: string;
+  category: 'pipe' | 'emitter' | 'fitting' | 'valve' | 'filter' | 'control' | 'pump' | 'storage' | 'protection';
+  label: string;
+  specification: string;
+  unit: 'm' | 'each';
+  measuredQuantity: number;
+  purchaseQuantity: number;
+  unitCost: number;
+  totalCost: number;
+};
+
+export type IrrigationNetworkPlan = {
+  source: {
+    type: IrrigationSourceType;
+    coordinate: Coordinate;
+    elevationM: number;
+    placement: 'user-water-point' | 'highest-terrain-sample' | 'field-centroid';
+    requiresHydrogeologicalSurvey: boolean;
+  };
+  lines: IrrigationLine[];
+  components: IrrigationComponent[];
+  requiredFlowM3Hour: number;
+  availableFlowM3Hour: number;
+  requiredDynamicHeadM: number;
+  availablePressureHeadM: number;
+  pumpRequired: boolean;
+  pumpPowerKw: number;
+  peakZoneRuntimeHours: number;
+  protectedCrossingCount: number;
+  routedObstacleCount: number;
+  manualOverrideCount: number;
+  totalMeasuredPipeM: number;
+  totalPurchasePipeM: number;
+  warnings: string[];
 };
 
 export type IrrigationEstimate = {
+  designYear: number;
+  activePlantCount: number;
+  irrigatedPlantCount: number;
+  inactivePlantCount: number;
+  configuration: IrrigationConfiguration;
+  economics: EconomicConfiguration;
+  network: IrrigationNetworkPlan;
   climatePeriod: string;
   annualNetMm: number;
   annualGrossMm: number;
   annualWaterM3: number;
+  potentialAnnualWaterM3: number;
+  waterModel: {
+    system: DesignSystemId;
+    supplementalIrrigationPercent: number;
+    matureSupplementalTargetPercent: number;
+    transitionYears: number;
+    basis: 'measured-system-reference' | 'conservative-planning-default';
+  };
   peakDayM3: number;
   zones: number;
   emitterCount: number;
   lateralPipeM: number;
   mainlinePipeM: number;
   installation: {
-    materialsEur: number;
+    materialsCost: number;
     laborHours: number;
-    laborEur: number;
-    totalEur: number;
+    laborCost: number;
+    totalCost: number;
   };
   annualOperation: {
-    waterEur: number;
+    waterCost: number;
     pumpingKwh: number;
-    energyEur: number;
-    maintenanceEur: number;
-    totalEur: number;
+    energyCost: number;
+    maintenanceCost: number;
+    managementLaborHours: number;
+    managementLaborCost: number;
+    totalCost: number;
   };
   satelliteScheduling: {
     adjustmentPercent: number;
@@ -472,22 +651,52 @@ export type IrrigationEstimate = {
     annualVolumeAdjusted: false;
   };
   assumptions: Array<{ label: string; value: string; source: string; sourceUrl: string }>;
-  monthly: Array<{ month: number; netM3: number; grossM3: number; costEur: number }>;
+  monthly: Array<{ month: number; netM3: number; grossM3: number; cost: number }>;
 };
 
 export type EstablishmentCost = {
-  plantPurchaseEur: number;
+  economics: EconomicConfiguration;
+  plantPurchaseCost: number;
   plantingLaborHours: number;
-  plantingLaborEur: number;
-  protectionAndStakesEur: number;
-  irrigationInstallationEur: number;
-  totalEur: number;
+  plantingLaborCost: number;
+  protectionAndStakesCost: number;
+  irrigationInstallationCost: number;
+  totalCost: number;
   bySpecies: Array<{
     speciesId: string;
     count: number;
-    unitPlantEur: number;
+    unitPlantCost: number;
     unitLaborHours: number;
-    subtotalEur: number;
+    subtotalCost: number;
+  }>;
+  activeSystem: {
+    designYear: number;
+    activePlantCount: number;
+    inactivePlantCount: number;
+    plantPurchaseCost: number;
+    plantingLaborHours: number;
+    plantingLaborCost: number;
+    protectionAndStakesCost: number;
+    irrigationInstallationCost: number;
+    totalReplacementCost: number;
+    bySpecies: Array<{
+      speciesId: string;
+      count: number;
+      unitPlantCost: number;
+      unitLaborHours: number;
+      subtotalCost: number;
+    }>;
+  };
+  timeline: Array<{
+    year: number;
+    activePlantCount: number;
+    annualWaterM3: number;
+    waterAndEnergyCost: number;
+    managementLaborCost: number;
+    maintenanceCost: number;
+    annualOperatingCost: number;
+    activeReplacementCost: number;
+    cumulativeOperatingCost: number;
   }>;
 };
 
@@ -498,6 +707,8 @@ export type ProjectState = {
   siteProfile: SiteProfile | null;
   selectedSpeciesIds: string[];
   designConfiguration: DesignConfiguration;
+  irrigationConfiguration: IrrigationConfiguration;
+  economicConfiguration: EconomicConfiguration;
   variants: LayoutVariant[];
   selectedVariantId: string | null;
   timelineYear: number;

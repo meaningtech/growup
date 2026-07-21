@@ -22,10 +22,10 @@
 
 - Runtime/auth: `GET /api/health`, `GET /api/config`, `GET /api/auth/session`, `POST /api/auth/google`, `POST /api/auth/logout`.
 - Site/data: `GET /api/locations/search`, `POST /api/site/validate`, `POST /api/site/profile`, `POST /api/geometry/metrics`.
-- Species/design: `GET /api/catalog/stats`, `GET /api/catalog/search`, `GET /api/design-species`, `POST /api/recommendations`, `POST /api/layout/generate`.
+- Species/design: `GET /api/catalog/stats`, `GET /api/catalog/search`, `GET /api/design-species`, `POST /api/recommendations`, `POST /api/layout/generate`, `POST /api/layout/regenerate`.
 - Water/cost: `POST /api/irrigation/calculate`, `POST /api/costs/calculate`.
 - Assistant: `GET /api/assistant/status`, `POST /api/assistant/plan`.
-- Private projects: `GET /api/projects`, `GET|PUT /api/projects/:id`, `GET /api/projects/:id/export.geojson`.
+- Private projects: `GET /api/projects`, `GET|PUT /api/projects/:id`, `GET /api/projects/:id/export.geojson`, `GET /api/projects/:id/export.csv`.
 
 New or changed backend behavior must extend `server/app.integration.test.ts`; real persistence changes must also extend the opt-in `server/mongo.live.integration.test.ts` and clean up exact test IDs.
 
@@ -41,4 +41,4 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 
 - Baseline: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`.
 - Live Mongo: set `GROWAF_LIVE_MONGO_TEST=1` with in-memory `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
-- Browser behavior must be verified against the real default Ragusa Ibla field. Keep screenshots and generated test artifacts out of Git.
+- Browser behavior must be verified with explicit imported field fixtures; production must never bundle or auto-load a localized default field. Keep screenshots and generated test artifacts out of Git.

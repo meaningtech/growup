@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test';
 import type { LayoutVariant, SpeciesRecommendation } from '../src/types';
+import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
+import { importSiteFixture } from './support/siteFixture';
 
 test('applies objectives to suitability, filters the source catalogue and checks planned composition', async ({ page }) => {
   await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await expect(page.getByTestId('existing-vegetation-audit')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('step-species').click();
@@ -42,6 +45,8 @@ test('applies objectives to suitability, filters the source catalogue and checks
   expect(generated.ok()).toBeTruthy();
   const { variants } = await generated.json() as { variants: LayoutVariant[] };
   expect(variants[0].composition.targets.nativePercent).toBeGreaterThanOrEqual(75);
+  expect(variants[0].composition.nativeDataAvailable).toBe(false);
+  expect(variants[0].composition.nativePercent).toBeNull();
   expect(Object.keys(variants[0].composition.byStratum).length).toBeGreaterThanOrEqual(3);
   await expect(page.getByTestId('layout-composition')).toBeVisible();
   await expect(page.getByTestId('layout-composition')).toContainText('actual');

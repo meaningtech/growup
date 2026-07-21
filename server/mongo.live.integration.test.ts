@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { RAGUSA_IBLA_TEST_SITE } from '../src/data/ragusaIblaSite.js';
+import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
+import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation.js';
+import { defaultEconomicConfiguration } from '../src/data/economicProfiles.js';
 import type { ProjectState } from '../src/types.js';
 import { createApp } from './app.js';
 import { geometryMetrics } from './db.js';
@@ -19,16 +21,18 @@ import {
 
 const runLive = process.env.GROWAF_LIVE_MONGO_TEST === '1';
 
-describe.runIf(runLive)('solaraf live persistence integration', () => {
+describe.runIf(runLive)('existing Mongo live persistence integration', () => {
   it('signs in, saves, lists and reopens an owner-isolated Growaf project', async () => {
     const marker = `growaf-live-${randomUUID()}`;
     const project: ProjectState = {
       id: marker,
       name: 'Growaf live persistence test',
-      site: RAGUSA_IBLA_TEST_SITE,
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
       siteProfile: null,
       selectedSpeciesIds: [],
       designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+      economicConfiguration: defaultEconomicConfiguration(''),
       variants: [],
       selectedVariantId: null,
       timelineYear: 5,
@@ -64,9 +68,9 @@ describe.runIf(runLive)('solaraf live persistence integration', () => {
       expect(await getProject('another-owner', marker)).toBeNull();
     } finally {
       if (marker.startsWith('growaf-live-')) {
-        const solaraf = await mongoDatabase();
-        await solaraf.collection<{ _id: string }>('growaf_projects').deleteOne({ _id: marker });
-        await solaraf.collection<{ _id: string }>('growaf_users').deleteOne({ _id: marker });
+        const database = await mongoDatabase();
+        await database.collection<{ _id: string }>('growaf_projects').deleteOne({ _id: marker });
+        await database.collection<{ _id: string }>('growaf_users').deleteOne({ _id: marker });
       }
     }
   });

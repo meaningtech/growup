@@ -1,11 +1,13 @@
 import type { DesignSpecies, GrowthState, TreeInstance } from '../types';
 import { stableHash } from './geometry';
 
+export const GROWTH_MODEL_VERSION = 'growaf-growth-1.0.0';
+
 export function growthState(species: DesignSpecies, tree: TreeInstance, year: number): GrowthState {
   const age = Math.max(0, year - tree.plantedYear);
   const active = year >= tree.plantedYear && (tree.removedYear === null || year < tree.removedYear);
 
-  if (!active) return { year, heightM: 0, crownDiameterM: 0, active: false };
+  if (!active) return growthResult(species, year, 0, 0, false);
 
   const height = richards(species.initialHeightM, species.matureHeightM, species.growthRate, species.growthShape, age);
   const crownInitial = Math.min(1.1, Math.max(0.45, species.initialHeightM * 0.62));
@@ -13,12 +15,7 @@ export function growthState(species: DesignSpecies, tree: TreeInstance, year: nu
 
   if (species.succession === 'placenta' && age > 0 && age % 3 === 0) crown *= 0.58;
 
-  return {
-    year,
-    heightM: Number(height.toFixed(2)),
-    crownDiameterM: Number(crown.toFixed(2)),
-    active: true,
-  };
+  return growthResult(species, year, height, crown, true);
 }
 
 export function crownPath(species: DesignSpecies, tree: TreeInstance, year: number, scalePxPerM: number): string {
@@ -58,6 +55,29 @@ function richards(initial: number, mature: number, rate: number, shape: number, 
   const initialRatio = Math.min(0.999, Math.max(0.0001, initial / mature));
   const offset = -Math.log(1 - initialRatio ** (1 / shape)) / rate;
   return mature * (1 - Math.exp(-rate * (age + offset))) ** shape;
+}
+
+function growthResult(species: DesignSpecies, year: number, heightM: number, crownDiameterM: number, active: boolean): GrowthState {
+  const height = Number(heightM.toFixed(2));
+  const crown = Number(crownDiameterM.toFixed(2));
+  return {
+    year,
+    heightM: height,
+    crownDiameterM: crown,
+    active,
+    uncertainty: {
+      heightLowM: Number((height * 0.8).toFixed(2)),
+      heightHighM: Number((height * 1.2).toFixed(2)),
+      crownDiameterLowM: Number((crown * 0.78).toFixed(2)),
+      crownDiameterHighM: Number((crown * 1.22).toFixed(2)),
+    },
+    model: {
+      version: GROWTH_MODEL_VERSION,
+      level: 'species-parameterized',
+      confidence: 'medium',
+      sourceLabels: Array.from(new Set(species.sources.map((source) => source.label))),
+    },
+  };
 }
 
 function crownScale(archetype: DesignSpecies['crown']) {

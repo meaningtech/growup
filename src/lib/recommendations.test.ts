@@ -4,8 +4,9 @@ import type { DesignObjectives, SiteProfile } from '../types';
 import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
 import { rankSpecies, suitabilityWeights } from './recommendations';
 
-function ragusaProfile(ph: number | null = 7.2): SiteProfile {
+function fieldProfile(ph: number | null = 7.2): SiteProfile {
   return {
+    location: { countryCode: 'XZ', displayName: 'Test field jurisdiction' },
     climate: {
       absoluteMinTemperatureC: -2.2,
       absoluteMaxTemperatureC: 43.8,
@@ -19,7 +20,7 @@ function ragusaProfile(ph: number | null = 7.2): SiteProfile {
 describe('objective-driven species suitability', () => {
   it('hard-blocks jurisdictionally excluded species regardless of objectives', () => {
     const blockedSpecies = DESIGN_SPECIES_BY_ID.get('acacia-saligna')!;
-    const [recommendation] = rankSpecies([blockedSpecies], ragusaProfile(), {
+    const [recommendation] = rankSpecies([blockedSpecies], fieldProfile(), {
       production: 100, biodiversity: 100, nativeHabitat: 0, waterResilience: 100, lowMaintenance: 100,
     });
 
@@ -30,7 +31,7 @@ describe('objective-driven species suitability', () => {
 
   it('never reports recommended when the critical field pH is unknown', () => {
     const olive = DESIGN_SPECIES_BY_ID.get('olea-europaea')!;
-    const [recommendation] = rankSpecies([olive], ragusaProfile(null), DEFAULT_DESIGN_OBJECTIVES);
+    const [recommendation] = rankSpecies([olive], fieldProfile(null), DEFAULT_DESIGN_OBJECTIVES);
 
     expect(recommendation.score).toBeGreaterThanOrEqual(70);
     expect(recommendation.status).toBe('conditional');
@@ -48,14 +49,14 @@ describe('objective-driven species suitability', () => {
     expect(habitatWeights.native).toBeGreaterThan(productionWeights.native);
     expect(Object.values(habitatWeights).reduce((sum, value) => sum + value, 0)).toBeCloseTo(1, 8);
 
-    const first = rankSpecies(DESIGN_SPECIES, ragusaProfile(), habitat).map((item) => `${item.species.id}:${item.score}:${item.status}`);
-    const second = rankSpecies(DESIGN_SPECIES, ragusaProfile(), habitat).map((item) => `${item.species.id}:${item.score}:${item.status}`);
+    const first = rankSpecies(DESIGN_SPECIES, fieldProfile(), habitat).map((item) => `${item.species.id}:${item.score}:${item.status}`);
+    const second = rankSpecies(DESIGN_SPECIES, fieldProfile(), habitat).map((item) => `${item.species.id}:${item.score}:${item.status}`);
     expect(second).toEqual(first);
   });
 
   it('caps monitored introduced species at conditional and exposes the containment note', () => {
     const mulberry = DESIGN_SPECIES_BY_ID.get('morus-alba')!;
-    const [recommendation] = rankSpecies([mulberry], ragusaProfile(), { production: 100, biodiversity: 20, nativeHabitat: 0, waterResilience: 100, lowMaintenance: 50 });
+    const [recommendation] = rankSpecies([mulberry], fieldProfile(), { production: 100, biodiversity: 20, nativeHabitat: 0, waterResilience: 100, lowMaintenance: 50 });
 
     expect(recommendation.status).not.toBe('recommended');
     expect(recommendation.mitigations[0]).toContain('monitor spread');

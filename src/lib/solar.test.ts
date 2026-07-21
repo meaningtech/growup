@@ -1,20 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import type { DesignConfiguration, SiteProfile } from '../types';
-import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
+import { DEFAULT_DESIGN_CONFIGURATION } from './layout';
 import { assessSolarOrientation, solarPositionNoaa } from './solar';
 
 const design: DesignConfiguration = {
+  ...DEFAULT_DESIGN_CONFIGURATION,
   system: 'alley-cropping', extent: 'full-field', perimeterBandM: 8, cropAlleyWidthM: 14,
   windbreakRows: 2, orientationObjective: 'solar-crop', customBearingDegrees: 0,
-  analysisYear: 10, monocultureSpeciesId: null, seed: 41, objectives: DEFAULT_DESIGN_OBJECTIVES,
+  analysisYear: 10, monocultureSpeciesId: null, seed: 41,
 };
 
 describe('solar geometry and orientation assessment', () => {
-  it('places the July midday sun high and south of Ragusa', () => {
+  it('places the July midday sun high and south at a northern mid-latitude site', () => {
     const position = solarPositionNoaa(new Date('2024-07-15T11:00:00Z'), 36.921, 14.753);
     expect(position.elevationDegrees).toBeGreaterThan(65);
     expect(position.azimuthDegrees).toBeGreaterThan(150);
     expect(position.azimuthDegrees).toBeLessThan(210);
+  });
+
+  it('computes solar noon from UTC and longitude for an equatorial field', () => {
+    const position = solarPositionNoaa(new Date('2024-03-20T09:44:00Z'), 1.0815, 34.1815);
+    expect(position.elevationDegrees).toBeGreaterThan(87);
   });
 
   it('uses measured radiation climatology and reports bearing-sensitive crop access', () => {

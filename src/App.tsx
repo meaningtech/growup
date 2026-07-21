@@ -22,7 +22,6 @@ import {
   PencilRuler,
   Plus,
   Redo2,
-  RotateCcw,
   Route,
   Satellite,
   Save,
@@ -31,6 +30,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sprout,
+  Tractor,
   Trash2,
   TreePine,
   Undo2,
@@ -39,8 +39,11 @@ import {
   X,
 } from 'lucide-react';
 import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
+import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
+import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
 import { growthState } from './lib/growth';
-import { createLocalProjection, pointInPolygon, polygonCentroid } from './lib/geometry';
+import { DEFAULT_IRRIGATION_CONFIGURATION } from './lib/irrigation';
+import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration } from './lib/layout';
 import {
   distanceToSiteBoundaryM,
@@ -62,8 +65,11 @@ import type {
   Coordinate,
   DesignConfiguration,
   DesignSpecies,
+  EconomicConfiguration,
+  Evidence,
   EstablishmentCost,
   IrrigationEstimate,
+  IrrigationConfiguration,
   LayoutVariant,
   LocationSearchResult,
   ProjectState,
@@ -71,6 +77,7 @@ import type {
   SiteProfile,
   SiteValidation,
   SpeciesRecommendation,
+  SuitabilityComponent,
   TreeInstance,
 } from './types';
 
@@ -79,7 +86,10 @@ type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'path' | 'access-point'
 
 type AppConfig = {
   googleMapsApiKey: string;
-  defaultSite: SiteBoundary;
+  initialMapViewport: {
+    center: Coordinate;
+    zoom: number;
+  };
   climatePeriod: string;
   modelVersion: string;
   assistant: { configured: boolean; interface: 'openai-compatible' };
@@ -124,7 +134,7 @@ export default function App() {
   const [catalogueStats, setCatalogueStats] = useState<CatalogueStats | null>(null);
   const [site, setSite] = useState<SiteBoundary | null>(null);
   const [siteValidation, setSiteValidation] = useState<SiteValidation | null>(null);
-  const [locationQuery, setLocationQuery] = useState('Ragusa Ibla');
+  const [locationQuery, setLocationQuery] = useState('');
   const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
   const [siteProfile, setSiteProfile] = useState<SiteProfile | null>(null);
   const [recommendations, setRecommendations] = useState<SpeciesRecommendation[]>([]);
@@ -134,6 +144,8 @@ export default function App() {
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [timelineYear, setTimelineYear] = useState(5);
   const [irrigation, setIrrigation] = useState<IrrigationEstimate | null>(null);
+  const [irrigationConfiguration, setIrrigationConfiguration] = useState<IrrigationConfiguration>(DEFAULT_IRRIGATION_CONFIGURATION);
+  const [economicConfiguration, setEconomicConfiguration] = useState<EconomicConfiguration>(() => defaultEconomicConfiguration(''));
   const [costs, setCosts] = useState<EstablishmentCost | null>(null);
   const [section, setSection] = useState<WorkspaceSection>('site');
   const [drawMode, setDrawMode] = useState<DrawMode>('idle');
@@ -143,11 +155,22 @@ export default function App() {
   const [showNdmi, setShowNdmi] = useState(false);
   const [showWaterSamples, setShowWaterSamples] = useState(false);
   const [showExistingVegetation, setShowExistingVegetation] = useState(true);
-  const [busy, setBusy] = useState<string | null>('Loading Growaf');
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
+  const [showBoundary, setShowBoundary] = useState(true);
+  const [showNoPlantAreas, setShowNoPlantAreas] = useState(true);
+  const [showManagementPaths, setShowManagementPaths] = useState(true);
+  const [showInfrastructure, setShowInfrastructure] = useState(true);
+  const [showObservedTrees, setShowObservedTrees] = useState(true);
+  const [showPlannedTrees, setShowPlannedTrees] = useState(true);
+  const [showMachinery, setShowMachinery] = useState(true);
+  const [showIrrigation, setShowIrrigation] = useState(true);
+  const [editingIrrigation, setEditingIrrigation] = useState(false);
+  const [busy, setBusy] = useState<string | null>(() => t('busy.loading'));
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [catalogueQuery, setCatalogueQuery] = useState('Quercus');
+  const [mapReady, setMapReady] = useState(false);
+  const [catalogueQuery, setCatalogueQuery] = useState('');
   const [catalogueResults, setCatalogueResults] = useState<CatalogueSpecies[]>([]);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantInput, setAssistantInput] = useState('');
@@ -156,23 +179,30 @@ export default function App() {
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
-  const [projectId] = useState(() => `ragusa-ibla-${crypto.randomUUID().slice(0, 8)}`);
+  const [clearSiteOpen, setClearSiteOpen] = useState(false);
+  const [projectName, setProjectName] = useState(() => t('project.newTitle'));
+  const [projectId, setProjectId] = useState(() => `growaf-${crypto.randomUUID().slice(0, 8)}`);
   const createdAtRef = useRef(new Date().toISOString());
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
+  const fittedSiteRef = useRef<string | null>(null);
   const boundaryRef = useRef<any[]>([]);
   const exclusionsRef = useRef<any[]>([]);
   const existingVegetationRef = useRef<any[]>([]);
   const draftOverlayRef = useRef<any>(null);
+  const draftPointOverlaysRef = useRef<any[]>([]);
   const treeOverlaysRef = useRef<any[]>([]);
+  const machineryOverlaysRef = useRef<any[]>([]);
   const waterOverlaysRef = useRef<any[]>([]);
+  const irrigationNetworkOverlaysRef = useRef<any[]>([]);
   const ndmiOverlayRef = useRef<any>(null);
   const mapClickRef = useRef<(coordinate: Coordinate) => void>(() => undefined);
   const undoRef = useRef<TreeInstance[][]>([]);
   const redoRef = useRef<TreeInstance[][]>([]);
-  const siteUndoRef = useRef<SiteBoundary[]>([]);
-  const siteRedoRef = useRef<SiteBoundary[]>([]);
+  const siteUndoRef = useRef<Array<SiteBoundary | null>>([]);
+  const siteRedoRef = useRef<Array<SiteBoundary | null>>([]);
   const recommendationObjectiveRef = useRef(JSON.stringify(DEFAULT_DESIGN_CONFIGURATION.objectives));
+  const projectNameEditedRef = useRef(false);
 
   const selectedVariant = useMemo(
     () => variants.find((variant) => variant.id === selectedVariantId) ?? variants[0] ?? null,
@@ -188,7 +218,6 @@ export default function App() {
     Promise.all([api<AppConfig>('/api/config'), api<CatalogueStats>('/api/catalog/stats'), api<AuthSession>('/api/auth/session')])
       .then(([appConfig, stats, session]) => {
         setConfig(appConfig);
-        setSite(normalizeSiteBoundary(appConfig.defaultSite));
         setCatalogueStats(stats);
         setAuthUser(session.user);
         setBusy(null);
@@ -198,6 +227,18 @@ export default function App() {
         setBusy(null);
       });
   }, []);
+
+  useEffect(() => {
+    if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
+  }, [locale, t]);
+
+  useEffect(() => {
+    if (!irrigation || irrigation.designYear === timelineYear || !site || !siteProfile || !selectedVariant) return;
+    const timer = window.setTimeout(() => {
+      void recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.timelineRecalculated', { year: timelineYear }));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [timelineYear, irrigation?.designYear]);
 
   useEffect(() => {
     const objectiveKey = JSON.stringify(designConfiguration.objectives);
@@ -212,13 +253,12 @@ export default function App() {
   }, [designConfiguration.objectives, siteProfile]);
 
   useEffect(() => {
-    if (!config || !site || !mapElementRef.current || mapRef.current) return;
+    if (!config || !mapElementRef.current || mapRef.current) return;
     loadGoogleMaps(config.googleMapsApiKey)
       .then((maps) => {
-        const center = centroid(site.polygon);
         const map = new maps.Map(mapElementRef.current, {
-          center,
-          zoom: 18,
+          center: config.initialMapViewport.center,
+          zoom: config.initialMapViewport.zoom,
           mapTypeId: 'satellite',
           tilt: 0,
           heading: 0,
@@ -233,26 +273,32 @@ export default function App() {
         map.addListener('click', (event: any) => {
           if (event.latLng) mapClickRef.current(coordinateFromLatLng(event.latLng));
         });
+        map.addListener('idle', () => {
+          if (mapElementRef.current) mapElementRef.current.dataset.zoom = String(map.getZoom() ?? '');
+        });
         mapRef.current = map;
+        setMapReady(true);
         setMapError(null);
-        setSite((current) => current ? cloneSite(current) : current);
       })
       .catch((mapsError) => setMapError(messageOf(mapsError)));
   }, [config, site]);
 
   useEffect(() => {
-    if (!site) return;
+    if (!site) {
+      setSiteValidation(null);
+      return;
+    }
     const local = localSiteValidation(site);
     if (!local.valid) {
       setSiteValidation(null);
-      setError(local.reason);
+      setError(localizedDomainMessage(local.reason, t));
       return;
     }
     const timer = window.setTimeout(() => {
       api<SiteValidation>('/api/site/validate', post(site))
         .then((validation) => {
           setSiteValidation(validation);
-          if (!validation.valid) setError(validation.reason);
+          if (!validation.valid) setError(localizedDomainMessage(validation.reason, t));
         })
         .catch((validationError) => setError(messageOf(validationError)));
     }, 300);
@@ -264,7 +310,7 @@ export default function App() {
     const maps = window.google?.maps;
     if (!map || !maps || !site) return;
     boundaryRef.current.forEach((overlay) => overlay.setMap(null));
-    boundaryRef.current = sitePolygons(site).map((polygon, index) => new maps.Polygon({
+    boundaryRef.current = showBoundary ? sitePolygons(site).map((polygon, index) => new maps.Polygon({
       map,
       paths: polygon,
       strokeColor: '#f0c36b',
@@ -274,8 +320,8 @@ export default function App() {
       fillOpacity: 0.13,
       editable: drawMode === 'edit-site' && index === 0,
       zIndex: 10,
-    }));
-    if (drawMode === 'edit-site') {
+    })) : [];
+    if (showBoundary && drawMode === 'edit-site') {
       const path = boundaryRef.current[0].getPath();
       const sync = () => {
         const polygon = coordinatesFromPath(path);
@@ -287,16 +333,21 @@ export default function App() {
     }
     const bounds = new maps.LatLngBounds();
     sitePolygons(site).flat().forEach((point) => bounds.extend(point));
-    if (!bounds.isEmpty() && section === 'site') map.fitBounds(bounds, 72);
+    if (!bounds.isEmpty() && fittedSiteRef.current !== site.id) {
+      map.fitBounds(bounds, 72);
+      fittedSiteRef.current = site.id;
+    }
     return () => boundaryRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [site?.polygon, site?.additionalPolygons, drawMode]);
+  }, [site?.polygon, site?.additionalPolygons, drawMode, mapReady, showBoundary]);
 
   useEffect(() => {
     const map = mapRef.current;
     const maps = window.google?.maps;
     if (!map || !maps || !site) return;
     exclusionsRef.current.forEach((overlay) => overlay.setMap(null));
-    const constraintPolygons = [...site.holes.map((polygon, index) => ({ polygon, kind: 'hole' as const, index })), ...site.exclusions.map((polygon, index) => ({ polygon, kind: 'exclusion' as const, index }))];
+    const constraintPolygons = showNoPlantAreas
+      ? [...site.holes.map((polygon, index) => ({ polygon, kind: 'hole' as const, index })), ...site.exclusions.map((polygon, index) => ({ polygon, kind: 'exclusion' as const, index }))]
+      : [];
     const polygonOverlays = constraintPolygons.map(({ polygon, kind, index }) => {
       const overlay = new maps.Polygon({
         map,
@@ -323,7 +374,7 @@ export default function App() {
       }
       return overlay;
     });
-    const pathOverlays = site.paths.map((path, index) => {
+    const pathOverlays = (showManagementPaths ? site.paths : []).map((path, index) => {
       const overlay = new maps.Polyline({ map, path: path.points, strokeColor: '#f7e6a5', strokeOpacity: 0.95, strokeWeight: Math.max(3, Math.min(12, path.widthM * 1.7)), editable: drawMode === 'edit-constraints', zIndex: 13 });
       if (drawMode === 'edit-constraints') {
         const overlayPath = overlay.getPath();
@@ -338,20 +389,36 @@ export default function App() {
       return overlay;
     });
     const pointOverlays = [
-      ...site.accessPoints.map((point) => ({ point, label: 'A', color: '#f0c36b' })),
-      ...site.waterPoints.map((point) => ({ point, label: 'W', color: '#62c8bd' })),
-      ...site.existingTrees.map((point) => ({ point, label: 'T', color: '#d7ff83' })),
-    ].map(({ point, label, color }) => new maps.Marker({
-      map,
-      position: point.coordinate,
-      clickable: false,
-      label: { text: label, color: '#17351f', fontSize: '9px', fontWeight: '700' },
-      icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: color, fillOpacity: 1, strokeColor: '#17351f', strokeWeight: 2 },
-      zIndex: 15,
-    }));
+      ...(showInfrastructure ? site.accessPoints.map((point) => ({ point, kind: 'access' as const, label: 'A', color: '#f0c36b' })) : []),
+      ...(showInfrastructure ? site.waterPoints.map((point) => ({ point, kind: 'water' as const, label: 'W', color: '#62c8bd' })) : []),
+      ...(showObservedTrees ? site.existingTrees.map((point) => ({ point, kind: 'tree' as const, label: 'T', color: '#d7ff83' })) : []),
+    ].map(({ point, kind, label, color }) => {
+      const marker = new maps.Marker({
+        map,
+        position: point.coordinate,
+        clickable: kind === 'water',
+        draggable: kind === 'water',
+        cursor: kind === 'water' ? 'grab' : undefined,
+        title: kind === 'water' ? t('map.dragWaterSource') : undefined,
+        label: { text: label, color: '#17351f', fontSize: '9px', fontWeight: '700' },
+        icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: color, fillOpacity: 1, strokeColor: '#17351f', strokeWeight: 2 },
+        zIndex: 15,
+      });
+      if (kind === 'water') marker.addListener('dragend', (event: any) => {
+        if (!event.latLng) return;
+        const coordinate = coordinateFromLatLng(event.latLng);
+        if (!siteContainsCoordinate(site, coordinate)) {
+          marker.setPosition(point.coordinate);
+          setError(t('errors.infrastructureOutside'));
+          return;
+        }
+        void relocateWaterSource(coordinate, point.id);
+      });
+      return marker;
+    });
     exclusionsRef.current = [...polygonOverlays, ...pathOverlays, ...pointOverlays];
     return () => exclusionsRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [site?.holes, site?.exclusions, site?.paths, site?.accessPoints, site?.waterPoints, site?.existingTrees, drawMode]);
+  }, [site?.holes, site?.exclusions, site?.paths, site?.accessPoints, site?.waterPoints, site?.existingTrees, drawMode, showNoPlantAreas, showManagementPaths, showInfrastructure, showObservedTrees]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -390,13 +457,87 @@ export default function App() {
     const maps = window.google?.maps;
     if (!map || !maps) return;
     draftOverlayRef.current?.setMap(null);
+    draftPointOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    draftPointOverlaysRef.current = [];
     if (draftPoints.length) {
       draftOverlayRef.current = drawMode !== 'path' && draftPoints.length >= 3
         ? new maps.Polygon({ map, paths: draftPoints, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#ffffff', fillOpacity: 0.12, zIndex: 50 })
         : new maps.Polyline({ map, path: draftPoints, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 50 });
+      draftPointOverlaysRef.current = draftPoints.map((point, index) => new maps.Marker({
+        map,
+        position: point,
+        clickable: false,
+        zIndex: 60 + index,
+        label: { text: String(index + 1), color: '#10281e', fontFamily: 'DM Mono, monospace', fontSize: '9px', fontWeight: '700' },
+        icon: {
+          path: maps.SymbolPath.CIRCLE,
+          scale: index === draftPoints.length - 1 ? 11 : 9,
+          fillColor: index === 0 ? '#c7e36f' : index === draftPoints.length - 1 ? '#ffffff' : '#f0c36b',
+          fillOpacity: 1,
+          strokeColor: '#10281e',
+          strokeWeight: index === draftPoints.length - 1 ? 3 : 2,
+        },
+      }));
     }
-    return () => draftOverlayRef.current?.setMap(null);
+    return () => {
+      draftOverlayRef.current?.setMap(null);
+      draftPointOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    };
   }, [draftPoints, drawMode]);
+
+  useEffect(() => {
+    const drawing = isGeometryDrawMode(drawMode);
+    mapRef.current?.setOptions({ draggableCursor: drawing ? 'crosshair' : null, draggingCursor: drawing ? 'crosshair' : null });
+  }, [drawMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    machineryOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    machineryOverlaysRef.current = [];
+    if (!selectedVariant?.machinery.enabled || !showMachinery) return;
+    for (const corridor of selectedVariant.machinery.corridors) {
+      for (let index = 0; index < corridor.points.length - 1; index += 1) {
+        machineryOverlaysRef.current.push(new maps.Polygon({
+          map,
+          paths: corridorSegmentPolygon(corridor.points[index], corridor.points[index + 1], corridor.widthM),
+          strokeColor: '#10281e',
+          strokeOpacity: 0.92,
+          strokeWeight: 2,
+          fillColor: '#ff6b3d',
+          fillOpacity: 0.55,
+          clickable: false,
+          zIndex: 18,
+        }));
+      }
+      machineryOverlaysRef.current.push(new maps.Polyline({
+        map,
+        path: corridor.points,
+        strokeColor: '#fff2c2',
+        strokeOpacity: 0,
+        strokeWeight: 2,
+        icons: [{ icon: { path: 'M 0,-1 0,1', strokeColor: '#fff2c2', strokeOpacity: 1, strokeWeight: 2, scale: 2 }, offset: '0', repeat: '14px' }],
+        clickable: false,
+        zIndex: 19,
+      }));
+    }
+    for (const area of selectedVariant.machinery.turningAreas) {
+      machineryOverlaysRef.current.push(new maps.Circle({
+        map,
+        center: area.center,
+        radius: area.radiusM,
+        strokeColor: '#10281e',
+        strokeOpacity: 0.95,
+        strokeWeight: 2,
+        fillColor: '#ff6b3d',
+        fillOpacity: 0.48,
+        clickable: false,
+        zIndex: 18,
+      }));
+    }
+    return () => machineryOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [selectedVariant?.machinery, showMachinery]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -404,7 +545,7 @@ export default function App() {
     if (!map || !maps) return;
     treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     treeOverlaysRef.current = [];
-    if (!selectedVariant) return;
+    if (!selectedVariant || !showPlannedTrees) return;
     for (const tree of selectedVariant.trees) {
       const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
       if (!species) continue;
@@ -430,7 +571,59 @@ export default function App() {
       treeOverlaysRef.current.push(crown);
     }
     return () => treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [selectedVariant, timelineYear, selectedTreeId]);
+  }, [selectedVariant, timelineYear, selectedTreeId, showPlannedTrees]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    irrigationNetworkOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    irrigationNetworkOverlaysRef.current = [];
+    if (!irrigation || !showIrrigation) return;
+    for (const line of irrigation.network.lines) {
+      const color = line.kind === 'mainline' ? '#1c5f88' : line.kind === 'submain' ? '#278c9e' : line.kind === 'protected-crossing' ? '#f0a536' : '#61b9c7';
+      const editable = editingIrrigation && line.kind !== 'protected-crossing';
+      const overlay = new maps.Polyline({
+        map,
+        path: line.points,
+        strokeColor: color,
+        strokeOpacity: line.kind === 'protected-crossing' ? 1 : 0.9,
+        strokeWeight: line.kind === 'mainline' ? 5 : line.kind === 'submain' ? 4 : line.kind === 'protected-crossing' ? 7 : 2,
+        clickable: editable,
+        editable,
+        zIndex: line.kind === 'protected-crossing' ? 33 : 30,
+      });
+      if (editable) overlay.addListener('mouseup', (event: any) => {
+        if (typeof event.vertex !== 'number') return;
+        const points = coordinatesFromPath(overlay.getPath());
+        void relocateIrrigationVertex(line.id, event.vertex, points);
+      });
+      irrigationNetworkOverlaysRef.current.push(overlay);
+    }
+    const sourceMarker = new maps.Marker({
+      map,
+      position: irrigation.network.source.coordinate,
+      draggable: true,
+      clickable: true,
+      cursor: 'grab',
+      title: t('map.dragWaterSource'),
+      label: { text: 'S', color: '#ffffff', fontFamily: 'DM Mono, monospace', fontSize: '10px', fontWeight: '700' },
+      icon: { path: maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#15557a', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
+      zIndex: 38,
+    });
+    sourceMarker.addListener('dragend', (event: any) => {
+      if (!event.latLng || !site) return;
+      const coordinate = coordinateFromLatLng(event.latLng);
+      if (!siteContainsCoordinate(site, coordinate)) {
+        sourceMarker.setPosition(irrigation.network.source.coordinate);
+        setError(t('errors.infrastructureOutside'));
+        return;
+      }
+      void relocateWaterSource(coordinate);
+    });
+    irrigationNetworkOverlaysRef.current.push(sourceMarker);
+    return () => irrigationNetworkOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [editingIrrigation, irrigation, showIrrigation, site, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -476,19 +669,19 @@ export default function App() {
     }
     if (site && (drawMode === 'access-point' || drawMode === 'water-point' || drawMode === 'existing-tree')) {
       if (!siteContainsCoordinate(site, coordinate)) {
-        setError('Site infrastructure and existing trees must be placed inside the field boundary.');
+        setError(t('errors.infrastructureOutside'));
         setDrawMode('idle');
         return;
       }
       const id = crypto.randomUUID();
-      if (drawMode === 'access-point') invalidateSite({ ...site, accessPoints: [...site.accessPoints, { id: `access-${id}`, name: `Access ${site.accessPoints.length + 1}`, coordinate }] });
-      if (drawMode === 'water-point') invalidateSite({ ...site, waterPoints: [...site.waterPoints, { id: `water-${id}`, name: `Water source ${site.waterPoints.length + 1}`, coordinate }] });
-      if (drawMode === 'existing-tree') invalidateSite({ ...site, existingTrees: [...site.existingTrees, { id: `existing-${id}`, name: `Observed tree ${site.existingTrees.length + 1}`, coordinate, speciesName: null, crownDiameterM: 5, protectionBufferM: 2.5 }] });
+      if (drawMode === 'access-point') invalidateSite({ ...site, accessPoints: [...site.accessPoints, { id: `access-${id}`, name: t('site.newAccess', { count: site.accessPoints.length + 1 }), coordinate }] });
+      if (drawMode === 'water-point') invalidateSite({ ...site, waterPoints: [...site.waterPoints, { id: `water-${id}`, name: t('site.newWaterSource', { count: site.waterPoints.length + 1 }), coordinate }] });
+      if (drawMode === 'existing-tree') invalidateSite({ ...site, existingTrees: [...site.existingTrees, { id: `existing-${id}`, name: t('site.newObservedTree', { count: site.existingTrees.length + 1 }), coordinate, speciesName: null, crownDiameterM: 5, protectionBufferM: 2.5 }] });
       setDrawMode('idle');
       return;
     }
     if (drawMode === 'add-tree' && selectedVariant && treeSpeciesId) {
-      const restriction = plantingRestriction(coordinate, site, siteProfile);
+      const restriction = plantingRestriction(coordinate, site, siteProfile, t);
       if (restriction) {
         setError(restriction);
         setDrawMode('idle');
@@ -513,7 +706,7 @@ export default function App() {
       return;
     }
     if (drawMode === 'move-tree' && selectedTree && !selectedTree.locked) {
-      const restriction = plantingRestriction(coordinate, site, siteProfile);
+      const restriction = plantingRestriction(coordinate, site, siteProfile, t);
       if (restriction) {
         setError(restriction);
         setDrawMode('idle');
@@ -528,7 +721,7 @@ export default function App() {
     const normalized = normalizeSiteBoundary(nextSite);
     const validation = localSiteValidation(normalized);
     if (!validation.valid) {
-      setError(validation.reason);
+      setError(localizedDomainMessage(validation.reason, t));
       return;
     }
     if (site) siteUndoRef.current.push(cloneSite(site));
@@ -540,52 +733,91 @@ export default function App() {
     setSelectedVariantId(null);
     setIrrigation(null);
     setCosts(null);
-    setNotice('Boundary changed. Re-run evidence analysis before generating a design.');
+    setNotice(t('notices.boundaryChanged'));
   }
 
   function finishDraft() {
     const minimumPoints = drawMode === 'path' ? 2 : 3;
-    if (!site || draftPoints.length < minimumPoints) {
-      setError(`Add at least ${minimumPoints} points before finishing this geometry.`);
+    if (draftPoints.length < minimumPoints) {
+      setError(t('errors.minimumPoints', { count: minimumPoints }));
       return;
     }
-    if (drawMode === 'site') invalidateSite({ ...site, polygon: draftPoints });
+    if (drawMode === 'site') {
+      const nextSite = site
+        ? { ...site, polygon: draftPoints }
+        : normalizeSiteBoundary({ id: `site-${crypto.randomUUID()}`, name: t('site.untitledName'), polygon: draftPoints });
+      fittedSiteRef.current = null;
+      invalidateSite(nextSite);
+      setDraftPoints([]);
+      setDrawMode('idle');
+      return;
+    }
+    if (!site) {
+      setError(t('site.drawFirst'));
+      return;
+    }
     if (drawMode === 'hole') invalidateSite({ ...site, holes: [...site.holes, draftPoints] });
     if (drawMode === 'exclusion') invalidateSite({ ...site, exclusions: [...site.exclusions, draftPoints] });
-    if (drawMode === 'path') invalidateSite({ ...site, paths: [...site.paths, { id: `path-${crypto.randomUUID()}`, name: `Management path ${site.paths.length + 1}`, points: draftPoints, widthM: 3 }] });
+    if (drawMode === 'path') invalidateSite({ ...site, paths: [...site.paths, { id: `path-${crypto.randomUUID()}`, name: t('site.newPath', { count: site.paths.length + 1 }), points: draftPoints, widthM: 3 }] });
     setDraftPoints([]);
     setDrawMode('idle');
   }
 
   async function importGeoJsonFile(file: File) {
-    await runBusy('Validating imported GeoJSON', async () => {
+    await runBusy(t('busy.validatingGeoJson'), async () => {
       const imported = importSiteGeoJson(JSON.parse(await file.text()), { id: site?.id, name: site?.name });
       const validation = await api<SiteValidation>('/api/site/validate', post(imported));
       if (!validation.valid) throw new Error(validation.reason);
+      fittedSiteRef.current = null;
       invalidateSite(imported);
       setSiteValidation(validation);
-      setNotice(`${validation.geometryType} imported: ${validation.plantableAreaM2.toFixed(0)} m² plantable after constraints.`);
+      setNotice(t('notices.geoJsonImported', { geometry: validation.geometryType, area: validation.plantableAreaM2.toFixed(0) }));
     });
   }
 
   function undoSite() {
-    if (!site || !siteUndoRef.current.length) return;
+    if (!siteUndoRef.current.length) return;
     const previous = siteUndoRef.current.pop()!;
-    siteRedoRef.current.push(cloneSite(site));
-    setSite(previous);
+    siteRedoRef.current.push(site ? cloneSite(site) : null);
+    setSite(previous ? cloneSite(previous) : null);
     clearDerivedSiteState();
   }
 
   function redoSite() {
-    if (!site || !siteRedoRef.current.length) return;
+    if (!siteRedoRef.current.length) return;
     const next = siteRedoRef.current.pop()!;
-    siteUndoRef.current.push(cloneSite(site));
-    setSite(next);
+    siteUndoRef.current.push(site ? cloneSite(site) : null);
+    setSite(next ? cloneSite(next) : null);
     clearDerivedSiteState();
+  }
+
+  function clearSite() {
+    if (!site) return;
+    siteUndoRef.current.push(cloneSite(site));
+    siteRedoRef.current = [];
+    setSite(null);
+    fittedSiteRef.current = null;
+    setSiteValidation(null);
+    clearDerivedSiteState();
+    setSelectedSpeciesIds([]);
+    setTreeSpeciesId('');
+    setSelectedTreeId(null);
+    setDrawMode('idle');
+    setDraftPoints([]);
+    setShowNdmi(false);
+    setShowWaterSamples(false);
+    setProjectId(`growaf-${crypto.randomUUID().slice(0, 8)}`);
+    projectNameEditedRef.current = false;
+    setProjectName(t('project.newTitle'));
+    createdAtRef.current = new Date().toISOString();
+    setClearSiteOpen(false);
+    setSection('site');
+    setNotice(t('site.clearedNotice'));
   }
 
   function clearDerivedSiteState() {
     setSiteProfile(null);
+    setEconomicConfiguration(defaultEconomicConfiguration(''));
     setRecommendations([]);
     setVariants([]);
     setSelectedVariantId(null);
@@ -593,30 +825,51 @@ export default function App() {
     setCosts(null);
   }
 
+  function activateDrawMode(mode: DrawMode) {
+    setDrawMode(mode);
+    setDraftPoints([]);
+    if (mode === 'site' || mode === 'edit-site') setShowBoundary(true);
+    if (mode === 'hole' || mode === 'exclusion') setShowNoPlantAreas(true);
+    if (mode === 'path') setShowManagementPaths(true);
+    if (mode === 'access-point' || mode === 'water-point') setShowInfrastructure(true);
+    if (mode === 'existing-tree') setShowObservedTrees(true);
+    if (mode === 'add-tree' || mode === 'move-tree') setShowPlannedTrees(true);
+    if (mode === 'edit-constraints') {
+      setShowNoPlantAreas(true);
+      setShowManagementPaths(true);
+      setShowInfrastructure(true);
+      setShowObservedTrees(true);
+    }
+  }
+
   async function analyzeSite() {
     if (!site) return;
-    await runBusy('Reading terrain, climate, soil and Sentinel scenes', async () => {
+    setSection('profile');
+    await runBusy(t('busy.readingEvidence'), async () => {
       const profile = await api<SiteProfile>('/api/site/profile', post(site));
-      const result = await api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives }));
+      const [result, economics] = await Promise.all([
+        api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives })),
+        api<EconomicConfiguration>('/api/economics/profile', post({ siteProfile: profile })),
+      ]);
       recommendationObjectiveRef.current = JSON.stringify(designConfiguration.objectives);
       setSiteProfile(profile);
+      setEconomicConfiguration(economics);
       setRecommendations(result.recommendations);
       const palette = result.palette.map((species) => species.id);
       setSelectedSpeciesIds(palette);
       setTreeSpeciesId(palette[0] ?? '');
-      setSection('profile');
       setShowWaterSamples(false);
       setShowExistingVegetation(true);
       const woody = profile.satellite.existingVegetation;
-      setNotice(`Evidence ready: ${woody.patches.length} existing woody ${woody.patches.length === 1 ? 'patch' : 'patches'} protected.`);
+      setNotice(t('notices.evidenceReady', { count: woody.patches.length }));
     });
   }
 
   async function generateDesign() {
-    if (!site || !siteProfile) return setError('Complete the site evidence analysis first.');
+    if (!site || !siteProfile) return setError(t('errors.completeEvidenceFirst'));
     const minimumSpecies = designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2;
-    if (selectedSpeciesIds.length < minimumSpecies) return setError(`Select at least ${minimumSpecies} compatible ${minimumSpecies === 1 ? 'species' : 'species'}.`);
-    await runBusy('Generating evidence-scored planting systems', async () => {
+    if (selectedSpeciesIds.length < minimumSpecies) return setError(t('errors.minimumSpecies', { count: minimumSpecies }));
+    await runBusy(t('busy.generatingDesigns'), async () => {
       const result = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds, designConfiguration }));
       setVariants(result.variants);
       setSelectedVariantId(result.variants[0]?.id ?? null);
@@ -626,26 +879,120 @@ export default function App() {
       setShowNdmi(false);
       setIrrigation(null);
       setCosts(null);
+      setEditingIrrigation(false);
+      setIrrigationConfiguration((configuration) => ({ ...configuration, lineOverrides: {} }));
       undoRef.current = [];
       redoRef.current = [];
-      setNotice(`${result.variants.length} reproducible layouts generated.`);
+      setNotice(t('notices.layoutsGenerated', { count: result.variants.length }));
+    });
+  }
+
+  async function regenerateUnlockedDesign() {
+    if (!site || !siteProfile || !selectedVariant) return setError(t('errors.generateLayoutFirst'));
+    await runBusy(t('busy.regeneratingUnlocked'), async () => {
+      const result = await api<{ variant: LayoutVariant }>('/api/layout/regenerate', post({
+        site,
+        siteProfile,
+        selectedSpeciesIds,
+        previousVariant: selectedVariant,
+        designConfiguration,
+      }));
+      setVariants((items) => items.map((item) => item.id === selectedVariant.id ? result.variant : item));
+      if (selectedTreeId && !result.variant.trees.some((tree) => tree.id === selectedTreeId)) setSelectedTreeId(null);
+      setIrrigation(null);
+      setCosts(null);
+      setEditingIrrigation(false);
+      setIrrigationConfiguration((configuration) => ({ ...configuration, lineOverrides: {} }));
+      undoRef.current = [];
+      redoRef.current = [];
+      setNotice(t('notices.unlockedRegenerated', { count: result.variant.generation.lockedTreeCount }));
+    });
+  }
+
+  async function requestWaterAndCosts(activeSite: SiteBoundary, activeConfiguration: IrrigationConfiguration, designYear: number) {
+    if (!selectedVariant || !siteProfile) throw new Error(t('errors.generateLayoutFirst'));
+    return api<{ irrigation: IrrigationEstimate; establishment: EstablishmentCost }>('/api/costs/calculate', post({
+      variant: selectedVariant,
+      site: activeSite,
+      siteProfile,
+      selectedSpeciesIds,
+      designYear,
+      irrigationConfiguration: activeConfiguration,
+      economicConfiguration,
+    }));
+  }
+
+  async function recalculateWaterAndCosts(activeSite: SiteBoundary, activeConfiguration: IrrigationConfiguration, designYear: number, successNotice: string) {
+    await runBusy(t('busy.sizingWaterCosts'), async () => {
+      const result = await requestWaterAndCosts(activeSite, activeConfiguration, designYear);
+      setIrrigation(result.irrigation);
+      setCosts(result.establishment);
+      setNotice(successNotice);
     });
   }
 
   async function calculateWaterAndCosts() {
-    if (!selectedVariant || !siteProfile) return setError('Generate and select a layout first.');
-    await runBusy('Sizing irrigation and calculating establishment costs', async () => {
-      const result = await api<{ irrigation: IrrigationEstimate; establishment: EstablishmentCost }>('/api/costs/calculate', post({
-        variant: selectedVariant,
-        siteProfile,
-        selectedSpeciesIds,
-        designYear: timelineYear,
-      }));
-      setIrrigation(result.irrigation);
-      setCosts(result.establishment);
-      setSection('water');
-      setNotice('Irrigation CAPEX, annual operation and establishment costs calculated.');
-    });
+    if (!selectedVariant || !site || !siteProfile) return setError(t('errors.generateLayoutFirst'));
+    await recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.waterCostsReady'));
+    setSection('water');
+  }
+
+  async function relocateWaterSource(coordinate: Coordinate, requestedPointId?: string) {
+    if (!site) return;
+    if (!siteContainsCoordinate(site, coordinate)) return setError(t('errors.infrastructureOutside'));
+    const existingPoint = site.waterPoints.find((point) => point.id === requestedPointId)
+      ?? site.waterPoints.find((point) => point.id === irrigationConfiguration.sourcePointId)
+      ?? site.waterPoints[0]
+      ?? null;
+    const pointId = existingPoint?.id ?? `water-${crypto.randomUUID()}`;
+    const nextPoint = existingPoint
+      ? { ...existingPoint, coordinate }
+      : { id: pointId, name: t('site.newWaterSource', { count: site.waterPoints.length + 1 }), coordinate };
+    const nextSite = {
+      ...site,
+      waterPoints: existingPoint
+        ? site.waterPoints.map((point) => point.id === pointId ? nextPoint : point)
+        : [...site.waterPoints, nextPoint],
+    };
+    const nextConfiguration = { ...irrigationConfiguration, sourcePointId: pointId, lineOverrides: {} };
+    siteUndoRef.current.push(cloneSite(site));
+    siteRedoRef.current = [];
+    setSite(nextSite);
+    setIrrigationConfiguration(nextConfiguration);
+    if (selectedVariant && siteProfile) {
+      await recalculateWaterAndCosts(nextSite, nextConfiguration, timelineYear, t('notices.waterSourceMoved'));
+    } else {
+      setNotice(t('notices.waterSourceMoved'));
+    }
+  }
+
+  async function relocateIrrigationVertex(lineId: string, vertexIndex: number, points: Coordinate[]) {
+    if (!site || !irrigation || points.length < 2) return;
+    if (points.some((point) => !siteContainsCoordinate(site, point))) {
+      setError(t('errors.infrastructureOutside'));
+      setIrrigation({ ...irrigation });
+      return;
+    }
+    const target = irrigation.network.lines.find((line) => line.id === lineId);
+    if (!target) return;
+    const previousPoint = target.points[vertexIndex];
+    const nextPoint = points[vertexIndex];
+    if (previousPoint && nextPoint && haversineM(previousPoint, irrigation.network.source.coordinate) < 0.5) {
+      await relocateWaterSource(nextPoint);
+      return;
+    }
+    const replacements = previousPoint && nextPoint && target.points.length === points.length && haversineM(previousPoint, nextPoint) > 0.02
+      ? [{ previous: previousPoint, next: nextPoint }]
+      : [];
+    const lineOverrides = { ...irrigationConfiguration.lineOverrides, [lineId]: points };
+    for (const line of irrigation.network.lines) {
+      if (line.kind === 'protected-crossing' || line.id === lineId) continue;
+      const adjusted = line.points.map((point) => replacements.reduce((value, replacement) => haversineM(value, replacement.previous) < 0.5 ? replacement.next : value, point));
+      if (adjusted.some((point, index) => haversineM(point, line.points[index]) > 0.02)) lineOverrides[line.id] = adjusted;
+    }
+    const nextConfiguration = { ...irrigationConfiguration, lineOverrides };
+    setIrrigationConfiguration(nextConfiguration);
+    await recalculateWaterAndCosts(site, nextConfiguration, timelineYear, t('notices.irrigationGeometryMoved'));
   }
 
   function currentAssistantContext(): AssistantProjectContext {
@@ -701,7 +1048,7 @@ export default function App() {
         if (action.type === 'navigate') nextSection = action.section;
       }
       const minimumSpecies = designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2;
-      if (nextSpeciesIds.length < minimumSpecies) throw new Error(`This design system requires at least ${minimumSpecies} selected ${minimumSpecies === 1 ? 'species' : 'species'}.`);
+      if (nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
       const speciesChanged = nextSpeciesIds.join('|') !== selectedSpeciesIds.join('|');
       const regenerate = actions.some((action) => action.type === 'regenerate_layout');
       const recalculate = actions.some((action) => action.type === 'recalculate_water_and_costs');
@@ -712,7 +1059,7 @@ export default function App() {
         nextCosts = null;
       }
       if (regenerate) {
-        if (!site || !siteProfile) throw new Error('Complete the site evidence analysis before regenerating a layout.');
+        if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeRegenerate'));
         const layoutResult = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds: nextSpeciesIds, designConfiguration }));
         nextVariants = layoutResult.variants;
         nextVariantId = nextVariants.some((variant) => variant.id === nextVariantId) ? nextVariantId : nextVariants[0]?.id ?? null;
@@ -720,14 +1067,17 @@ export default function App() {
         nextCosts = null;
       }
       if (recalculate) {
-        if (!siteProfile) throw new Error('Complete the site evidence analysis before calculating water and costs.');
+        if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeCosts'));
         const chosenVariant = nextVariants.find((variant) => variant.id === nextVariantId) ?? nextVariants[0];
-        if (!chosenVariant) throw new Error('Generate a layout before calculating water and costs.');
+        if (!chosenVariant) throw new Error(t('errors.layoutBeforeCosts'));
         const costResult = await api<{ irrigation: IrrigationEstimate; establishment: EstablishmentCost }>('/api/costs/calculate', post({
           variant: chosenVariant,
+          site,
           siteProfile,
           selectedSpeciesIds: nextSpeciesIds,
           designYear: nextTimelineYear,
+          irrigationConfiguration,
+          economicConfiguration,
         }));
         nextIrrigation = costResult.irrigation;
         nextCosts = costResult.establishment;
@@ -742,7 +1092,7 @@ export default function App() {
       setSection(nextSection);
       setAssistantProposal(null);
       setAssistantInput('');
-      setNotice('AI proposal validated and applied to the Growaf project.');
+      setNotice(t('notices.aiApplied'));
     } catch (assistantApplyError) {
       setAssistantError(messageOf(assistantApplyError));
     } finally {
@@ -760,11 +1110,13 @@ export default function App() {
     const now = new Date().toISOString();
     const project: ProjectState = {
       id: projectId,
-      name: 'Ragusa Ibla pilot agroforestry system',
+      name: projectName.trim() || t('project.newTitle'),
       site,
       siteProfile,
       selectedSpeciesIds,
       designConfiguration,
+      irrigationConfiguration,
+      economicConfiguration,
       variants,
       selectedVariantId,
       timelineYear,
@@ -795,7 +1147,7 @@ export default function App() {
   }
 
   async function searchCatalogue(filters: CatalogueFilters = { treeOnly: false, globUntOnly: false, designReadyOnly: false }) {
-    await runBusy('Searching the evidence catalogue', async () => {
+    await runBusy(t('busy.searchingCatalogue'), async () => {
       const parameters = new URLSearchParams({ q: catalogueQuery, limit: '18' });
       if (filters.treeOnly) parameters.set('tree', 'true');
       if (filters.globUntOnly) parameters.set('globunt', 'true');
@@ -807,11 +1159,11 @@ export default function App() {
 
   async function searchLocation() {
     const query = locationQuery.trim();
-    if (query.length < 2) return setError('Enter at least two characters to search for a place.');
-    await runBusy('Searching places', async () => {
+    if (query.length < 2) return setError(t('errors.searchLength'));
+    await runBusy(t('busy.searchingPlaces'), async () => {
       const results = await api<LocationSearchResult[]>(`/api/locations/search?q=${encodeURIComponent(query)}`);
       setLocationResults(results);
-      if (!results.length) setNotice('No matching place was found. The current field is unchanged.');
+      if (!results.length) setNotice(t('notices.noPlace'));
     });
   }
 
@@ -830,12 +1182,12 @@ export default function App() {
     }
     setLocationResults([]);
     setLocationQuery(result.displayName);
-    setNotice('Map centred on the selected place. Draw or import the authoritative field boundary before analysis.');
+    setNotice(t('notices.mapCentredPlace'));
   }
 
   function useEnteredCoordinate(coordinate: Coordinate) {
     if (!Number.isFinite(coordinate.lat) || coordinate.lat < -90 || coordinate.lat > 90 || !Number.isFinite(coordinate.lng) || coordinate.lng < -180 || coordinate.lng > 180) {
-      setError('Enter a valid latitude and longitude.');
+      setError(t('errors.invalidCoordinate'));
       return;
     }
     if (drawMode !== 'idle' && drawMode !== 'edit-site' && drawMode !== 'edit-constraints') {
@@ -844,7 +1196,7 @@ export default function App() {
     }
     mapRef.current?.panTo(coordinate);
     mapRef.current?.setZoom(19);
-    setNotice('Map centred on the entered coordinate. Select a drawing tool to use keyboard-entered vertices.');
+    setNotice(t('notices.mapCentredCoordinate'));
   }
 
   function toggleSpecies(id: string) {
@@ -928,20 +1280,35 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => setSection('site')} aria-label="Growaf home">
+        <button className="brand" onClick={() => setSection('site')} aria-label={t('nav.home')}>
           <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
           <span><strong>growaf</strong><small>{t('brand.tagline')}</small></span>
         </button>
         <div className="project-title">
-          <span className="eyebrow">{t('project.pilot')}</span>
-          <strong>{t('project.title')}</strong>
+          <span className="eyebrow">{site ? t('project.activeField') : t('project.noField')}</span>
+          <input
+            aria-label={t('project.nameLabel')}
+            value={projectName}
+            maxLength={120}
+            onChange={(event) => {
+              projectNameEditedRef.current = true;
+              setProjectName(event.target.value);
+            }}
+            onBlur={() => {
+              if (!projectName.trim()) {
+                projectNameEditedRef.current = false;
+                setProjectName(t('project.newTitle'));
+              }
+            }}
+          />
         </div>
         <div className="top-actions">
-          <span className="source-status"><span /> {siteProfile ? t('status.siteData', { date: shortDay(siteProfile.generatedAt, locale) }) : t('status.awaiting')}</span>
+          <span className="source-status"><span /> {siteProfile ? t('status.siteData', { date: shortDay(siteProfile.generatedAt, locale) }) : t(site ? 'status.awaiting' : 'status.noField')}</span>
           <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
           <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
           <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
-          <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
+          <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
+          <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
           {authUser ? (
             <button className="user-chip" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
               {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
@@ -951,7 +1318,7 @@ export default function App() {
         </div>
       </header>
 
-      <aside className="step-rail" aria-label="Workflow">
+      <aside className="step-rail" aria-label={t('nav.workflow')}>
         {STEPS.map((step, index) => {
           const Icon = step.icon;
           return (
@@ -970,42 +1337,63 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <section className="map-stage" aria-label="Interactive site map">
+        <section className={`map-stage ${isGeometryDrawMode(drawMode) ? 'drawing' : ''}`} aria-label={t('map.interactive')}>
           <div ref={mapElementRef} className="map-canvas" />
-          {mapError && <div className="map-error"><Satellite size={22} /><strong>Satellite map unavailable</strong><span>{mapError}</span></div>}
-          <div className="map-badge"><Satellite size={14} /> {t('map.live')}</div>
+          {mapError && <div className="map-error"><Satellite size={22} /><strong>{t('map.unavailable')}</strong><span>{mapError}</span></div>}
+          {isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
+            <span><PencilRuler size={15} />{t(`map.drawMode.${drawMode}`)}</span>
+            <strong>{t('map.pointsPlaced', { count: draftPoints.length })}</strong>
+            <small>{draftPoints.length < (drawMode === 'path' ? 2 : 3) ? t('map.pointsRemaining', { count: (drawMode === 'path' ? 2 : 3) - draftPoints.length }) : t('map.readyToFinish')}</small>
+          </div>}
           <div className="map-toolbar">
-            <button aria-label="Edit site vertices" className={drawMode === 'edit-site' ? 'active' : ''} onClick={() => { setDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site'); setDraftPoints([]); }} title="Edit site vertices"><MousePointer2 size={17} /></button>
-            <button aria-label="Edit constraint vertices" className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => { setDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints'); setDraftPoints([]); }} title="Edit constraint vertices"><Route size={17} /></button>
-            <button aria-label="Draw a new site" className={drawMode === 'site' ? 'active' : ''} onClick={() => { setDrawMode('site'); setDraftPoints([]); }} title="Draw a new site"><PencilRuler size={17} /></button>
-            <button aria-label="Draw a hole" className={drawMode === 'hole' ? 'active' : ''} onClick={() => { setDrawMode('hole'); setDraftPoints([]); }} title="Draw a hole"><CircleOff size={17} /></button>
-            <button aria-label="Draw an exclusion" className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => { setDrawMode('exclusion'); setDraftPoints([]); }} title="Draw an exclusion"><Layers3 size={17} /></button>
-            <button aria-label="Draw a management path" className={drawMode === 'path' ? 'active' : ''} onClick={() => { setDrawMode('path'); setDraftPoints([]); }} title="Draw a management path"><Route size={17} /></button>
-            {(drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion' || drawMode === 'path') && <button aria-label="Finish geometry" className="finish" onClick={finishDraft} title="Finish geometry"><Check size={17} /></button>}
+            <button aria-label={t('map.editSite')} className={drawMode === 'edit-site' ? 'active' : ''} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} title={t('map.editSite')}><MousePointer2 size={17} /></button>
+            <button aria-label={t('map.editConstraints')} className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => activateDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints')} title={t('map.editConstraints')}><Route size={17} /></button>
+            <button aria-label={t('map.drawSite')} className={drawMode === 'site' ? 'active' : ''} onClick={() => activateDrawMode('site')} title={t('map.drawSite')}><PencilRuler size={17} /></button>
+            <button aria-label={t('map.drawHole')} className={drawMode === 'hole' ? 'active' : ''} onClick={() => activateDrawMode('hole')} title={t('map.drawHole')}><CircleOff size={17} /></button>
+            <button aria-label={t('map.drawExclusion')} className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => activateDrawMode('exclusion')} title={t('map.drawExclusion')}><Layers3 size={17} /></button>
+            <button aria-label={t('map.drawPath')} className={drawMode === 'path' ? 'active' : ''} onClick={() => activateDrawMode('path')} title={t('map.drawPath')}><Route size={17} /></button>
+            {isGeometryDrawMode(drawMode) && <button aria-label={t('map.finish')} className="finish" onClick={finishDraft} title={t('map.finish')}><Check size={17} /></button>}
             <span />
-            <button aria-label="Toggle existing vegetation mask" className={showExistingVegetation ? 'active vegetation' : ''} onClick={() => setShowExistingVegetation((value) => !value)} disabled={!siteProfile?.satellite.existingVegetation.patches.length} title="Toggle existing vegetation mask"><TreePine size={17} /></button>
-            <button aria-label="Toggle NDMI raster" className={showNdmi ? 'active water' : ''} onClick={() => setShowNdmi((value) => !value)} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} title="Toggle NDMI raster"><Waves size={17} /></button>
-            <button aria-label="Toggle water-priority samples" className={showWaterSamples ? 'active water' : ''} onClick={() => setShowWaterSamples((value) => !value)} disabled={!siteProfile?.satellite.optical.waterSamples.length} title="Toggle water-priority samples"><Droplets size={17} /></button>
+            <button aria-label={t('map.layers')} aria-expanded={showLayerPanel} className={showLayerPanel ? 'active layers' : 'layers'} onClick={() => setShowLayerPanel((value) => !value)} title={t('map.layers')}><Layers3 size={17} /></button>
+            <button aria-label={t('map.editIrrigation')} className={editingIrrigation ? 'active water' : ''} onClick={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} disabled={!irrigation} title={t('map.editIrrigation')}><Route size={17} /></button>
           </div>
+          {showLayerPanel && <div className="map-layer-panel" data-testid="map-layer-panel" role="group" aria-label={t('map.layers')}>
+            <header><span><Layers3 size={16} /><strong>{t('map.layersTitle')}</strong></span><button aria-label={t('map.closeLayers')} onClick={() => setShowLayerPanel(false)}><X size={15} /></button></header>
+            <p>{t('map.layersHint')}</p>
+            <small>{t('map.planningLayers')}</small>
+            <MapLayerToggle icon={MapIcon} tone="boundary" active={showBoundary} disabled={!site} label={t('map.layerBoundary')} hint={t('map.layerBoundaryHint')} toggleLabel={t('map.toggleBoundary')} onToggle={() => { const next = !showBoundary; setShowBoundary(next); if (!next && drawMode === 'edit-site') setDrawMode('idle'); }} />
+            <MapLayerToggle icon={CircleOff} tone="exclusions" active={showNoPlantAreas} disabled={!site || (!site.holes.length && !site.exclusions.length)} label={t('map.layerExclusions')} hint={t('map.layerExclusionsHint')} toggleLabel={t('map.toggleExclusions')} onToggle={() => setShowNoPlantAreas((value) => !value)} />
+            <MapLayerToggle icon={Route} tone="paths" active={showManagementPaths} disabled={!site?.paths.length} label={t('map.layerPaths')} hint={t('map.layerPathsHint')} toggleLabel={t('map.togglePaths')} onToggle={() => setShowManagementPaths((value) => !value)} />
+            <MapLayerToggle icon={LocateFixed} tone="infrastructure" active={showInfrastructure} disabled={!site || (!site.accessPoints.length && !site.waterPoints.length)} label={t('map.layerInfrastructure')} hint={t('map.layerInfrastructureHint')} toggleLabel={t('map.toggleInfrastructure')} onToggle={() => setShowInfrastructure((value) => !value)} />
+            <MapLayerToggle icon={TreePine} tone="observed" active={showObservedTrees} disabled={!site?.existingTrees.length} label={t('map.layerObservedTrees')} hint={t('map.layerObservedTreesHint')} toggleLabel={t('map.toggleObservedTrees')} onToggle={() => setShowObservedTrees((value) => !value)} />
+            <MapLayerToggle icon={Sprout} tone="trees" active={showPlannedTrees} disabled={!selectedVariant} label={t('map.layerTrees')} hint={t('map.layerTreesHint')} toggleLabel={t('map.toggleTrees')} onToggle={() => setShowPlannedTrees((value) => !value)} />
+            <MapLayerToggle icon={Tractor} tone="machinery" active={showMachinery} disabled={!selectedVariant?.machinery.enabled} label={t('map.layerMachinery')} hint={t('map.layerMachineryHint')} toggleLabel={t('map.toggleMachinery')} onToggle={() => setShowMachinery((value) => !value)} />
+            <MapLayerToggle icon={Droplets} tone="irrigation" active={showIrrigation} disabled={!irrigation} label={t('map.layerIrrigation')} hint={t('map.layerIrrigationHint')} toggleLabel={t('map.toggleIrrigation')} onToggle={() => { const next = !showIrrigation; setShowIrrigation(next); if (!next) setEditingIrrigation(false); }} />
+            <small>{t('map.evidenceLayers')}</small>
+            <MapLayerToggle icon={TreePine} tone="vegetation" active={showExistingVegetation} disabled={!siteProfile?.satellite.existingVegetation.patches.length} label={t('map.layerVegetation')} hint={t('map.layerVegetationHint')} toggleLabel={t('map.toggleVegetation')} onToggle={() => setShowExistingVegetation((value) => !value)} />
+            <MapLayerToggle icon={Waves} tone="ndmi" active={showNdmi} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} label={t('map.layerNdmi')} hint={t('map.layerNdmiHint')} toggleLabel={t('map.toggleNdmi')} onToggle={() => setShowNdmi((value) => !value)} />
+            <MapLayerToggle icon={Droplets} tone="water" active={showWaterSamples} disabled={!siteProfile?.satellite.optical.waterSamples.length} label={t('map.layerWater')} hint={t('map.layerWaterHint')} toggleLabel={t('map.toggleWater')} onToggle={() => setShowWaterSamples((value) => !value)} />
+          </div>}
+          {editingIrrigation && irrigation && <div className="irrigation-edit-status"><Route size={15} /><span><strong>{t('map.editIrrigation')}</strong><small>{t('map.editIrrigationHint')}</small></span></div>}
           {selectedVariant && (
             <div className="timeline-control">
               <div><span>{t('timeline.year')}</span><strong>{timelineYear}</strong></div>
-              <input aria-label="Succession year" type="range" min="0" max="30" value={timelineYear} onChange={(event) => setTimelineYear(Number(event.target.value))} />
+              <input aria-label={t('timeline.year')} type="range" min="0" max="30" value={timelineYear} onChange={(event) => setTimelineYear(Number(event.target.value))} />
               <div className="timeline-marks"><span>{t('timeline.planting')}</span><span>{t('timeline.establishment')}</span><span>{t('timeline.maturity')}</span></div>
             </div>
           )}
           {showExistingVegetation && Boolean(siteProfile?.satellite.existingVegetation.patches.length) && (
             <div className="vegetation-legend">
-              <span><i /> existing woody vegetation</span>
-              <small>protected zone · no new planting</small>
+              <span><i /> {t('map.existingVegetation')}</span>
+              <small>{t('map.protectedZone')}</small>
             </div>
           )}
           {showWaterSamples && siteProfile?.satellite.optical.latest && (
             <div className="satellite-legend">
-              <span><i className="dry" /> higher priority</span>
-              <span><i className="balanced" /> monitor</span>
-              <span><i className="wet" /> lower priority</span>
-              <small>Sentinel-2 · {shortDate(siteProfile.satellite.optical.latest.acquiredAt)}</small>
+              <span><i className="dry" /> {t('map.priorityHigh')}</span>
+              <span><i className="balanced" /> {t('map.priorityMonitor')}</span>
+              <span><i className="wet" /> {t('map.priorityLow')}</span>
+              <small>Sentinel-2 · {shortDate(siteProfile.satellite.optical.latest.acquiredAt, locale)}</small>
             </div>
           )}
         </section>
@@ -1017,9 +1405,9 @@ export default function App() {
             profile={siteProfile}
             validation={siteValidation}
             drawMode={drawMode}
-            onDrawMode={(mode) => { setDrawMode(mode); setDraftPoints([]); }}
+            onDrawMode={activateDrawMode}
             onAnalyze={analyzeSite}
-            onReset={() => config && invalidateSite(normalizeSiteBoundary(config.defaultSite))}
+            onClear={() => setClearSiteOpen(true)}
             onUpdate={invalidateSite}
             onImport={importGeoJsonFile}
             locationQuery={locationQuery}
@@ -1034,11 +1422,11 @@ export default function App() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} onAnalyze={analyzeSite} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} />}
-          {section === 'species' && <SpeciesPanel recommendations={recommendations} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
-          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={setSelectedVariantId} selectedTree={selectedTree} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={setDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onCalculate={calculateWaterAndCosts} />}
-          {section === 'water' && <WaterPanel irrigation={irrigation} profile={siteProfile} onCalculate={calculateWaterAndCosts} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} />}
-          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} onCalculate={calculateWaterAndCosts} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} />}
+          {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
+          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={setSelectedVariantId} selectedTree={selectedTree} onTreeSelect={setSelectedTreeId} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} />}
+          {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
+          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} />}
         </section>
       </main>
 
@@ -1063,6 +1451,8 @@ export default function App() {
         onClose={() => setAuthOpen(false)}
       />}
 
+      {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
+
       {(busy || error || notice) && (
         <div className={`toast ${error ? 'error' : notice ? 'success' : ''}`} role="status">
           {busy ? <LoaderCircle className="spin" size={18} /> : error ? <span className="toast-symbol">!</span> : <Check size={18} />}
@@ -1072,6 +1462,24 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
+  icon: typeof Layers3;
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'irrigation' | 'vegetation' | 'ndmi' | 'water';
+  active: boolean;
+  disabled: boolean;
+  label: string;
+  hint: string;
+  toggleLabel: string;
+  onToggle: () => void;
+}) {
+  const visible = active && !disabled;
+  return <button type="button" className={`map-layer-toggle ${visible ? 'active' : ''}`} aria-label={toggleLabel} aria-pressed={visible} disabled={disabled} onClick={onToggle}>
+    <i className={`map-layer-swatch ${tone}`}><Icon size={15} /></i>
+    <span><strong>{label}</strong><small>{hint}</small></span>
+    <Check className="map-layer-check" size={14} />
+  </button>;
 }
 
 function AuthPanel({ configured, clientId, locale, onCredential, onClose }: {
@@ -1113,7 +1521,7 @@ function InspectorHeader({ section, onPrevious, onNext }: { section: WorkspaceSe
   return (
     <div className="inspector-header">
       <div><span className="section-icon"><Icon size={18} /></span><span><small>{t('workspace.label')}</small><strong>{t(stepLabelKey(current.id))}</strong></span></div>
-      <nav><button onClick={onPrevious}><ArrowLeft size={16} /></button><button onClick={onNext}><ArrowRight size={16} /></button></nav>
+      <nav><button aria-label={t('nav.previous')} onClick={onPrevious}><ArrowLeft size={16} /></button><button aria-label={t('nav.next')} onClick={onNext}><ArrowRight size={16} /></button></nav>
     </div>
   );
 }
@@ -1132,51 +1540,62 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
 }) {
   const { t } = useI18n();
   const prompts = [
-    'Aggiungi una specie produttiva adatta al sito e rigenera il progetto.',
-    'Riduci il fabbisogno idrico senza perdere troppi strati.',
-    'Spiegami perché queste specie sono adatte a questo terreno.',
+    t('assistant.promptProductive'),
+    t('assistant.promptWater'),
+    t('assistant.promptExplain'),
   ];
   return (
-    <aside className="assistant-panel" aria-label="Growaf AI assistant">
+    <aside className="assistant-panel" aria-label={t('assistant.aria')}>
       <header>
         <span className="assistant-mark"><Sparkles size={18} /></span>
         <span><small>{t('assistant.internal')}</small><strong>{t('actions.ask')}</strong></span>
-        <span className={`assistant-model ${configured ? 'ready' : ''}`}>{configured ? t('assistant.connected') : t('assistant.notConfigured')}</span>
-        <button aria-label="Close assistant" onClick={onClose}><X size={17} /></button>
+        <button aria-label={t('assistant.close')} onClick={onClose}><X size={17} /></button>
       </header>
       <div className="assistant-body">
         <div className="assistant-trust"><ShieldCheck size={16} /><span><strong>{t('assistant.validated')}</strong><small>{t('assistant.validatedBody')}</small></span></div>
-        {!configured && <div className="assistant-warning">Set <code>AI_PROVIDER_API_KEY</code> on the server. The key is never exposed to the browser.</div>}
+        {!configured && <div className="assistant-warning">{t('assistant.unavailable')}</div>}
         {!proposal && !busy && <div className="assistant-prompts">{prompts.map((prompt) => <button key={prompt} onClick={() => { onInput(prompt); onAsk(prompt); }} disabled={!configured}>{prompt}</button>)}</div>}
-        {busy && <div className="assistant-thinking"><LoaderCircle className="spin" size={20} /><span>Reading the current site, palette and design…</span></div>}
-        {error && <div className="assistant-error"><strong>Request not applied</strong><span>{error}</span></div>}
+        {busy && <div className="assistant-thinking"><LoaderCircle className="spin" size={20} /><span>{t('assistant.reading')}</span></div>}
+        {error && <div className="assistant-error"><strong>{t('assistant.notApplied')}</strong><span>{localizedDomainMessage(error, t)}</span></div>}
         {proposal && <div className="assistant-proposal" data-testid="assistant-proposal">
           <div className="assistant-answer"><small>{t('assistant.proposal')}</small><strong>{proposal.summary}</strong><p>{proposal.rationale}</p></div>
-          {proposal.actions.length > 0 && <div className="assistant-actions"><small>Changes awaiting confirmation</small>{proposal.actions.map((action, index) => <span key={`${action.type}-${index}`}><i>{index + 1}</i>{assistantActionLabel(action)}</span>)}</div>}
+          {proposal.actions.length > 0 && <div className="assistant-actions"><small>{t('assistant.awaitingConfirmation')}</small>{proposal.actions.map((action, index) => <span key={`${action.type}-${index}`}><i>{index + 1}</i>{assistantActionLabel(action, t)}</span>)}</div>}
           {proposal.warnings.length > 0 && <div className="assistant-proposal-warnings">{proposal.warnings.map((warning) => <span key={warning}>• {warning}</span>)}</div>}
-          <div className="assistant-confirm"><button onClick={onDismiss}>Dismiss</button>{proposal.requiresConfirmation ? <button className="confirm" onClick={onApply} disabled={busy}><ShieldCheck size={15} /> Apply validated changes</button> : <button className="confirm" onClick={onDismiss}>Done</button>}</div>
+          <div className="assistant-confirm"><button onClick={onDismiss}>{t('assistant.dismiss')}</button>{proposal.requiresConfirmation ? <button className="confirm" onClick={onApply} disabled={busy}><ShieldCheck size={15} /> {t('assistant.apply')}</button> : <button className="confirm" onClick={onDismiss}>{t('assistant.done')}</button>}</div>
         </div>}
       </div>
       <form onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
-        <textarea aria-label="Ask Growaf" value={input} onChange={(event) => onInput(event.target.value)} placeholder="Ask to add a species, compare variants, reduce water use…" maxLength={2000} />
-        <button aria-label="Send to AI assistant" type="submit" disabled={!configured || busy || !input.trim()}><Send size={17} /></button>
+        <textarea
+          aria-label={t('actions.ask')}
+          value={input}
+          onChange={(event) => onInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (configured && !busy && input.trim()) onAsk();
+          }}
+          placeholder={t('assistant.placeholder')}
+          maxLength={2000}
+        />
+        <button aria-label={t('assistant.send')} type="submit" disabled={!configured || busy || !input.trim()}><Send size={17} /></button>
       </form>
     </aside>
   );
 }
 
-function assistantActionLabel(action: AssistantAction) {
-  if (action.type === 'add_species') return `Add ${action.speciesIds.map(speciesLabel).join(', ')}`;
-  if (action.type === 'remove_species') return `Remove ${action.speciesIds.map(speciesLabel).join(', ')}`;
-  if (action.type === 'select_variant') return `Select layout ${humanize(action.variantId)}`;
-  if (action.type === 'set_timeline_year') return `Set succession year to ${action.year}`;
-  if (action.type === 'regenerate_layout') return 'Regenerate all three validated layouts';
-  if (action.type === 'recalculate_water_and_costs') return 'Recalculate irrigation and costs';
-  return `Open ${humanize(action.section)}`;
+function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
+  if (action.type === 'add_species') return t('assistant.actionAdd', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
+  if (action.type === 'remove_species') return t('assistant.actionRemove', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
+  if (action.type === 'select_variant') return t('assistant.actionSelect', { id: humanize(action.variantId) });
+  if (action.type === 'set_timeline_year') return t('assistant.actionYear', { year: action.year });
+  if (action.type === 'regenerate_layout') return t('assistant.actionRegenerate');
+  if (action.type === 'recalculate_water_and_costs') return t('assistant.actionRecalculate');
+  return t('assistant.actionOpen', { section: t(stepLabelKey(action.section)) });
 }
 
-function speciesLabel(id: string) {
-  return DESIGN_SPECIES_BY_ID.get(id)?.commonName ?? id;
+function speciesLabel(id: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const species = DESIGN_SPECIES_BY_ID.get(id);
+  return species ? speciesDisplayName(species, t) : id;
 }
 
 function SitePanel({
@@ -1186,7 +1605,7 @@ function SitePanel({
   drawMode,
   onDrawMode,
   onAnalyze,
-  onReset,
+  onClear,
   onUpdate,
   onImport,
   locationQuery,
@@ -1207,7 +1626,7 @@ function SitePanel({
   drawMode: DrawMode;
   onDrawMode: (mode: DrawMode) => void;
   onAnalyze: () => void;
-  onReset: () => void;
+  onClear: () => void;
   onUpdate: (site: SiteBoundary) => void;
   onImport: (file: File) => void;
   locationQuery: string;
@@ -1224,8 +1643,8 @@ function SitePanel({
 }) {
   const { t } = useI18n();
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [coordinateLat, setCoordinateLat] = useState('36.92100');
-  const [coordinateLng, setCoordinateLng] = useState('14.75320');
+  const [coordinateLat, setCoordinateLat] = useState('');
+  const [coordinateLng, setCoordinateLng] = useState('');
   const removePolygon = (kind: 'holes' | 'exclusions', index: number) => {
     if (!site) return;
     onUpdate({ ...site, [kind]: site[kind].filter((_, itemIndex) => itemIndex !== index) });
@@ -1235,112 +1654,146 @@ function SitePanel({
       <div className="panel-intro"><span className="eyebrow">{t('site.eyebrow')}</span><h1>{t('site.title')}</h1><p>{t('site.body')}</p></div>
       <div className="location-search">
         <Search size={16} />
-        <input aria-label="Search place or address" value={locationQuery} onChange={(event) => onLocationQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onLocationSearch()} />
+        <input aria-label={t('site.searchPlace')} placeholder={t('site.searchPlaceholder')} value={locationQuery} onChange={(event) => onLocationQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onLocationSearch()} />
         <button onClick={onLocationSearch}>{t('site.find')}</button>
         {locationResults.length > 0 && <div className="location-results">{locationResults.map((result) => <button key={result.id} onClick={() => onLocationSelect(result)}><strong>{result.displayName}</strong><small>{humanize(result.type)} · {result.coordinate.lat.toFixed(5)}, {result.coordinate.lng.toFixed(5)}</small></button>)}</div>}
       </div>
       <div className="coordinate-entry">
-        <label><span>Latitude</span><input aria-label="Coordinate latitude" inputMode="decimal" value={coordinateLat} onChange={(event) => setCoordinateLat(event.target.value)} /></label>
-        <label><span>Longitude</span><input aria-label="Coordinate longitude" inputMode="decimal" value={coordinateLng} onChange={(event) => setCoordinateLng(event.target.value)} /></label>
-        <button onClick={() => onCoordinate({ lat: Number(coordinateLat), lng: Number(coordinateLng) })}>{drawMode === 'idle' || drawMode.startsWith('edit') ? 'Centre map' : 'Add coordinate'}</button>
+        <label><span>{t('site.latitude')}</span><input aria-label={t('site.coordinateLatitude')} inputMode="decimal" value={coordinateLat} onChange={(event) => setCoordinateLat(event.target.value)} /></label>
+        <label><span>{t('site.longitude')}</span><input aria-label={t('site.coordinateLongitude')} inputMode="decimal" value={coordinateLng} onChange={(event) => setCoordinateLng(event.target.value)} /></label>
+        <button disabled={!coordinateLat.trim() || !coordinateLng.trim()} onClick={() => onCoordinate({ lat: Number(coordinateLat), lng: Number(coordinateLng) })}>{drawMode === 'idle' || drawMode.startsWith('edit') ? t('site.centreMap') : t('site.addCoordinate')}</button>
       </div>
       <div className="metric-grid">
-        <Metric label={t('site.geometry')} value={validation?.geometryType ?? '—'} detail={`${validation?.counts.polygons ?? 0} planting region${validation?.counts.polygons === 1 ? '' : 's'}`} />
-        <Metric label={t('site.constraints')} value={String((site?.holes.length ?? 0) + (site?.exclusions.length ?? 0) + (site?.paths.length ?? 0) + (site?.existingTrees.length ?? 0) + (profile?.satellite.existingVegetation.patches.length ?? 0))} detail="holes · paths · vegetation" />
-        <Metric label={t('site.grossArea')} value={validation ? `${formatNumber(validation.areaM2 / 10_000, 2)} ha` : 'checking'} detail="PostGIS geography" />
-        <Metric label={t('site.plantable')} value={validation ? `${formatNumber(validation.plantableAreaM2, 0)} m²` : 'checking'} detail={`${site?.setbackM ?? 0} m setback`} />
+        <Metric label={t('site.geometry')} value={validation?.geometryType ?? '—'} detail={t('site.regions', { count: validation?.counts.polygons ?? 0 })} />
+        <Metric label={t('site.constraints')} value={String((site?.holes.length ?? 0) + (site?.exclusions.length ?? 0) + (site?.paths.length ?? 0) + (site?.existingTrees.length ?? 0) + (profile?.satellite.existingVegetation.patches.length ?? 0))} detail={t('site.constraintsDetail')} />
+        <Metric label={t('site.grossArea')} value={validation ? `${formatNumber(validation.areaM2 / 10_000, 2)} ha` : site ? t('status.checking') : '—'} detail={t('site.areaSource')} />
+        <Metric label={t('site.plantable')} value={validation ? `${formatNumber(validation.plantableAreaM2, 0)} m²` : site ? t('status.checking') : '—'} detail={site ? t('site.setbackDetail', { value: site.setbackM }) : t('site.noBoundary')} />
       </div>
-      <div className="field-card">
+      <div className={`field-card ${site ? '' : 'empty'}`}>
         <div className="field-card-icon"><LocateFixed size={20} /></div>
-        <div><small>Selected field</small><strong>{site?.name ?? 'No site selected'}</strong><span>Ragusa Ibla, Sicily · real pilot boundary</span></div>
-        <button onClick={onReset}><RotateCcw size={15} /></button>
+        <div><small>{t(site ? 'site.selectedField' : 'site.noField')}</small><strong>{site?.name ?? t('site.noFieldTitle')}</strong><span>{site ? t('site.customBoundary') : t('site.noFieldBody')}</span></div>
+        {site ? <div className="field-card-actions">
+          <button className="danger" aria-label={t('site.clear')} title={t('site.clear')} onClick={onClear}><Trash2 size={15} /></button>
+        </div> : <div className="field-card-actions empty-actions">
+          <button className="draw-site-action" onClick={() => onDrawMode('site')}><PencilRuler size={15} /><span>{t('site.draw')}</span></button>
+        </div>}
       </div>
-      <div className={`site-validation ${validation?.valid ? 'valid' : 'pending'}`}>
+      {site && <div className={`site-validation ${validation?.valid ? 'valid' : 'pending'}`}>
         <ShieldCheck size={17} />
-        <span><strong>{validation?.valid ? t('site.validationValid') : t('site.validationPending')}</strong><small>{validation?.reason ?? 'Boundary, blockers and plantable area are checked server-side.'}</small></span>
-      </div>
+        <span><strong>{validation?.valid ? t('site.validationValid') : t('site.validationPending')}</strong><small>{validation?.valid ? t('site.validationReasonValid') : validation?.reason ? localizedDomainMessage(validation.reason, t) : t('site.validationFallback')}</small></span>
+      </div>}
       <div className="site-history-actions">
-        <button onClick={onUndo} disabled={!canUndo}><Undo2 size={14} /> Undo site</button>
-        <button onClick={onRedo} disabled={!canRedo}><Redo2 size={14} /> Redo site</button>
-        <button onClick={() => importInputRef.current?.click()}><Upload size={14} /> Import GeoJSON</button>
-        <input ref={importInputRef} className="visually-hidden" aria-label="Import site GeoJSON" type="file" accept=".geojson,.json,application/geo+json,application/json" onChange={(event) => {
+        <button onClick={onUndo} disabled={!canUndo}><Undo2 size={14} /> {t('site.undo')}</button>
+        <button onClick={onRedo} disabled={!canRedo}><Redo2 size={14} /> {t('site.redo')}</button>
+        <button onClick={() => importInputRef.current?.click()}><Upload size={14} /> {t('site.import')}</button>
+        <input ref={importInputRef} className="visually-hidden" aria-label={t('site.import')} type="file" accept=".geojson,.json,application/geo+json,application/json" onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) onImport(file);
           event.target.value = '';
         }} />
       </div>
-      <div className="site-tool-grid" aria-label="Site feature tools">
-        <button className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => onDrawMode('edit-constraints')}><MousePointer2 size={15} /><span>Edit features<small>drag vertices</small></span></button>
-        <button className={drawMode === 'hole' ? 'active' : ''} onClick={() => onDrawMode('hole')}><CircleOff size={15} /><span>Hole<small>pond / building</small></span></button>
-        <button className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => onDrawMode('exclusion')}><Layers3 size={15} /><span>Exclusion<small>no-plant area</small></span></button>
-        <button className={drawMode === 'path' ? 'active' : ''} onClick={() => onDrawMode('path')}><Route size={15} /><span>Path<small>management access</small></span></button>
-        <button className={drawMode === 'access-point' ? 'active' : ''} onClick={() => onDrawMode('access-point')}><LocateFixed size={15} /><span>Access<small>click gate point</small></span></button>
-        <button className={drawMode === 'water-point' ? 'active' : ''} onClick={() => onDrawMode('water-point')}><Droplets size={15} /><span>Water<small>click source point</small></span></button>
-        <button className={drawMode === 'existing-tree' ? 'active' : ''} onClick={() => onDrawMode('existing-tree')}><TreePine size={15} /><span>Existing tree<small>protected buffer</small></span></button>
+      <div className="site-tool-grid" aria-label={t('site.tools')}>
+        <button disabled={!site} className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => onDrawMode('edit-constraints')}><MousePointer2 size={15} /><span>{t('site.editFeatures')}<small>{t('site.dragVertices')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'hole' ? 'active' : ''} onClick={() => onDrawMode('hole')}><CircleOff size={15} /><span>{t('site.hole')}<small>{t('site.holeDetail')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => onDrawMode('exclusion')}><Layers3 size={15} /><span>{t('site.exclusion')}<small>{t('site.exclusionDetail')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'path' ? 'active' : ''} onClick={() => onDrawMode('path')}><Route size={15} /><span>{t('site.path')}<small>{t('site.pathDetail')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'access-point' ? 'active' : ''} onClick={() => onDrawMode('access-point')}><LocateFixed size={15} /><span>{t('site.access')}<small>{t('site.accessDetail')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'water-point' ? 'active' : ''} onClick={() => onDrawMode('water-point')}><Droplets size={15} /><span>{t('site.water')}<small>{t('site.waterDetail')}</small></span></button>
+        <button disabled={!site} className={drawMode === 'existing-tree' ? 'active' : ''} onClick={() => onDrawMode('existing-tree')}><TreePine size={15} /><span>{t('site.existingTree')}<small>{t('site.existingTreeDetail')}</small></span></button>
       </div>
       {site && <div className="site-parameters">
-        <label><span>Boundary setback<small>applied before tree placement</small></span><span><input aria-label="Boundary setback metres" type="number" min="0" max="30" step="0.1" value={site.setbackM} onChange={(event) => onUpdate({ ...site, setbackM: Number(event.target.value) })} /> m</span></label>
-        {site.paths.map((path) => <label key={path.id}><span>{path.name}<small>{path.points.length} vertices</small></span><span><input aria-label={`${path.name} width metres`} type="number" min="0.5" max="30" step="0.5" value={path.widthM} onChange={(event) => onUpdate({ ...site, paths: site.paths.map((item) => item.id === path.id ? { ...item, widthM: Number(event.target.value) } : item) })} /> m <button aria-label={`Remove ${path.name}`} onClick={() => onUpdate({ ...site, paths: site.paths.filter((item) => item.id !== path.id) })}><X size={12} /></button></span></label>)}
+        <label><span>{t('site.boundarySetback')}<small>{t('site.boundarySetbackDetail')}</small></span><span><input aria-label={t('site.boundarySetback')} type="number" min="0" max="30" step="0.1" value={site.setbackM} onChange={(event) => onUpdate({ ...site, setbackM: Number(event.target.value) })} /> m</span></label>
+        {site.paths.map((path) => <label key={path.id}><span>{path.name}<small>{t('site.vertices', { count: path.points.length })}</small></span><span><input aria-label={t('site.pathWidth', { name: path.name })} type="number" min="0.5" max="30" step="0.5" value={path.widthM} onChange={(event) => onUpdate({ ...site, paths: site.paths.map((item) => item.id === path.id ? { ...item, widthM: Number(event.target.value) } : item) })} /> m <button aria-label={t('site.removeFeature', { name: path.name })} onClick={() => onUpdate({ ...site, paths: site.paths.filter((item) => item.id !== path.id) })}><X size={12} /></button></span></label>)}
       </div>}
       {site && (site.holes.length + site.exclusions.length + site.accessPoints.length + site.waterPoints.length + site.existingTrees.length > 0) && <div className="site-feature-list">
-        {site.holes.map((_, index) => <span key={`hole-${index}`}><i>H{index + 1}</i><strong>Site hole</strong><button aria-label={`Remove hole ${index + 1}`} onClick={() => removePolygon('holes', index)}><X size={13} /></button></span>)}
-        {site.exclusions.map((_, index) => <span key={`exclusion-${index}`}><i>X{index + 1}</i><strong>No-plant exclusion</strong><button aria-label={`Remove exclusion ${index + 1}`} onClick={() => removePolygon('exclusions', index)}><X size={13} /></button></span>)}
-        {site.accessPoints.map((point) => <span key={point.id}><i>A</i><strong>{point.name}</strong><button aria-label={`Remove ${point.name}`} onClick={() => onUpdate({ ...site, accessPoints: site.accessPoints.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
-        {site.waterPoints.map((point) => <span key={point.id}><i>W</i><strong>{point.name}</strong><button aria-label={`Remove ${point.name}`} onClick={() => onUpdate({ ...site, waterPoints: site.waterPoints.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
-        {site.existingTrees.map((point) => <span key={point.id}><i>T</i><strong>{point.name}</strong><button aria-label={`Remove ${point.name}`} onClick={() => onUpdate({ ...site, existingTrees: site.existingTrees.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
+        {site.holes.map((_, index) => <span key={`hole-${index}`}><i>H{index + 1}</i><strong>{t('site.siteHole')}</strong><button aria-label={t('site.removeHole', { count: index + 1 })} onClick={() => removePolygon('holes', index)}><X size={13} /></button></span>)}
+        {site.exclusions.map((_, index) => <span key={`exclusion-${index}`}><i>X{index + 1}</i><strong>{t('site.noPlantExclusion')}</strong><button aria-label={t('site.removeExclusion', { count: index + 1 })} onClick={() => removePolygon('exclusions', index)}><X size={13} /></button></span>)}
+        {site.accessPoints.map((point) => <span key={point.id}><i>A</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, accessPoints: site.accessPoints.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
+        {site.waterPoints.map((point) => <span key={point.id}><i>W</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, waterPoints: site.waterPoints.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
+        {site.existingTrees.map((point) => <span key={point.id}><i>T</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, existingTrees: site.existingTrees.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
       </div>}
       <div className="callout"><CloudSun size={18} /><div><strong>{t('site.climateTitle')}</strong><span>{t('site.climateBody')}</span></div></div>
       <button className="button primary wide" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
-      <p className="fine-print">Execution decisions still require a field visit, soil sampling and water-source verification.</p>
+      <p className="fine-print">{t('site.executionNote')}</p>
     </div>
   );
 }
 
-function ProfilePanel({ profile, onAnalyze, onShowNdmi }: { profile: SiteProfile | null; onAnalyze: () => void; onShowNdmi: () => void }) {
+function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   const { t } = useI18n();
-  if (!profile) return <EmptyState icon={FlaskConical} title="No evidence profile yet" body="Analyse the selected field to retrieve terrain, climate, soil and Sentinel observations." action="Analyse field" onAction={onAnalyze} />;
+  return (
+    <div className="confirmation-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+      <section className="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="clear-site-title" aria-describedby="clear-site-description">
+        <span className="confirmation-mark"><Trash2 size={22} /></span>
+        <small>{t('site.clearEyebrow')}</small>
+        <h2 id="clear-site-title">{t('site.clearTitle')}</h2>
+        <p id="clear-site-description">{t('site.clearBody')}</p>
+        <div className="confirmation-actions">
+          <button onClick={onCancel}>{t('actions.cancel')}</button>
+          <button className="danger" onClick={onConfirm}><Trash2 size={15} />{t('site.clearConfirm')}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void }) {
+  const { t, locale } = useI18n();
+  if (!profile) return <EmptyState icon={FlaskConical} title={t('profile.emptyTitle')} body={t(hasSite ? 'profile.emptyBody' : 'profile.emptyNoSiteBody')} action={t(hasSite ? 'profile.analyse' : 'profile.openSite')} onAction={hasSite ? onAnalyze : onOpenSite} />;
   const optical = profile.satellite.optical.latest;
   const radar = profile.satellite.radar;
   const vegetation = profile.satellite.existingVegetation;
   return (
     <div className="panel-body">
-      <div className="panel-intro compact"><span className="eyebrow">{t('profile.eyebrow')}</span><h1>{profile.location.municipality ?? 'Ragusa Ibla'}</h1><p>{profile.location.displayName}</p></div>
+      <div className="panel-intro compact"><span className="eyebrow">{t('profile.eyebrow')}</span><h1>{profile.location.municipality ?? profile.location.region ?? profile.location.countryCode ?? t('profile.locationUnknown')}</h1><p>{profile.location.displayName}</p></div>
       <div className="metric-grid">
         <Metric label={t('profile.elevation')} value={`${formatNumber(profile.terrain.elevationMeanM, 0)} m`} detail={`${profile.terrain.elevationMinM}–${profile.terrain.elevationMaxM} m`} />
-        <Metric label={t('profile.slope')} value={`${profile.terrain.slopePercent}%`} detail={`${profile.terrain.aspectLabel} aspect`} />
-        <Metric label={t('profile.rain')} value={`${formatNumber(profile.climate.annualPrecipitationMm, 0)} mm`} detail="annual mean" />
-        <Metric label="ET₀" value={`${formatNumber(profile.climate.annualEt0Mm, 0)} mm`} detail={`aridity ${profile.climate.aridityIndex}`} />
-        <Metric label={t('profile.solar')} value={profile.solar.status === 'available' ? `${formatNumber(profile.solar.annualGlobalHorizontalKwhM2, 0)} kWh/m²` : '—'} detail="annual horizontal" />
-        <Metric label={t('profile.wind')} value={profile.solar.prevailingWindDirectionLabel ?? '—'} detail={profile.solar.meanWindSpeedMs === null ? 'unavailable' : `${profile.solar.meanWindSpeedMs} m/s mean`} />
+        <Metric label={t('profile.slope')} value={`${profile.terrain.slopePercent}%`} detail={t('profile.aspect', { value: localizedEnum(profile.terrain.aspectLabel, t) })} />
+        <Metric label={t('profile.rain')} value={`${formatNumber(profile.climate.annualPrecipitationMm, 0)} mm`} detail={t('profile.annualMean')} />
+        <Metric label="ET₀" value={`${formatNumber(profile.climate.annualEt0Mm, 0)} mm`} detail={t('profile.aridity', { value: profile.climate.aridityIndex })} />
+        <Metric label={t('profile.solar')} value={profile.solar.status === 'available' ? `${formatNumber(profile.solar.annualGlobalHorizontalKwhM2, 0)} kWh/m²` : '—'} detail={t('profile.annualHorizontal')} />
+        <Metric label={t('profile.wind')} value={profile.solar.prevailingWindDirectionLabel ? localizedEnum(profile.solar.prevailingWindDirectionLabel, t) : '—'} detail={profile.solar.meanWindSpeedMs === null ? t('status.unavailable') : t('profile.windMean', { value: profile.solar.meanWindSpeedMs })} />
       </div>
       <div className="evidence-card soil-card">
-        <div className="card-heading"><div><FlaskConical size={17} /><span><small>SoilGrids · 0–5 cm</small><strong>{profile.soil.textureClass ?? 'Field test required'}</strong></span></div><StatusPill status={profile.soil.status} /></div>
-        <div className="soil-values"><span><small>pH</small><strong>{profile.soil.ph ?? '—'}</strong></span><span><small>Sand</small><strong>{profile.soil.sandPercent ?? '—'}%</strong></span><span><small>Clay</small><strong>{profile.soil.clayPercent ?? '—'}%</strong></span><span><small>SOC</small><strong>{profile.soil.organicCarbonGKg ?? '—'}</strong></span></div>
+        <div className="card-heading"><div><FlaskConical size={17} /><span><small>SoilGrids · 0–5 cm</small><strong>{profile.soil.textureClass ? localizedEnum(profile.soil.textureClass, t) : t('profile.fieldTestRequired')}</strong></span></div><StatusPill status={profile.soil.status} /></div>
+        <div className="soil-values"><span><small>pH</small><strong>{profile.soil.ph ?? '—'}</strong></span><span><small>{t('profile.sand')}</small><strong>{profile.soil.sandPercent ?? '—'}%</strong></span><span><small>{t('profile.clay')}</small><strong>{profile.soil.clayPercent ?? '—'}%</strong></span><span><small>{t('profile.soc')}</small><strong>{profile.soil.organicCarbonGKg ?? '—'}</strong></span></div>
       </div>
       <div className="vegetation-audit" data-testid="existing-vegetation-audit">
-        <div className="card-heading"><div><TreePine size={17} /><span><small>Existing vegetation audit</small><strong>{vegetation.patches.length} protected {vegetation.patches.length === 1 ? 'patch' : 'patches'}</strong></span></div><StatusPill status={vegetation.suitability} /></div>
-        <div className="vegetation-metrics"><span><small>Detected cover</small><strong>{vegetation.detectedCoverPercent}%</strong></span><span><small>Protected area</small><strong>{vegetation.protectedCoverPercent}%</strong></span><span><small>NDVI dates</small><strong>{vegetation.analyzedOpticalScenes}</strong></span><span><small>Tree maps</small><strong>{vegetation.annualLandCoverYears.length + 1 + Number(vegetation.woodyVegetationLayerAvailable)}</strong></span></div>
-        <p>{vegetation.conclusion}</p>
-        {vegetation.patches.length > 0 && <div className="vegetation-patches">{vegetation.patches.slice(0, 4).map((patch, index) => <span key={patch.id}><i>{index + 1}</i><strong>NDVI {patch.currentNdvi.toFixed(2)}</strong><small>{patch.confidence} confidence · {patch.protectedAreaM2.toFixed(0)} m² protected</small></span>)}</div>}
+        <div className="card-heading"><div><TreePine size={17} /><span><small>{t('profile.vegetationAudit')}</small><strong>{t('profile.protectedAreas', { count: vegetation.patches.length })}</strong></span></div><StatusPill status={vegetation.suitability} /></div>
+        <div className="vegetation-metrics"><span><small>{t('profile.detectedCover')}</small><strong>{vegetation.detectedCoverPercent}%</strong></span><span><small>{t('profile.protectedArea')}</small><strong>{vegetation.protectedCoverPercent}%</strong></span><span><small>{t('profile.ndviDates')}</small><strong>{vegetation.analyzedOpticalScenes}</strong></span><span><small>{t('profile.treeMaps')}</small><strong>{vegetation.annualLandCoverYears.length + 1 + Number(vegetation.woodyVegetationLayerAvailable)}</strong></span></div>
+        <p>{localizedDomainMessage(vegetation.conclusion, t)}</p>
+        {vegetation.patches.length > 0 && <div className="vegetation-patches">{vegetation.patches.slice(0, 4).map((patch, index) => <span key={patch.id}><i>{index + 1}</i><strong>NDVI {patch.currentNdvi.toFixed(2)}</strong><small>{t('profile.patchDetail', { confidence: t(`status.${patch.confidence}`), area: patch.protectedAreaM2.toFixed(0) })}</small></span>)}</div>}
       </div>
       <div className="satellite-card">
-        <div className="satellite-image">{profile.satellite.optical.ndmiPreviewUrl ? <img src={profile.satellite.optical.ndmiPreviewUrl} alt="Sentinel-2 NDMI field crop" /> : <Satellite size={30} />}</div>
+        <div className="satellite-image">{profile.satellite.optical.ndmiPreviewUrl ? <img src={profile.satellite.optical.ndmiPreviewUrl} alt={t('profile.ndmiAlt')} /> : <Satellite size={30} />}</div>
         <div className="satellite-copy">
-          <div className="card-heading"><div><Satellite size={17} /><span><small>Sentinel field water</small><strong>{profile.satellite.status}</strong></span></div><StatusPill status={profile.satellite.status} /></div>
-          {optical ? <><p>Clear pixels from {shortDate(optical.acquiredAt)} · {optical.fieldCloudPercent}% field cloud.</p><div className="index-row"><Index label="NDVI" value={optical.ndvi.mean} /><Index label="NDMI" value={optical.ndmi.mean} /><Index label="NDWI" value={optical.ndwi.mean} /></div></> : <p>No clear Sentinel-2 observation was available.</p>}
-          <div className="radar-line"><Waves size={15} /><span>Sentinel-1: <strong>{humanize(radar.surfaceMoistureSignal)}</strong>{radar.latestVvAnomalyDb !== null ? ` · ${signed(radar.latestVvAnomalyDb)} dB` : ''}</span></div>
-          <button className="text-button" onClick={onShowNdmi}>Show water layers on map <ChevronRight size={14} /></button>
+          <div className="card-heading"><div><Satellite size={17} /><span><small>{t('profile.sentinelWater')}</small><strong>{translatedStatus(profile.satellite.status, t)}</strong></span></div><StatusPill status={profile.satellite.status} /></div>
+          {optical ? <><p>{t('profile.clearPixels', { date: shortDate(optical.acquiredAt, locale), cloud: optical.fieldCloudPercent })}</p><div className="index-row"><Index label="NDVI" value={optical.ndvi.mean} /><Index label="NDMI" value={optical.ndmi.mean} /><Index label="NDWI" value={optical.ndwi.mean} /></div></> : <p>{t('profile.noClearSentinel')}</p>}
+          <div className="radar-line"><Waves size={15} /><span>Sentinel-1: <strong>{localizedEnum(radar.surfaceMoistureSignal, t)}</strong>{radar.latestVvAnomalyDb !== null ? ` · ${signed(radar.latestVvAnomalyDb)} dB` : ''}</span></div>
+          <button className="text-button" onClick={onShowNdmi}>{t('profile.showWaterLayers')} <ChevronRight size={14} /></button>
         </div>
       </div>
-      {profile.warnings.length > 0 && <div className="warning-list">{profile.warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div>}
-      <div className="source-list">
-        {[profile.terrain.evidence, profile.climate.evidence, profile.solar.evidence, profile.soil.evidence, ...profile.satellite.existingVegetation.evidence, ...profile.satellite.evidence].map((item) => <a key={`${item.source}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span>{item.source}</span><small>{item.version} · {item.resolution}</small></a>)}
+      {profile.warnings.length > 0 && <div className="warning-list">{profile.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
+      <div className="source-traceability" data-testid="evidence-traceability">
+        <div className="card-heading"><div><Database size={17} /><span><small>{t('evidence.traceability')}</small><strong>{t('evidence.howUsed')}</strong></span></div></div>
+        {[profile.terrain.evidence, profile.climate.evidence, profile.solar.evidence, profile.soil.evidence, ...profile.satellite.existingVegetation.evidence, ...profile.satellite.evidence].map((item, index) => {
+          const usageKey = evidenceUsageKey(item);
+          return <article className="evidence-use-card" key={`${item.source}-${item.version}-${index}`}>
+            <header><strong>{item.source}</strong><span className={`evidence-confidence ${item.confidence}`}>{t(`status.${item.confidence}`)}</span></header>
+            <dl>
+              <div><dt>{t('evidence.dataUsed')}</dt><dd>{t(`${usageKey}.data`)}</dd></div>
+              <div><dt>{t('evidence.calculation')}</dt><dd>{t(`${usageKey}.calculation`)}</dd></div>
+              <div><dt>{t('evidence.decision')}</dt><dd>{t(`${usageKey}.decision`)}</dd></div>
+            </dl>
+            <footer><span>{item.version}</span><span>{item.resolution ?? t('evidence.resolutionUnavailable')}</span><time dateTime={item.observedAt}>{shortDate(item.observedAt, locale)}</time></footer>
+          </article>;
+        })}
       </div>
     </div>
   );
 }
 
-function SpeciesPanel({ recommendations, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
+function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<CatalogueFilters>({ treeOnly: true, globUntOnly: false, designReadyOnly: false });
@@ -1351,20 +1804,22 @@ function SpeciesPanel({ recommendations, selectedIds, onToggle, onGenerate, quer
   const minimumSpecies = design.system === 'syntropic' ? 3 : design.system === 'monoculture' ? 1 : 2;
   const selectedOptions = recommendations.map((item) => item.species).filter((item) => selectedIds.includes(item.id) && item.treeLike && item.productiveFromYear !== null);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
+  const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
+  const machineEnvelope = machineryEnvelope(design.machinery);
   const objectives = [
-    { key: 'production', label: 'Food & production' },
-    { key: 'biodiversity', label: 'Biodiversity' },
-    { key: 'nativeHabitat', label: 'Native habitat' },
-    { key: 'waterResilience', label: 'Water resilience' },
-    { key: 'lowMaintenance', label: 'Low maintenance' },
+    { key: 'production', label: t('species.objective.production') },
+    { key: 'biodiversity', label: t('species.objective.biodiversity') },
+    { key: 'nativeHabitat', label: t('species.objective.nativeHabitat') },
+    { key: 'waterResilience', label: t('species.objective.waterResilience') },
+    { key: 'lowMaintenance', label: t('species.objective.lowMaintenance') },
   ] as const;
   return (
     <div className="panel-body">
       <div className="panel-intro compact"><span className="eyebrow">{t('species.eyebrow')}</span><h1>{t('species.title')}</h1><p>{t('species.selected', { count: selectedIds.length })}</p></div>
-      {recommendations.length > 0 && <div className="safety-gate" data-testid="species-safety-gate"><ShieldCheck size={18} /><span><small>Jurisdictional safety gate</small><strong>{blocked.length} blocked · {monitored.length} monitored</strong><p>Blocked taxa cannot enter generated layouts. Monitored taxa are capped at conditional and require containment.</p></span>{blocked.length > 0 && <button onClick={() => setInspectedId(blocked[0].species.id)}>Inspect</button>}</div>}
+      {recommendations.length > 0 && <div className="safety-gate" data-testid="species-safety-gate"><ShieldCheck size={18} /><span><small>{t('species.safetyEyebrow')}</small><strong>{t('species.safetyCount', { blocked: blocked.length, monitored: monitored.length })}</strong><p>{t('species.safetyBody')}</p></span>{blocked.length > 0 && <button onClick={() => setInspectedId(blocked[0].species.id)}>{t('actions.inspect')}</button>}</div>}
       <div className="objective-panel" data-testid="design-objectives">
-        <div className="card-heading"><div><Sprout size={17} /><span><small>Priority model</small><strong>Design objectives</strong></span></div><small>0–100</small></div>
-        <p>These priorities change suitability weights, palette order and composition targets.</p>
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
+        <p>{t('species.objectivesBody')}</p>
         {objectives.map((objective) => <label className="objective-control" key={objective.key}><span><b>{objective.label}</b><output>{design.objectives[objective.key]}</output></span><input aria-label={objective.label} type="range" min="0" max="100" step="5" value={design.objectives[objective.key]} onChange={(event) => update({ objectives: { ...design.objectives, [objective.key]: Number(event.target.value) } })} /></label>)}
       </div>
       <div className="design-config" data-testid="design-config">
@@ -1380,16 +1835,16 @@ function SpeciesPanel({ recommendations, selectedIds, onToggle, onGenerate, quer
           <option value="windbreak">{t('system.windbreak')}</option>
           <option value="boundary-buffer">{t('system.boundary')}</option>
         </select></label>
-        <p className="design-explainer">{designSystemDescription(design.system)}</p>
+        <p className="design-explainer">{t(designSystemDescriptionKey(design.system))}</p>
         <div className="extent-switch" role="group" aria-label={t('design.extent')}>
           <button className={design.extent === 'full-field' ? 'active' : ''} disabled={design.system === 'windbreak' || design.system === 'boundary-buffer'} onClick={() => update({ extent: 'full-field' })}>{t('design.fullField')}</button>
           <button className={design.extent === 'perimeter-band' ? 'active' : ''} disabled={design.system === 'windbreak'} onClick={() => update({ extent: 'perimeter-band' })}>{t('design.perimeterOnly')}</button>
           {design.system === 'windbreak' && <button className="active" disabled>{t('design.selectedEdges')}</button>}
         </div>
-        {design.extent !== 'full-field' && <label className="range-control"><span><b>{t('design.boundaryBand')}</b><output>{design.perimeterBandM} m</output></span><input aria-label="Perimeter band width" type="range" min="3" max="20" step="1" value={design.perimeterBandM} onChange={(event) => update({ perimeterBandM: Number(event.target.value) })} /></label>}
-        {design.system === 'alley-cropping' && <label className="range-control"><span><b>{t('design.cropAlley')}</b><output>{design.cropAlleyWidthM} m</output></span><input aria-label="Crop alley width" type="range" min="6" max="30" step="1" value={design.cropAlleyWidthM} onChange={(event) => update({ cropAlleyWidthM: Number(event.target.value) })} /></label>}
-        {design.system === 'windbreak' && <label className="range-control"><span><b>{t('design.windbreakRows')}</b><output>{design.windbreakRows}</output></span><input aria-label="Windbreak rows" type="range" min="1" max="5" step="1" value={design.windbreakRows} onChange={(event) => update({ windbreakRows: Number(event.target.value) })} /></label>}
-        {design.system === 'monoculture' && <label className="select-label"><span>{t('design.singleCrop')}</span><select aria-label="Monoculture species" value={design.monocultureSpeciesId ?? ''} onChange={(event) => update({ monocultureSpeciesId: event.target.value || null })}><option value="">Best selected productive species</option>{selectedOptions.map((species) => <option key={species.id} value={species.id}>{species.commonName}</option>)}</select></label>}
+        {design.extent !== 'full-field' && <label className="range-control"><span><b>{t('design.boundaryBand')}</b><output>{design.perimeterBandM} m</output></span><input aria-label={t('design.boundaryBand')} type="range" min="3" max="20" step="1" value={design.perimeterBandM} onChange={(event) => update({ perimeterBandM: Number(event.target.value) })} /></label>}
+        {design.system === 'alley-cropping' && <label className="range-control"><span><b>{t('design.cropAlley')}</b><output>{design.cropAlleyWidthM} m</output></span><input aria-label={t('design.cropAlley')} type="range" min="6" max="30" step="1" value={design.cropAlleyWidthM} onChange={(event) => update({ cropAlleyWidthM: Number(event.target.value) })} /></label>}
+        {design.system === 'windbreak' && <label className="range-control"><span><b>{t('design.windbreakRows')}</b><output>{design.windbreakRows}</output></span><input aria-label={t('design.windbreakRows')} type="range" min="1" max="5" step="1" value={design.windbreakRows} onChange={(event) => update({ windbreakRows: Number(event.target.value) })} /></label>}
+        {design.system === 'monoculture' && <label className="select-label"><span>{t('design.singleCrop')}</span><select aria-label={t('design.singleCrop')} value={design.monocultureSpeciesId ?? ''} onChange={(event) => update({ monocultureSpeciesId: event.target.value || null })}><option value="">{t('design.bestProductive')}</option>{selectedOptions.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)}</option>)}</select></label>}
         <label className="select-label"><span>{t('design.orientation')}</span><select aria-label={t('design.orientation')} value={design.orientationObjective} onChange={(event) => update({ orientationObjective: event.target.value as DesignConfiguration['orientationObjective'] })}>
           <option value="solar-crop">{t('orientation.solar')}</option>
           <option value="contour">{t('orientation.contour')}</option>
@@ -1397,120 +1852,278 @@ function SpeciesPanel({ recommendations, selectedIds, onToggle, onGenerate, quer
           <option value="wind-protection">{t('orientation.wind')}</option>
           <option value="custom">{t('orientation.custom')}</option>
         </select></label>
-        {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label="Custom row bearing" type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
+        {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label={t('design.bearing')} type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
       </div>
-      <div className="catalogue-search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch(filters)} aria-label="Search scientific catalogue" /><button onClick={() => onSearch(filters)}>Search</button></div>
-      <div className="catalogue-filters" aria-label="Catalogue filters">{([
-        ['treeOnly', 'Trees'], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', 'Design-ready'],
+      <div className="machinery-config" data-testid="machinery-config">
+        <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.eyebrow')}</small><strong>{t('machinery.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('machinery.enabled')} type="checkbox" checked={design.machinery.enabled} onChange={(event) => updateMachinery({ enabled: event.target.checked })} /><span>{t('machinery.enabled')}</span></label></div>
+        <p>{t('machinery.body')}</p>
+        <label className="select-label"><span>{t('machinery.preset')}</span><select aria-label={t('machinery.preset')} value={design.machinery.presetId} disabled={!design.machinery.enabled} onChange={(event) => update({ machinery: machineryConfigurationFromPreset(event.target.value as DesignConfiguration['machinery']['presetId']) })}>{MACHINERY_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(`machinery.category.${preset.category}`)} · {preset.referenceModel}</option>)}</select></label>
+        <div className="machinery-dimensions">
+          {([
+            ['widthM', 'machinery.width'],
+            ['lengthM', 'machinery.length'],
+            ['turningRadiusM', 'machinery.turningRadius'],
+            ['implementWidthM', 'machinery.implementWidth'],
+            ['safetyClearanceM', 'machinery.safetyClearance'],
+          ] as const).map(([key, label]) => <label key={key}><span>{t(label)}</span><span><input aria-label={t(label)} type="number" min="0.1" max="12" step="0.05" disabled={!design.machinery.enabled} value={design.machinery[key]} onChange={(event) => updateMachinery({ [key]: Number(event.target.value) })} /> m</span></label>)}
+        </div>
+        <div className="machinery-result"><span><small>{t('machinery.requiredCorridor')}</small><strong>{formatNumber(machineEnvelope.corridorWidthM, 2)} m</strong></span><span><small>{t('machinery.headland')}</small><strong>{formatNumber(machineEnvelope.headlandDepthM, 2)} m</strong></span></div>
+        <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.machinery.protectPipeCrossings} disabled={!design.machinery.enabled} onChange={(event) => updateMachinery({ protectPipeCrossings: event.target.checked })} /><span><strong>{t('machinery.pipeCrossings')}</strong><small>{t('machinery.pipeCrossingsBody')}</small></span></label>
+      </div>
+      <div className="catalogue-search"><Search size={16} /><input value={query} placeholder={t('species.searchPlaceholder')} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch(filters)} aria-label={t('species.searchCatalogue')} /><button onClick={() => onSearch(filters)}>{t('actions.search')}</button></div>
+      <div className="catalogue-filters" aria-label={t('species.catalogueFilters')}>{([
+        ['treeOnly', t('species.filterTrees')], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', t('species.filterDesignReady')],
       ] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.checked })} /><span>{label}</span></label>)}</div>
-      <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> Switchboard taxa</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> GlobUNT records</span></div>
-      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>Design-ready</small>}{item.globUnt && <small>GlobUNT</small>}</span></span>)}</div>}
-      {!recommendations.length ? <div className="inline-empty">Complete field evidence to rank the design-ready palette.</div> : <div className="species-list">{visible.map((item) => {
+      <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
+      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}</span></span>)}</div>}
+      {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
         const selected = selectedIds.includes(item.species.id);
         return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>
-          <button className="species-open" onClick={() => setInspectedId(item.species.id)} aria-label={`Inspect ${item.species.commonName}`}>
+          <button className="species-open" onClick={() => setInspectedId(item.species.id)} aria-label={t('species.inspect', { name: speciesDisplayName(item.species, t) })}>
             <span className="species-swatch" style={{ background: item.species.color }} />
-            <span className="species-name"><strong>{item.species.commonName}</strong><i>{item.species.scientificName}</i><small>{item.species.stratum} · {item.species.succession} · {item.species.roles.slice(0, 2).join(' / ')}</small></span>
+            <span className="species-name"><strong>{speciesDisplayName(item.species, t)}</strong><i>{item.species.scientificName}</i><small>{localizedEnum(item.species.stratum, t)} · {localizedEnum(item.species.succession, t)} · {item.species.roles.slice(0, 2).map((role) => localizedEnum(role, t)).join(' / ')}</small></span>
             <span className="species-score"><strong>{item.score}</strong><small>/100</small></span>
           </button>
-          <button className="select-check" onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={`${selected ? 'Remove' : 'Add'} ${item.species.commonName}`}>{selected && <Check size={13} />}</button>
+          <button className="select-check" onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={t(selected ? 'species.remove' : 'species.add', { name: speciesDisplayName(item.species, t) })}>{selected && <Check size={13} />}</button>
         </div>;
       })}</div>}
       {inspected && <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
-        <header><span className="species-swatch" style={{ background: inspected.species.color }} /><span><small>{humanize(inspected.status)} · score {inspected.score}/100</small><strong>{inspected.species.commonName}</strong><i>{inspected.species.scientificName}</i></span>{inspected.status === 'blocked' && <CircleOff size={20} />}</header>
-        <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{component.label}</strong><small>{Math.round(component.weight * 100)}% weight · {component.status}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{component.explanation}</p></div>)}</div>
-        {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>Checks before use</strong>{inspected.mitigations.map((item) => <p key={item}>• {item}</p>)}</div>}
-        <div className="species-sources"><strong>Linked evidence</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.join(', ')}</small></a>)}</div>
+        <header><span className="species-swatch" style={{ background: inspected.species.color }} /><span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>{inspected.status === 'blocked' && <CircleOff size={20} />}</header>
+        <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
+        {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
+        <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
       </div>}
       <button className="button primary wide sticky-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
     </div>
   );
 }
 
-function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedSpecies, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onCalculate }: { variants: LayoutVariant[]; selectedVariant: LayoutVariant | null; onSelect: (id: string) => void; selectedTree: TreeInstance | null; selectedSpecies: DesignSpecies[]; treeSpeciesId: string; onTreeSpecies: (id: string) => void; drawMode: DrawMode; onMode: (mode: DrawMode) => void; onDelete: () => void; onLock: () => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onCalculate: () => void }) {
+function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, onTreeSelect, selectedSpecies, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies }: { variants: LayoutVariant[]; selectedVariant: LayoutVariant | null; onSelect: (id: string) => void; selectedTree: TreeInstance | null; onTreeSelect: (id: string | null) => void; selectedSpecies: DesignSpecies[]; treeSpeciesId: string; onTreeSpecies: (id: string) => void; drawMode: DrawMode; onMode: (mode: DrawMode) => void; onDelete: () => void; onLock: () => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onRegenerate: () => void; onCalculate: () => void; onOpenSpecies: () => void }) {
   const { t } = useI18n();
-  if (!selectedVariant) return <EmptyState icon={TreePine} title="No system generated" body="Select a compatible species palette, then generate reproducible syntropic arrangements clipped to the site." action="Open species" onAction={() => undefined} />;
+  if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
   const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
+  const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
   return (
     <div className="panel-body">
-      <div className="panel-intro compact"><span className="eyebrow">{t('layout.eyebrow')}</span><h1>{selectedVariant.name}</h1><p>{selectedVariant.description}</p></div>
-      <div className="variant-tabs">{variants.map((variant, index) => <button key={variant.id} className={variant.id === selectedVariant.id ? 'active' : ''} onClick={() => onSelect(variant.id)}><span>0{index + 1}</span><strong>{variant.name}</strong><small>score {variant.score}</small></button>)}</div>
+      <div className="panel-intro compact"><span className="eyebrow">{t('layout.eyebrow')}</span><h1>{localizedVariantName(selectedVariant, Math.max(0, variants.findIndex((variant) => variant.id === selectedVariant.id)), t)}</h1><p>{localizedVariantDescription(selectedVariant, t)}</p></div>
+      <div className="variant-tabs">{variants.map((variant, index) => <button key={variant.id} className={variant.id === selectedVariant.id ? 'active' : ''} onClick={() => onSelect(variant.id)}><span>0{index + 1}</span><strong>{localizedVariantName(variant, index, t)}</strong><small>{t('layout.score', { score: variant.score })}</small></button>)}</div>
       <div className="metric-grid">
-        <Metric label={t('layout.plants')} value={formatNumber(selectedVariant.metrics.totalTrees, 0)} detail={`${selectedVariant.metrics.speciesCount} species`} />
-        <Metric label={t('layout.density')} value={formatNumber(selectedVariant.metrics.treesPerHectare, 0)} detail="plants / ha" />
-        <Metric label="Canopy Y10" value={`${selectedVariant.metrics.projectedCanopyYear10Percent}%`} detail="projected cover" />
-        <Metric label="Canopy Y20" value={`${selectedVariant.metrics.projectedCanopyYear20Percent}%`} detail="projected cover" />
-        <Metric label={t('layout.openInterior')} value={`${formatNumber(selectedVariant.metrics.cropInteriorAreaM2, 0)} m²`} detail={selectedVariant.design.extent === 'full-field' ? 'between woody rows' : 'kept free of new trees'} />
-        <Metric label={t('layout.rowBearing')} value={`${selectedVariant.directionDegrees.toFixed(0)}°`} detail={humanize(selectedVariant.design.orientationObjective)} />
+        <Metric label={t('layout.plants')} value={formatNumber(selectedVariant.metrics.totalTrees, 0)} detail={t('layout.speciesCount', { count: selectedVariant.metrics.speciesCount })} />
+        <Metric label={t('layout.density')} value={formatNumber(selectedVariant.metrics.treesPerHectare, 0)} detail={t('layout.plantsPerHa')} />
+        <Metric label={t('layout.canopyY10')} value={`${selectedVariant.metrics.projectedCanopyYear10Percent}%`} detail={t('layout.projectedCover')} />
+        <Metric label={t('layout.canopyY20')} value={`${selectedVariant.metrics.projectedCanopyYear20Percent}%`} detail={t('layout.projectedCover')} />
+        <Metric label={t('layout.openInterior')} value={`${formatNumber(selectedVariant.metrics.cropInteriorAreaM2, 0)} m²`} detail={t(selectedVariant.design.extent === 'full-field' ? 'layout.betweenRows' : 'layout.keptFree')} />
+        <Metric label={t('layout.rowBearing')} value={`${selectedVariant.directionDegrees.toFixed(0)}°`} detail={localizedEnum(selectedVariant.design.orientationObjective, t)} />
       </div>
       <div className="composition-card" data-testid="layout-composition">
-        <div className="card-heading"><div><Layers3 size={17} /><span><small>Objective check</small><strong>Planned composition</strong></span></div></div>
+        <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.objectiveCheck')}</small><strong>{t('layout.composition')}</strong></span></div></div>
         <div className="composition-targets">{[
-          ['Productive', selectedVariant.composition.productivePercent, selectedVariant.composition.targets.productivePercent],
-          ['Native Italy', selectedVariant.composition.nativePercent, selectedVariant.composition.targets.nativePercent],
-          ['Nitrogen fixers', selectedVariant.composition.nitrogenFixerPercent, selectedVariant.composition.targets.nitrogenFixerPercent],
-        ].map(([label, value, target]) => <div key={String(label)}><span><strong>{label}</strong><small>{value}% actual · {target}% target</small></span><div><i className={Number(value) >= Number(target) ? 'met' : ''} style={{ width: `${Math.min(100, Number(value))}%` }} /><b style={{ left: `${Math.min(100, Number(target))}%` }} /></div></div>)}</div>
-        <div className="composition-groups"><span><small>Strata</small><strong>{Object.entries(selectedVariant.composition.byStratum).map(([key, value]) => `${humanize(key)} ${value}`).join(' · ')}</strong></span><span><small>Succession</small><strong>{Object.entries(selectedVariant.composition.bySuccession).map(([key, value]) => `${humanize(key)} ${value}`).join(' · ')}</strong></span></div>
+          [t('layout.productive'), selectedVariant.composition.productivePercent, selectedVariant.composition.targets.productivePercent],
+          [t('layout.nativeSite'), selectedVariant.composition.nativePercent, selectedVariant.composition.targets.nativePercent],
+          [t('layout.nitrogenFixers'), selectedVariant.composition.nitrogenFixerPercent, selectedVariant.composition.targets.nitrogenFixerPercent],
+        ].map(([label, value, target]) => {
+          const verified = typeof value === 'number';
+          return <div key={String(label)} className={verified ? '' : 'unverified'}><span><strong>{label}</strong><small>{verified ? t('layout.actualTarget', { value, target: Number(target) }) : t('layout.nativeUnverified')}</small></span><div><i className={verified && value >= Number(target) ? 'met' : ''} style={{ width: `${verified ? Math.min(100, value) : 0}%` }} />{verified && <b style={{ left: `${Math.min(100, Number(target))}%` }} />}</div></div>;
+        })}</div>
+        <div className="composition-groups"><span><small>{t('layout.strata')}</small><strong>{Object.entries(selectedVariant.composition.byStratum).map(([key, value]) => `${localizedEnum(key, t)} ${value}`).join(' · ')}</strong></span><span><small>{t('layout.succession')}</small><strong>{Object.entries(selectedVariant.composition.bySuccession).map(([key, value]) => `${localizedEnum(key, t)} ${value}`).join(' · ')}</strong></span></div>
       </div>
       <div className="solar-assessment">
-        <div className="card-heading"><div><CloudSun size={17} /><span><small>{t('layout.solarCheck')}</small><strong>{selectedVariant.solar.status === 'available' ? t('layout.cropAccess', { value: selectedVariant.solar.cropSolarAccessPercent ?? 0 }) : 'Radiation unavailable'}</strong></span></div><StatusPill status={selectedVariant.solar.confidence} /></div>
+        <div className="card-heading"><div><CloudSun size={17} /><span><small>{t('layout.solarCheck')}</small><strong>{selectedVariant.solar.status === 'available' ? t('layout.cropAccess', { value: selectedVariant.solar.cropSolarAccessPercent ?? 0 }) : t('layout.radiationUnavailable')}</strong></span></div><StatusPill status={selectedVariant.solar.confidence} /></div>
         {selectedVariant.solar.status === 'available' && <div className="solar-metrics"><span><small>{t('layout.terrainPlane')}</small><strong>{formatNumber(selectedVariant.solar.terrainPlaneKwhM2Year ?? 0, 0)} kWh/m²·yr</strong></span><span><small>{t('layout.shadeLoss')}</small><strong>{selectedVariant.solar.shadedCropAreaPercent}%</strong></span><span><small>{t('layout.winterSun')}</small><strong>{selectedVariant.solar.winterSunHoursPerDay} h/day</strong></span><span><small>{t('layout.summerSun')}</small><strong>{selectedVariant.solar.summerSunHoursPerDay} h/day</strong></span></div>}
-        <p>{selectedVariant.solar.method}</p>
-        {selectedVariant.solar.limitations.slice(0, 1).map((item) => <small className="solar-limitation" key={item}>{item}</small>)}
+        <p>{t('layout.solarMethod')}</p>
+        {selectedVariant.solar.limitations.length > 0 && <small className="solar-limitation">{t('layout.solarLimitation')}</small>}
       </div>
-      <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> Undo</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> Redo</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> Add</button></div>
-      <label className="select-label"><span>Species for manual additions</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{species.commonName} — {species.stratum}</option>)}</select></label>
-      {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>Selected individual</small><strong>{selectedTreeSpecies?.commonName ?? selectedTree.speciesId}</strong><span>{selectedTree.locked ? 'Position locked' : 'Position editable'} · planted Y{selectedTree.plantedYear}</span></div><div className="tree-actions"><button onClick={onLock}>{selectedTree.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>Move</button><button className="danger" onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">Select a crown on the map to edit that individual.</div>}
-      {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div>}
+      <div className="generation-audit" data-testid="generation-audit">
+        <div className="card-heading"><div><Sparkles size={17} /><span><small>{t('layout.generationAudit')}</small><strong>{t(selectedVariant.generation.mode === 'partial' ? 'layout.partialGeneration' : 'layout.fullGeneration')}</strong></span></div><StatusPill status={selectedVariant.generation.conflicts.length ? 'review-required' : 'available'} /></div>
+        <div className="generation-audit-grid"><span><small>{t('layout.seed')}</small><strong>{selectedVariant.generation.seed}</strong></span><span><small>{t('layout.engine')}</small><strong>{selectedVariant.generation.engineVersion}</strong></span><span><small>{t('layout.lockedPreserved')}</small><strong>{selectedVariant.generation.lockedTreeCount}</strong></span></div>
+      </div>
+      {selectedVariant.machinery.enabled && <div className="machinery-plan" data-testid="machinery-plan">
+        <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.planEyebrow')}</small><strong>{t('machinery.planTitle')}</strong></span></div><StatusPill status={selectedVariant.machinery.clearanceSatisfied ? 'available' : 'review-required'} /></div>
+        <div className="machinery-result"><span><small>{t('machinery.corridors')}</small><strong>{selectedVariant.machinery.corridors.length}</strong></span><span><small>{t('machinery.turningAreas')}</small><strong>{selectedVariant.machinery.turningAreas.length}</strong></span><span><small>{t('machinery.reservedArea')}</small><strong>{formatNumber(selectedVariant.machinery.reservedAreaM2, 0)} m²</strong></span></div>
+        <p>{t('machinery.planBody', { corridor: formatNumber(selectedVariant.machinery.requiredCorridorWidthM, 2), headland: formatNumber(selectedVariant.machinery.headlandDepthM, 2) })}</p>
+      </div>}
+      <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
+      <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
+      <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{selectedVariant.trees.map((tree) => <option key={tree.id} value={tree.id}>{tree.id}</option>)}</select></label>
+      {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span>{t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
+      {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
       <button className="button primary wide" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
     </div>
   );
 }
 
-function WaterPanel({ irrigation, profile, onCalculate, onCosts, onShowZones }: { irrigation: IrrigationEstimate | null; profile: SiteProfile | null; onCalculate: () => void; onCosts: () => void; onShowZones: () => void }) {
+function WaterPanel({ site, irrigation, configuration, onConfiguration, profile, canCalculate, onCalculate, onPrepare, onCosts, onShowZones, editingIrrigation, onEditIrrigation }: { site: SiteBoundary | null; irrigation: IrrigationEstimate | null; configuration: IrrigationConfiguration; onConfiguration: (value: IrrigationConfiguration) => void; profile: SiteProfile | null; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onCosts: () => void; onShowZones: () => void; editingIrrigation: boolean; onEditIrrigation: () => void }) {
   const { t } = useI18n();
-  if (!irrigation) return <EmptyState icon={Droplets} title="Irrigation not sized" body="Generate a layout to calculate FAO crop demand, installed drip infrastructure, annual water and pumping use." action="Calculate water system" onAction={onCalculate} />;
+  const update = (patch: Partial<IrrigationConfiguration>) => onConfiguration({ ...configuration, ...patch });
+  const sourceConfiguration = <div className="water-configuration" data-testid="water-configuration">
+    <div className="card-heading"><div><Droplets size={17} /><span><small>{t('water.sourceEyebrow')}</small><strong>{t('water.sourceTitle')}</strong></span></div></div>
+    <p>{t('water.sourceBody')}</p>
+    <div className="water-source-grid">
+      <label className="select-label"><span>{t('water.sourceType')}</span><select aria-label={t('water.sourceType')} value={configuration.sourceType} onChange={(event) => update({ sourceType: event.target.value as IrrigationConfiguration['sourceType'] })}><option value="network">{t('water.source.network')}</option><option value="well">{t('water.source.well')}</option><option value="tank">{t('water.source.tank')}</option><option value="reservoir">{t('water.source.reservoir')}</option></select></label>
+      <label className="select-label"><span>{t('water.sourcePoint')}</span><select aria-label={t('water.sourcePoint')} value={configuration.sourcePointId ?? ''} onChange={(event) => update({ sourcePointId: event.target.value || null })}><option value="">{t(configuration.sourceType === 'tank' ? 'water.sourceAutoHigh' : 'water.sourceAuto')}</option>{site?.waterPoints.map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}</select></label>
+    </div>
+    <div className="water-input-grid">
+      <label><span>{t('water.availableFlow')}</span><span><input aria-label={t('water.availableFlow')} type="number" min="0.1" max="500" step="0.1" value={configuration.availableFlowM3Hour} onChange={(event) => update({ availableFlowM3Hour: Number(event.target.value) })} /> m³/h</span></label>
+      <label><span>{t('water.inletPressure')}</span><span><input aria-label={t('water.inletPressure')} type="number" min="0" max="20" step="0.1" value={configuration.inletPressureBar} onChange={(event) => update({ inletPressureBar: Number(event.target.value) })} /> bar</span></label>
+      <label><span>{t('water.emitterFlow')}</span><span><input aria-label={t('water.emitterFlow')} type="number" min="0.5" max="32" step="0.5" value={configuration.emitterFlowLHour} onChange={(event) => update({ emitterFlowLHour: Number(event.target.value) })} /> L/h</span></label>
+      <label><span>{t('water.emittersPlant')}</span><span><input aria-label={t('water.emittersPlant')} type="number" min="1" max="12" step="1" value={configuration.emittersPerPlant} onChange={(event) => update({ emittersPerPlant: Number(event.target.value) })} /></span></label>
+      <label><span>{t('water.distributionEfficiency')}</span><span><input aria-label={t('water.distributionEfficiency')} type="number" min="50" max="98" step="1" value={configuration.distributionEfficiencyPercent} onChange={(event) => update({ distributionEfficiencyPercent: Number(event.target.value) })} /> %</span></label>
+      {configuration.sourceType === 'well' && <label><span>{t('water.wellLift')}</span><span><input aria-label={t('water.wellLift')} type="number" min="0" max="500" step="1" value={configuration.wellLiftM} onChange={(event) => update({ wellLiftM: Number(event.target.value) })} /> m</span></label>}
+      {configuration.sourceType === 'tank' && <label><span>{t('water.tankCapacity')}</span><span><input aria-label={t('water.tankCapacity')} type="number" min="0.5" max="10000" step="0.5" value={configuration.tankCapacityM3} onChange={(event) => update({ tankCapacityM3: Number(event.target.value) })} /> m³</span></label>}
+    </div>
+    <small className="water-source-note">{t(configuration.sourceType === 'well' ? 'water.wellSurvey' : configuration.sourceType === 'tank' ? 'water.tankPlacement' : 'water.sourceVerification')}</small>
+  </div>;
+  if (!irrigation) return <div className="panel-body">{sourceConfiguration}<EmptyState icon={Droplets} title={t('water.emptyTitle')} body={t('water.emptyBody')} action={t(canCalculate ? 'water.calculate' : 'water.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
   const maxMonthly = Math.max(...irrigation.monthly.map((month) => month.grossM3), 1);
   return (
     <div className="panel-body">
-      <div className="panel-intro compact"><span className="eyebrow">{t('water.eyebrow')}</span><h1>{t('water.annual', { value: formatNumber(irrigation.annualWaterM3, 0) })}</h1><p>FAO crop-coefficient demand, effective rainfall and 90% drip distribution efficiency.</p></div>
+      <div className="panel-intro compact"><span className="eyebrow">{t('water.eyebrow')}</span><h1>{t('water.annual', { value: formatNumber(irrigation.annualWaterM3, 0) })}</h1><p>{t('water.method')}</p></div>
+      <div className="system-water-model" data-testid="system-water-model">
+        <div><Sprout size={17} /><span><small>{t('water.systemModelEyebrow')}</small><strong>{t(systemTranslationKey(irrigation.waterModel.system))}</strong></span><b>{formatNumber(irrigation.waterModel.supplementalIrrigationPercent, 0)}%</b></div>
+        <p>{t(irrigation.waterModel.system === 'syntropic' ? 'water.systemModelSyntropic' : irrigation.waterModel.system === 'monoculture' ? 'water.systemModelMonoculture' : 'water.systemModelDefault', { target: irrigation.waterModel.matureSupplementalTargetPercent, years: irrigation.waterModel.transitionYears })}</p>
+        <small>{t('water.potentialDemand', { value: formatNumber(irrigation.potentialAnnualWaterM3, 0), irrigated: irrigation.irrigatedPlantCount })}</small>
+      </div>
+      {sourceConfiguration}
       <div className="metric-grid">
         <Metric label={t('water.gross')} value={`${formatNumber(irrigation.annualGrossMm, 0)} mm`} detail={irrigation.climatePeriod} />
-        <Metric label={t('water.peak')} value={`${formatNumber(irrigation.peakDayM3, 1)} m³`} detail="design flow" />
-        <Metric label={t('water.zones')} value={String(irrigation.zones)} detail={`${irrigation.emitterCount} emitters`} />
-        <Metric label={t('water.opex')} value={currency(irrigation.annualOperation.totalEur)} detail="water + energy + care" />
+        <Metric label={t('water.peak')} value={`${formatNumber(irrigation.peakDayM3, 1)} m³`} detail={t('water.designFlow')} />
+        <Metric label={t('water.zones')} value={String(irrigation.zones)} detail={t('water.activePlants', { active: irrigation.activePlantCount, inactive: irrigation.inactivePlantCount })} />
+        <Metric label={t('water.opexYear', { year: irrigation.designYear })} value={currency(irrigation.annualOperation.totalCost, irrigation.economics)} detail={t('water.opexDetail')} />
       </div>
-      <div className="monthly-chart"><div className="card-heading"><div><Droplets size={17} /><span><small>Monthly gross demand</small><strong>m³ by month</strong></span></div></div><div className="bars">{irrigation.monthly.map((month) => <div key={month.month}><span style={{ height: `${Math.max(3, month.grossM3 / maxMonthly * 100)}%` }} title={`${month.grossM3} m³`} /><small>{monthName(month.month)}</small></div>)}</div></div>
-      <div className="satellite-schedule"><div><Satellite size={18} /><span><small>Current satellite scheduling</small><strong>{signed(irrigation.satelliteScheduling.adjustmentPercent)}% next pulse</strong></span><StatusPill status={irrigation.satelliteScheduling.confidence} /></div><p>{irrigation.satelliteScheduling.recommendation}</p><div className="priority-counts"><span className="high">{irrigation.satelliteScheduling.highPrioritySamples} high</span><span className="medium">{irrigation.satelliteScheduling.mediumPrioritySamples} monitor</span><span className="low">{irrigation.satelliteScheduling.lowPrioritySamples} low</span></div><button className="text-button" onClick={onShowZones}>Show sampled zones <ChevronRight size={14} /></button></div>
-      <div className="cost-breakdown"><Row label="Water" value={currency(irrigation.annualOperation.waterEur)} /><Row label={`Pumping · ${formatNumber(irrigation.annualOperation.pumpingKwh, 0)} kWh`} value={currency(irrigation.annualOperation.energyEur)} /><Row label="Annual maintenance" value={currency(irrigation.annualOperation.maintenanceEur)} /><Row label="Installation materials" value={currency(irrigation.installation.materialsEur)} strong /><Row label={`Installation labour · ${irrigation.installation.laborHours} h`} value={currency(irrigation.installation.laborEur)} /></div>
-      {profile?.satellite.limitations.slice(0, 2).map((limitation) => <p className="fine-print" key={limitation}>{limitation}</p>)}
-      <button className="button primary wide" onClick={onCosts}>Review complete cost plan <ChevronRight size={18} /></button>
+      <div className="hydraulic-plan" data-testid="hydraulic-plan">
+        <div className="card-heading"><div><Waves size={17} /><span><small>{t('water.hydraulicEyebrow')}</small><strong>{t('water.hydraulicTitle')}</strong></span></div><StatusPill status={irrigation.network.warnings.length ? 'review-required' : 'available'} /></div>
+        <div className="hydraulic-metrics">
+          <span><small>{t('water.requiredFlow')}</small><strong>{formatNumber(irrigation.network.requiredFlowM3Hour, 2)} m³/h</strong></span>
+          <span><small>{t('water.dynamicHead')}</small><strong>{formatNumber(irrigation.network.requiredDynamicHeadM, 1)} m</strong></span>
+          <span><small>{t('water.pump')}</small><strong>{irrigation.network.pumpRequired ? `${formatNumber(irrigation.network.pumpPowerKw, 2)} kW` : t('water.notRequired')}</strong></span>
+          <span><small>{t('water.runtime')}</small><strong>{formatNumber(irrigation.network.peakZoneRuntimeHours, 1)} h</strong></span>
+          <span><small>{t('water.pipeMeasured')}</small><strong>{formatNumber(irrigation.network.totalMeasuredPipeM, 0)} m</strong></span>
+          <span><small>{t('water.pipePurchase')}</small><strong>{formatNumber(irrigation.network.totalPurchasePipeM, 0)} m</strong></span>
+        </div>
+        <p>{t('water.sourcePlacement', { elevation: irrigation.network.source.elevationM, source: t(`water.source.${irrigation.network.source.type}`) })}</p>
+        {irrigation.network.source.placement === 'highest-terrain-sample' && <p>{t('water.autoHighEvidence')}</p>}
+        <p>{t('water.dragSourceHint')}</p>
+        {irrigation.network.protectedCrossingCount > 0 && <p>{t('water.protectedCrossings', { count: irrigation.network.protectedCrossingCount })}</p>}
+        {irrigation.network.routedObstacleCount > 0 && <p>{t('water.routedObstacles', { count: irrigation.network.routedObstacleCount })}</p>}
+        {irrigation.network.manualOverrideCount > 0 && <p>{t('water.manualOverrides', { count: irrigation.network.manualOverrideCount })}</p>}
+        {irrigation.network.warnings.map((warning) => <p className="hydraulic-warning" key={warning}>• {localizedDomainMessage(warning, t)}</p>)}
+      </div>
+      <div className="network-lines"><div className="card-heading"><div><Route size={17} /><span><small>{t('water.lineScheduleEyebrow')}</small><strong>{t('water.lineSchedule')}</strong></span></div><button className={editingIrrigation ? 'line-edit active' : 'line-edit'} onClick={onEditIrrigation}>{t(editingIrrigation ? 'water.finishLineEdit' : 'water.editLines')}</button></div><p className="line-edit-hint">{t('water.editLinesHint')}</p>{(['mainline', 'submain', 'lateral', 'protected-crossing'] as const).map((kind) => {
+        const lines = irrigation.network.lines.filter((line) => line.kind === kind);
+        if (!lines.length) return null;
+        return <div key={kind}><span><i className={kind} /><strong>{t(`water.line.${kind}`)}</strong><small>{t('water.lineCountLength', { count: lines.length, length: formatNumber(lines.reduce((sum, line) => sum + line.lengthM, 0), 0) })}</small></span><span>{[...new Set(lines.map((line) => `${line.diameterMm} mm`))].join(' · ')}</span></div>;
+      })}</div>
+      <div className="network-bom" data-testid="irrigation-bom"><div className="card-heading"><div><Database size={17} /><span><small>{t('water.bomEyebrow')}</small><strong>{t('water.bomTitle')}</strong></span></div></div><div className="network-bom-head"><span>{t('water.component')}</span><span>{t('water.measured')}</span><span>{t('water.purchase')}</span></div>{irrigation.network.components.map((component) => <div className="network-bom-row" key={component.id}><span><strong>{localizedNetworkComponent(component.label, t)}</strong><small>{localizedNetworkSpecification(component.specification, t)}</small></span><span>{formatNumber(component.measuredQuantity, component.unit === 'm' ? 1 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span><span>{formatNumber(component.purchaseQuantity, component.unit === 'm' ? 0 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span></div>)}</div>
+      <div className="monthly-chart"><div className="card-heading"><div><Droplets size={17} /><span><small>{t('water.monthlyDemand')}</small><strong>{t('water.monthlyUnit')}</strong></span></div></div><div className="bars">{irrigation.monthly.map((month) => <div key={month.month}><span style={{ height: `${Math.max(3, month.grossM3 / maxMonthly * 100)}%` }} title={`${month.grossM3} m³`} /><small>{monthName(month.month)}</small></div>)}</div></div>
+      <div className="satellite-schedule"><div><Satellite size={18} /><span><small>{t('water.satelliteSchedule')}</small><strong>{t('water.nextPulse', { value: signed(irrigation.satelliteScheduling.adjustmentPercent) })}</strong></span><StatusPill status={irrigation.satelliteScheduling.confidence} /></div><p>{localizedIrrigationRecommendation(irrigation, t)}</p><div className="priority-counts"><span className="high">{irrigation.satelliteScheduling.highPrioritySamples} {t('water.priorityHigh')}</span><span className="medium">{irrigation.satelliteScheduling.mediumPrioritySamples} {t('water.priorityMonitor')}</span><span className="low">{irrigation.satelliteScheduling.lowPrioritySamples} {t('water.priorityLow')}</span></div><button className="text-button" onClick={onShowZones}>{t('water.showZones')} <ChevronRight size={14} /></button></div>
+      <div className="cost-breakdown"><Row label={t('water.water')} value={currency(irrigation.annualOperation.waterCost, irrigation.economics)} /><Row label={t('water.pumping', { value: formatNumber(irrigation.annualOperation.pumpingKwh, 0) })} value={currency(irrigation.annualOperation.energyCost, irrigation.economics)} /><Row label={t('water.systemCare', { hours: formatNumber(irrigation.annualOperation.managementLaborHours, 1) })} value={currency(irrigation.annualOperation.managementLaborCost, irrigation.economics)} /><Row label={t('water.annualMaintenance')} value={currency(irrigation.annualOperation.maintenanceCost, irrigation.economics)} /><Row label={t('water.installationMaterials')} value={currency(irrigation.installation.materialsCost, irrigation.economics)} strong /><Row label={t('water.installationLabour', { hours: irrigation.installation.laborHours })} value={currency(irrigation.installation.laborCost, irrigation.economics)} /></div>
+      {Boolean(profile?.satellite.limitations.length) && <p className="fine-print">{t('water.satelliteLimitation')}</p>}
+      <button className="button primary wide" onClick={onCosts}>{t('water.reviewCosts')} <ChevronRight size={18} /></button>
     </div>
   );
 }
 
-function CostsPanel({ costs, irrigation, species, onCalculate }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; onCalculate: () => void }) {
-  const { t } = useI18n();
-  if (!costs || !irrigation) return <EmptyState icon={CircleDollarSign} title="No cost plan yet" body="Calculate the chosen layout to price every plant, planting labour, protection, irrigation installation and annual operation." action="Calculate cost plan" onAction={onCalculate} />;
+function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void }) {
+  const { t, locale } = useI18n();
+  const update = (patch: Partial<EconomicConfiguration>) => onConfiguration({
+    ...configuration,
+    ...patch,
+    pricingStatus: 'user-supplied',
+    sourceSummary: 'Local rates reviewed or supplied for this project.',
+    sourceVersion: 'User-supplied project rates',
+    sourceObservedAt: new Date().toISOString(),
+    confidence: 'high',
+  });
+  const rateConfiguration = <div className="economic-configuration" data-testid="economic-configuration">
+    <div className="card-heading"><div><CircleDollarSign size={17} /><span><small>{t('costs.localBasisEyebrow')}</small><strong>{t('costs.localBasisTitle', { country: configuration.countryCode })}</strong></span></div><StatusPill status={configuration.missingLocalRates.length ? 'review-required' : 'available'} /></div>
+    <p>{localizedEconomicSummary(configuration.sourceSummary, t)}</p>
+    <small>{t('costs.exchangeBasis', { rate: formatNumber(configuration.exchangeRateToLocal, 4), currency: configuration.currencyCode, date: shortDate(configuration.sourceObservedAt, locale), confidence: translatedStatus(configuration.confidence, t) })}</small>
+    <div className="economic-input-grid">
+      <label><span>{t('costs.currency')}</span><input aria-label={t('costs.currency')} value={configuration.currencyCode} maxLength={3} onChange={(event) => update({ currencyCode: event.target.value.toUpperCase() })} /></label>
+      <label><span>{t('costs.labourRate')}</span><input aria-label={t('costs.labourRate')} type="number" min="0" step="0.01" value={configuration.laborCostPerHour} onChange={(event) => update({ laborCostPerHour: Number(event.target.value) })} /><i>{configuration.currencyCode}/h</i></label>
+      <label><span>{t('costs.waterRate')}</span><input aria-label={t('costs.waterRate')} type="number" min="0" step="0.01" value={configuration.waterCostPerM3} onChange={(event) => update({ waterCostPerM3: Number(event.target.value) })} /><i>{configuration.currencyCode}/m³</i></label>
+      <label><span>{t('costs.electricityRate')}</span><input aria-label={t('costs.electricityRate')} type="number" min="0" step="0.01" value={configuration.electricityCostPerKwh} onChange={(event) => update({ electricityCostPerKwh: Number(event.target.value) })} /><i>{configuration.currencyCode}/kWh</i></label>
+      <label><span>{t('costs.plantMultiplier')}</span><input aria-label={t('costs.plantMultiplier')} type="number" min="0" step="0.01" value={configuration.plantReferenceMultiplier} onChange={(event) => update({ plantReferenceMultiplier: Number(event.target.value) })} /><i>×</i></label>
+      <label><span>{t('costs.materialMultiplier')}</span><input aria-label={t('costs.materialMultiplier')} type="number" min="0" step="0.01" value={configuration.irrigationReferenceMultiplier} onChange={(event) => update({ irrigationReferenceMultiplier: Number(event.target.value) })} /><i>×</i></label>
+      <label><span>{t('costs.smallProtection')}</span><input aria-label={t('costs.smallProtection')} type="number" min="0" step="0.01" value={configuration.smallProtectionUnitCost} onChange={(event) => update({ smallProtectionUnitCost: Number(event.target.value) })} /><i>{configuration.currencyCode}</i></label>
+      <label><span>{t('costs.largeProtection')}</span><input aria-label={t('costs.largeProtection')} type="number" min="0" step="0.01" value={configuration.largeProtectionUnitCost} onChange={(event) => update({ largeProtectionUnitCost: Number(event.target.value) })} /><i>{configuration.currencyCode}</i></label>
+    </div>
+    {configuration.missingLocalRates.length > 0 && <div className="economic-warning"><ShieldCheck size={16} /><span>{t('costs.missingLocalRates', { values: configuration.missingLocalRates.map((value) => localizedEconomicRate(value, t)).join(', ') })}</span></div>}
+  </div>;
+  if (!costs || !irrigation) return <div className="panel-body">{rateConfiguration}<EmptyState icon={CircleDollarSign} title={t('costs.emptyTitle')} body={t('costs.emptyBody')} action={t(canCalculate ? 'costs.calculate' : 'costs.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
   const speciesMap = new Map(species.map((item) => [item.id, item]));
   return (
     <div className="panel-body">
-      <div className="total-cost"><small>{t('costs.establishment')}</small><strong>{currency(costs.totalEur)}</strong><span>plants, labour, protection and irrigation CAPEX</span></div>
-      <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseEur)} /><Row label={`${t('costs.labour')} · ${formatNumber(costs.plantingLaborHours, 1)} person-hours`} value={currency(costs.plantingLaborEur)} /><Row label="Stakes + protection" value={currency(costs.protectionAndStakesEur)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationEur)} strong /><Row label="Annual water + operation" value={`${currency(irrigation.annualOperation.totalEur)} / yr`} strong /></div>
-      <div className="cost-table"><div className="cost-table-head"><span>Species</span><span>Qty</span><span>Plant</span><span>Labour</span><span>Total</span></div>{costs.bySpecies.map((item) => {
+      {rateConfiguration}
+      {costs.economics.missingLocalRates.length > 0 && <div className="estimate-partial"><strong>{t('costs.partialTitle')}</strong><span>{t('costs.partialBody')}</span></div>}
+      <div className="cost-scope-grid">
+        <div className="total-cost"><small>{t(costs.economics.missingLocalRates.length ? 'costs.partialEstablishment' : 'costs.establishment')}</small><strong>{currency(costs.totalCost, costs.economics)}</strong><span>{t('costs.capexDetail')}</span></div>
+        <div className="total-cost active"><small>{t('costs.activeSystem', { year: costs.activeSystem.designYear })}</small><strong>{currency(costs.activeSystem.totalReplacementCost, costs.economics)}</strong><span>{t('costs.activeSystemDetail', { active: costs.activeSystem.activePlantCount, inactive: costs.activeSystem.inactivePlantCount })}</span></div>
+      </div>
+      <CostTimelineChart costs={costs} irrigation={irrigation} />
+      <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseCost, costs.economics)} /><Row label={t('costs.labourHours', { label: t('costs.labour'), hours: formatNumber(costs.plantingLaborHours, 1) })} value={currency(costs.plantingLaborCost, costs.economics)} /><Row label={t('costs.protection')} value={currency(costs.protectionAndStakesCost, costs.economics)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationCost, costs.economics)} strong /><Row label={t('costs.annualWaterYear', { year: irrigation.designYear })} value={t('costs.perYear', { value: currency(irrigation.annualOperation.totalCost, costs.economics) })} strong /></div>
+      <div className="cost-table"><div className="cost-table-head"><span>{t('costs.species')}</span><span>{t('costs.quantity')}</span><span>{t('costs.plant')}</span><span>{t('costs.labourShort')}</span><span>{t('costs.total')}</span></div>{costs.bySpecies.map((item) => {
         const entry = speciesMap.get(item.speciesId);
-        return <div className="cost-table-row" key={item.speciesId}><span><strong>{entry?.commonName ?? item.speciesId}</strong><i>{entry?.scientificName}</i></span><span>{item.count}</span><span>{currency(item.unitPlantEur)}</span><span>{formatNumber(item.unitLaborHours, 2)} h</span><span>{currency(item.subtotalEur)}</span></div>;
+        return <div className="cost-table-row" key={item.speciesId}><span><strong>{entry ? speciesDisplayName(entry, t) : item.speciesId}</strong><i>{entry?.scientificName}</i></span><span>{item.count}</span><span>{currency(item.unitPlantCost, costs.economics)}</span><span>{formatNumber(item.unitLaborHours, 2)} h</span><span>{currency(item.subtotalCost, costs.economics)}</span></div>;
       })}</div>
-      <div className="source-note"><Database size={17} /><div><strong>Regional price basis</strong><span>Sicilian Agriculture Price Book 2023; common agricultural labour €24.91/h with the 2024 table validity extended through 2026. Retail nursery comparisons are retained by stock class.</span></div></div>
-      <div className="callout"><Droplets size={18} /><div><strong>Water tariff is editable</strong><span>The €0.42/m³ baseline is a regional district planning average, not a verified contract for this parcel.</span></div></div>
+      <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>
+      <button className="button primary wide" onClick={onCalculate}>{t('costs.recalculate')} <ChevronRight size={18} /></button>
     </div>
+  );
+}
+
+function CostTimelineChart({ costs, irrigation }: { costs: EstablishmentCost; irrigation: IrrigationEstimate }) {
+  const { t } = useI18n();
+  const timeline = costs.timeline ?? [];
+  if (timeline.length < 2) return null;
+  const width = 640;
+  const height = 236;
+  const padding = { top: 20, right: 18, bottom: 32, left: 54 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maximum = Math.max(1, ...timeline.map((point) => point.annualOperatingCost));
+  const x = (index: number) => padding.left + index / (timeline.length - 1) * plotWidth;
+  const y = (value: number) => padding.top + plotHeight - value / maximum * plotHeight;
+  const line = timeline.map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(index).toFixed(1)} ${y(point.annualOperatingCost).toFixed(1)}`).join(' ');
+  const area = `${line} L ${x(timeline.length - 1).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} L ${x(0).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} Z`;
+  const currentIndex = Math.max(0, Math.min(timeline.length - 1, irrigation.designYear - 1));
+  const current = timeline[currentIndex];
+  const first = timeline[0];
+  const last = timeline[timeline.length - 1];
+  const change = first.annualOperatingCost > 0 ? (last.annualOperatingCost - first.annualOperatingCost) / first.annualOperatingCost * 100 : 0;
+  const markerYears = new Set([1, 5, 10, 15, 20, 25, timeline.length]);
+  return (
+    <section className="cost-timeline" data-testid="cost-timeline">
+      <div className="card-heading"><div><CircleDollarSign size={17} /><span><small>{t('costs.timelineEyebrow')}</small><strong>{t('costs.timelineTitle')}</strong></span></div><StatusPill status={change < 0 ? 'available' : 'review-required'} /></div>
+      <p>{t(irrigation.waterModel.system === 'syntropic' ? 'costs.timelineSyntropic' : irrigation.waterModel.system === 'monoculture' ? 'costs.timelineMonoculture' : 'costs.timelineOther', { system: t(systemTranslationKey(irrigation.waterModel.system)) })}</p>
+      <div className="cost-timeline-summary">
+        <span><small>{t('costs.yearOne')}</small><strong>{currency(first.annualOperatingCost, costs.economics)}</strong></span>
+        <span><small>{t('costs.yearThirty')}</small><strong>{currency(last.annualOperatingCost, costs.economics)}</strong></span>
+        <span className={change < 0 ? 'decline' : ''}><small>{t('costs.longTermChange')}</small><strong>{signed(Math.round(change))}%</strong></span>
+      </div>
+      <svg className="cost-timeline-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('costs.timelineAria')}>
+        <defs><linearGradient id="costTimelineFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#b8db55" stopOpacity=".42" /><stop offset="1" stopColor="#b8db55" stopOpacity=".03" /></linearGradient></defs>
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => <g key={ratio}><line x1={padding.left} x2={width - padding.right} y1={y(maximum * ratio)} y2={y(maximum * ratio)} /><text x={padding.left - 9} y={y(maximum * ratio) + 3} textAnchor="end">{compactCurrency(maximum * ratio, costs.economics)}</text></g>)}
+        <path className="cost-area" d={area} />
+        <path className="cost-line" d={line} />
+        {timeline.map((point, index) => markerYears.has(point.year) ? <g key={point.year}><circle className="cost-point" cx={x(index)} cy={y(point.annualOperatingCost)} r="3.5"><title>{t('costs.pointTitle', { year: point.year, value: currency(point.annualOperatingCost, costs.economics) })}</title></circle><text className="year-label" x={x(index)} y={height - 9} textAnchor="middle">{point.year}</text></g> : null)}
+        <line className="current-year-line" x1={x(currentIndex)} x2={x(currentIndex)} y1={padding.top} y2={padding.top + plotHeight} />
+        <circle className="current-year-point" cx={x(currentIndex)} cy={y(current.annualOperatingCost)} r="5"><title>{t('costs.currentPoint', { year: current.year, value: currency(current.annualOperatingCost, costs.economics) })}</title></circle>
+      </svg>
+      <div className="cost-timeline-breakdown">
+        <span><i className="water-energy" />{t('costs.waterEnergy')}<strong>{currency(current.waterAndEnergyCost, costs.economics)}</strong></span>
+        <span><i className="care" />{t('costs.systemCare')}<strong>{currency(current.managementLaborCost, costs.economics)}</strong></span>
+        <span><i className="maintenance" />{t('costs.maintenance')}<strong>{currency(current.maintenanceCost, costs.economics)}</strong></span>
+      </div>
+      <small className="cost-timeline-note">{t('costs.timelineNote')}</small>
+    </section>
   );
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="metric"><small>{label}</small><strong>{value}</strong><span>{detail}</span></div>; }
 function Index({ label, value }: { label: string; value: number }) { return <span><small>{label}</small><strong>{value.toFixed(3)}</strong></span>; }
 function Row({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) { return <div className={strong ? 'strong' : ''}><span>{label}</span><strong>{value}</strong></div>; }
-function StatusPill({ status }: { status: string }) { return <span className={`status-pill ${status}`}>{humanize(status)}</span>; }
+function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
 function post(value: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
@@ -1521,23 +2134,41 @@ async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Unexpected Growaf error'; }
-function centroid(polygon: Coordinate[]) { return { lat: polygon.reduce((sum, point) => sum + point.lat, 0) / polygon.length, lng: polygon.reduce((sum, point) => sum + point.lng, 0) / polygon.length }; }
-function plantingRestriction(coordinate: Coordinate, site: SiteBoundary | null, profile: SiteProfile | null) {
-  if (!site) return 'Select a valid site before placing a plant.';
-  if (!siteContainsCoordinate(site, coordinate)) return 'New plants must remain inside the field boundary and outside site holes.';
-  if (distanceToSiteBoundaryM(site, coordinate) < site.setbackM) return `New plants must respect the ${site.setbackM} m boundary setback.`;
-  if (site.paths.some((path) => distanceToSitePathM(coordinate, path) < path.widthM / 2)) return 'This point is inside a reserved management path.';
+function plantingRestriction(coordinate: Coordinate, site: SiteBoundary | null, profile: SiteProfile | null, t: (key: string, values?: Record<string, string | number>) => string) {
+  if (!site) return t('errors.selectSite');
+  if (!siteContainsCoordinate(site, coordinate)) return t('errors.plantOutside');
+  if (distanceToSiteBoundaryM(site, coordinate) < site.setbackM) return t('errors.boundarySetback', { value: site.setbackM });
+  if (site.paths.some((path) => distanceToSitePathM(coordinate, path) < path.widthM / 2)) return t('errors.reservedPath');
   if (site.existingTrees.some((tree) => {
     const projection = createLocalProjection(tree.coordinate);
     const point = projection.project(coordinate);
     return Math.hypot(point.x, point.y) < tree.crownDiameterM / 2 + tree.protectionBufferM;
-  })) return 'This point is inside the protection buffer of a field-observed existing tree.';
+  })) return t('errors.existingTreeBuffer');
   const projection = createLocalProjection(polygonCentroid(site.polygon));
   const point = projection.project(coordinate);
-  if (site.exclusions.some((polygon) => pointInPolygon(point, polygon.map(projection.project)))) return 'This point is inside a manual no-plant exclusion.';
+  if (site.exclusions.some((polygon) => pointInPolygon(point, polygon.map(projection.project)))) return t('errors.manualExclusion');
   const woody = profile?.satellite.existingVegetation.patches ?? [];
-  if (woody.some((patch) => pointInPolygon(point, patch.polygon.map(projection.project)))) return 'This point is protected existing vegetation; place the new plant outside its crown and root buffer.';
+  if (woody.some((patch) => pointInPolygon(point, patch.polygon.map(projection.project)))) return t('errors.existingVegetation');
   return null;
+}
+function corridorSegmentPolygon(start: Coordinate, end: Coordinate, widthM: number): Coordinate[] {
+  const origin = { lat: (start.lat + end.lat) / 2, lng: (start.lng + end.lng) / 2 };
+  const projection = createLocalProjection(origin);
+  const projectedStart = projection.project(start);
+  const projectedEnd = projection.project(end);
+  const deltaX = projectedEnd.x - projectedStart.x;
+  const deltaY = projectedEnd.y - projectedStart.y;
+  const length = Math.hypot(deltaX, deltaY);
+  if (length < 0.01) return [start, end, end, start];
+  const halfWidth = Math.max(0.25, widthM / 2);
+  const normalX = (-deltaY / length) * halfWidth;
+  const normalY = (deltaX / length) * halfWidth;
+  return [
+    projection.unproject({ x: projectedStart.x + normalX, y: projectedStart.y + normalY }),
+    projection.unproject({ x: projectedEnd.x + normalX, y: projectedEnd.y + normalY }),
+    projection.unproject({ x: projectedEnd.x - normalX, y: projectedEnd.y - normalY }),
+    projection.unproject({ x: projectedStart.x - normalX, y: projectedStart.y - normalY }),
+  ];
 }
 function cloneSite(site: SiteBoundary): SiteBoundary {
   return {
@@ -1556,21 +2187,248 @@ function previousSection(section: WorkspaceSection) { const index = STEPS.findIn
 function nextSection(section: WorkspaceSection) { const index = STEPS.findIndex((step) => step.id === section); return STEPS[Math.min(STEPS.length - 1, index + 1)].id; }
 function stepLabelKey(section: WorkspaceSection) { return `nav.${section}`; }
 function compactNumber(value: number) { return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
+function compactCurrency(value: number, economics: Pick<EconomicConfiguration, 'currencyCode' | 'currencyLocale'>) {
+  try {
+    return new Intl.NumberFormat(economics.currencyLocale, { style: 'currency', currency: economics.currencyCode, notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  } catch {
+    return `${compactNumber(value)} ${economics.currencyCode}`;
+  }
+}
 function formatNumber(value: number, digits: number) { return new Intl.NumberFormat('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value); }
-function currency(value: number) { return new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(value); }
+function currency(value: number, economics: Pick<EconomicConfiguration, 'currencyCode' | 'currencyLocale'>) {
+  try {
+    return new Intl.NumberFormat(economics.currencyLocale, { style: 'currency', currency: economics.currencyCode, maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return `${formatNumber(value, 0)} ${economics.currencyCode}`;
+  }
+}
 function signed(value: number) { return `${value > 0 ? '+' : ''}${formatNumber(value, Math.abs(value) < 10 && !Number.isInteger(value) ? 2 : 0)}`; }
-function shortDate(value: string) { return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value)); }
+function shortDate(value: string, locale: Locale = 'en') { return new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value)); }
 function shortDay(value: string, locale: Locale) { return new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { day: '2-digit', month: 'short' }).format(new Date(value)); }
 function humanize(value: string) { return value.replaceAll('-', ' ').replaceAll('_', ' '); }
+function translatedStatus(status: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const key = `status.${status}`;
+  const translated = t(key);
+  return translated === key ? humanize(status) : translated;
+}
+function localizedEnum(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const normalized = value.trim().toLowerCase().replaceAll(/\s+/g, '-').replaceAll('_', '-');
+  const key = `enum.${normalized}`;
+  const translated = t(key);
+  return translated === key ? humanize(value) : translated;
+}
+function localizedEconomicSummary(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const keys: Record<string, string> = {
+    'Global USD planning estimate. A current exchange rate is applied after field analysis; replace rates with local quotes before procurement.': 'costs.source.usd',
+    'Global USD planning estimate converted with the current field currency rate. Replace labour, utility and supplier rates with local quotes before procurement.': 'costs.source.converted',
+    'Local rates reviewed or supplied for this project.': 'costs.source.reviewed',
+  };
+  return keys[value] ? t(keys[value]) : value;
+}
+function localizedEconomicRate(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const keys: Record<string, string> = {
+    labour: 'costs.rate.labour',
+    water: 'costs.rate.water',
+    electricity: 'costs.rate.electricity',
+    'plant stock': 'costs.rate.plantStock',
+    'irrigation materials': 'costs.rate.irrigationMaterials',
+    'stakes and guards': 'costs.rate.stakesGuards',
+  };
+  return keys[value] ? t(keys[value]) : value;
+}
+function localizedDomainMessage(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  if (value === 'No existing woody patch met the multi-source detection threshold; field verification remains mandatory.') return t('profile.woodyNone');
+  const woodyReject = value.match(/^Reject this parcel for a blank-slate layout: ([\d.]+)% is classified as existing woody vegetation\.$/);
+  if (woodyReject) return t('profile.woodyReject', { value: woodyReject[1] });
+  const woodyDetected = value.match(/^(\d+) existing woody (?:patch|patches) detected and protected before layout generation\.$/);
+  if (woodyDetected) return t('profile.woodyDetected', { count: woodyDetected[1] });
+  if (value === 'Existing woody vegetation could not be classified automatically. A field survey is required before placing plants.') return t('profile.woodyUnavailable');
+  if (value === 'Existing woody vegetation classification is incomplete; do not place plants until the parcel is field-verified.') return t('profile.woodyIncomplete');
+  const exact: Record<string, string> = {
+    'Valid site geometry': 'validation.valid',
+    'Every planting polygon requires at least three vertices.': 'validation.minimumVertices',
+    'The site contains an invalid coordinate.': 'validation.invalidCoordinate',
+    'Every planting polygon must cover at least 25 m².': 'validation.minimumArea',
+    'A planting polygon self-intersects.': 'validation.selfIntersection',
+    'Every hole must be a valid polygon contained by the site.': 'validation.invalidHole',
+    'Every exclusion must be a valid polygon contained by the site.': 'validation.invalidExclusion',
+    'Every management path must contain at least two points inside the site.': 'validation.invalidPath',
+    'Access, water and existing-tree points must lie inside the site.': 'validation.invalidPoints',
+    'Fewer than four vertical strata could be represented in this geometry.': 'layout.warning.strata',
+    'The palette has no placenta-phase support species.': 'layout.warning.placenta',
+    'The palette has no long-lived climax species.': 'layout.warning.climax',
+    'Monoculture is a production baseline with lower planned diversity and resilience.': 'layout.warning.monoculture',
+    'Wind direction is based on reanalysis; confirm damaging seasonal winds and barrier porosity in the field.': 'layout.warning.wind',
+    'Year-20 projected crown cover is dense; scheduled pruning or thinning is required.': 'layout.warning.canopy',
+    'A critical climate or water mismatch prevents recommendation for this site.': 'species.warning.criticalMismatch',
+    'Set AI_PROVIDER_API_KEY on the Growaf server to enable the internal assistant.': 'assistant.unavailable',
+    'Well position is provisional at the highest sampled terrain point; hydrogeological survey and permitting are required before drilling.': 'water.warning.wellPosition',
+    'The tank is provisionally placed at the highest sampled terrain point for gravity assistance; confirm access, bearing capacity and surveyed elevation.': 'water.warning.tankPosition',
+    'Reservoir position requires a user-defined water point and geotechnical review.': 'water.warning.reservoirPosition',
+  };
+  if (exact[value]) return t(exact[value]);
+  let match = value.match(/^Planting is restricted to an inward ([\d.]+) m boundary band; the central crop area remains unplanted\.$/);
+  if (match) return t('layout.warning.perimeter', { value: match[1] });
+  match = value.match(/^(\d+) existing woody (?:patch is|patches are) protected from new planting\.$/);
+  if (match) return t('layout.warning.woody', { count: match[1] });
+  match = value.match(/^(\d+) field-observed existing (?:tree is|trees are) protected from new planting\.$/);
+  if (match) return t('layout.warning.trees', { count: match[1] });
+  match = value.match(/^(\d+) management (?:path is|paths are) reserved before placement\.$/);
+  if (match) return t('layout.warning.paths', { count: match[1] });
+  match = value.match(/^Native composition ([\d.]+)% is below the ([\d.]+)% objective target\.$/);
+  if (match) return t('layout.warning.native', { value: match[1], target: match[2] });
+  match = value.match(/^Nitrogen-fixer composition ([\d.]+)% is below the ([\d.]+)% target\.$/);
+  if (match) return t('layout.warning.fixers', { value: match[1], target: match[2] });
+  match = value.match(/^(\d+) strata are represented; the biodiversity objective targets (\d+)\.$/);
+  if (match) return t('layout.warning.strataTarget', { value: match[1], target: match[2] });
+  match = value.match(/^Partial regeneration preserved (\d+) locked (?:plant|plants) unchanged and reflowed (\d+) unlocked positions\.$/);
+  if (match) return t('layout.warning.partial', { locked: match[1], unlocked: match[2] });
+  match = value.match(/^(\d+) generated candidate (?:was|were) skipped to preserve locked-tree clearance\.$/);
+  if (match) return t('layout.warning.lockedSkip', { count: match[1] });
+  match = value.match(/^Row (\d+) alone requires ([\d.]+) m³\/h, above the configured source flow\.$/);
+  if (match) return t('water.warning.rowFlow', { row: match[1], flow: match[2] });
+  match = value.match(/^Peak-day runtime ([\d.]+) h exceeds the configured ([\d.]+) h operating window\.$/);
+  if (match) return t('water.warning.runtime', { runtime: match[1], window: match[2] });
+  return value;
+}
 function monthName(month: number) { return ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'][month - 1]; }
-function designSystemDescription(system: DesignConfiguration['system']) {
+function isGeometryDrawMode(mode: DrawMode): mode is 'site' | 'hole' | 'exclusion' | 'path' {
+  return mode === 'site' || mode === 'hole' || mode === 'exclusion' || mode === 'path';
+}
+function evidenceUsageKey(item: Evidence) {
+  const source = item.source.toLowerCase();
+  const context = `${item.version} ${item.resolution ?? ''}`.toLowerCase();
+  if (source.includes('elevation')) return 'evidence.usage.terrain';
+  if (source.includes('open-meteo') && /radiation|wind|hourly/.test(context)) return 'evidence.usage.solar';
+  if (source.includes('open-meteo')) return 'evidence.usage.climate';
+  if (source.includes('soilgrids')) return 'evidence.usage.soil';
+  if (source.includes('ndvi persistence')) return 'evidence.usage.woodyPersistence';
+  if (source.includes('impact observatory')) return 'evidence.usage.landCoverHistory';
+  if (source.includes('worldcover')) return 'evidence.usage.worldCover';
+  if (source.includes('woody vegetation')) return 'evidence.usage.woodyLayer';
+  if (source.includes('sentinel-2')) return 'evidence.usage.opticalWater';
+  if (source.includes('sentinel-1')) return 'evidence.usage.radarWater';
+  if (source.includes('planetary computer')) return 'evidence.usage.processing';
+  return 'evidence.usage.generic';
+}
+function designSystemDescriptionKey(system: DesignConfiguration['system']) {
   return {
-    syntropic: 'Mixed strata and succession phases with planned biomass, pruning and removals.',
-    'alley-cropping': 'Woody rows separated by explicit crop alleys sized for light and machinery.',
-    'mixed-orchard': 'Compatible productive trees in regular rows with optional support species.',
-    monoculture: 'A transparent single-species production baseline; not presented as agroforestry.',
-    windbreak: 'Selected boundary edges perpendicular to troublesome prevailing winds.',
-    'boundary-buffer': 'A productive perimeter hedge that leaves the central cultivation area empty.',
+    syntropic: 'design.description.syntropic',
+    'alley-cropping': 'design.description.alley',
+    'mixed-orchard': 'design.description.mixedOrchard',
+    monoculture: 'design.description.monoculture',
+    windbreak: 'design.description.windbreak',
+    'boundary-buffer': 'design.description.boundary',
+  }[system];
+}
+function speciesDisplayName(species: DesignSpecies, t: (key: string, values?: Record<string, string | number>) => string) {
+  const key = `species.name.${species.id}`;
+  const translated = t(key);
+  return translated === key ? species.commonName : translated;
+}
+function localizedSuitabilityExplanation(component: SuitabilityComponent, species: DesignSpecies, profile: SiteProfile | null, t: (key: string, values?: Record<string, string | number>) => string) {
+  if (component.key === 'safety') return localizedDomainMessage(component.explanation, t);
+  if (!profile) return localizedDomainMessage(component.explanation, t);
+  if (component.key === 'climate') return t('species.explanation.climate', { observedMin: profile.climate.absoluteMinTemperatureC, observedMax: profile.climate.absoluteMaxTemperatureC, supportedMin: species.minTemperatureC, supportedMax: species.maxTemperatureC });
+  if (component.key === 'soil') return profile.soil.ph === null
+    ? t('species.explanation.soilUnknown')
+    : t('species.explanation.soil', { ph: profile.soil.ph, min: species.phMin, max: species.phMax });
+  if (component.key === 'water') return t('species.explanation.water', { rain: profile.climate.annualPrecipitationMm, et0: profile.climate.annualEt0Mm, drought: species.droughtTolerance });
+  if (component.key === 'native') return t('species.explanation.nativeUnverified', { country: profile.location.countryCode ?? profile.location.displayName });
+  if (component.key === 'purpose') return t('species.explanation.purpose', { type: t(species.productiveFromYear !== null ? 'species.productive' : 'species.support'), roles: species.roles.map((role) => localizedEnum(role, t)).join(', ') });
+  if (component.key === 'syntropic') return t('species.explanation.syntropic', { stratum: localizedEnum(species.stratum, t), succession: localizedEnum(species.succession, t), fixer: species.nitrogenFixer ? t('species.nitrogenFixerSuffix') : '' });
+  if (component.key === 'maintenance') return t('species.explanation.maintenance', { growth: species.growthRate.toFixed(2), drought: species.droughtTolerance, biomass: species.roles.includes('biomass') ? t('species.biomassSuffix') : '' });
+  if (component.key === 'evidence') return t('species.explanation.evidence', { count: species.sources.length });
+  return localizedDomainMessage(component.explanation, t);
+}
+
+function localizedMitigation(
+  value: string,
+  recommendation: SpeciesRecommendation,
+  profile: SiteProfile | null,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
+  const component = recommendation.components.find((item) => item.explanation === value);
+  if (component) return localizedSuitabilityExplanation(component, recommendation.species, profile, t);
+  if (value === recommendation.species.invasiveNote) {
+    const key = `species.invasiveNote.${recommendation.species.id}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
+  return localizedDomainMessage(value, t);
+}
+function localizedNetworkComponent(value: string, t: (key: string) => string) {
+  const key = ({
+    'Pressure-compensating emitters': 'water.component.emitters',
+    'Lateral take-off connectors': 'water.component.connectors',
+    'Lateral flush/end valves': 'water.component.flushValves',
+    'Zone isolation valves': 'water.component.zoneValves',
+    'Zone pressure regulators': 'water.component.regulators',
+    'Main filtration unit': 'water.component.filter',
+    'Air release valve': 'water.component.airValve',
+    'Irrigation controller': 'water.component.controller',
+    'Duty pump allowance': 'water.component.pump',
+    'Header tank': 'water.component.tank',
+    'Well head and abstraction controls': 'water.component.wellHead',
+    'Machinery crossing sleeve': 'water.component.sleeve',
+    'mainline pipe': 'water.component.mainlinePipe',
+    'submain pipe': 'water.component.submainPipe',
+    'lateral pipe': 'water.component.lateralPipe',
+  } as Record<string, string>)[value];
+  return key ? t(key) : value;
+}
+function localizedNetworkSpecification(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  let match = value.match(/^PE (\d+) mm · (\d+) m coils$/);
+  if (match) return t('water.spec.pipeCoils', { diameter: match[1], length: match[2] });
+  match = value.match(/^(\d+(?:\.\d+)?) L\/h$/);
+  if (match) return t('water.spec.emitterFlow', { flow: match[1] });
+  match = value.match(/^(\d+) zones$/);
+  if (match) return t('water.spec.zones', { count: match[1] });
+  match = value.match(/^(\d+(?:\.\d+)?) m³$/);
+  if (match) return t('water.spec.capacity', { value: match[1] });
+  const key = ({
+    'with grommet': 'water.spec.grommet',
+    'one per lateral': 'water.spec.onePerLateral',
+    'sized to submain': 'water.spec.sizedSubmain',
+    '1 bar downstream': 'water.spec.oneBar',
+    'flow-rated disc filter': 'water.spec.discFilter',
+    'network high point': 'water.spec.highPoint',
+    'verify curve against calculated duty point': 'water.spec.verifyPumpCurve',
+    'quote after hydrogeological survey': 'water.spec.afterHydroSurvey',
+  } as Record<string, string>)[value];
+  return key ? t(key) : value;
+}
+function localizedVariantName(variant: LayoutVariant, index: number, t: (key: string, values?: Record<string, string | number>) => string) {
+  const prefix = t(index === 0 ? 'layout.variantPreferred' : index === 1 ? 'layout.variantSolar' : 'layout.variantField');
+  return `${prefix} · ${t(systemTranslationKey(variant.design.system))}`;
+}
+function localizedVariantDescription(variant: LayoutVariant, t: (key: string, values?: Record<string, string | number>) => string) {
+  const extent = variant.design.extent === 'full-field'
+    ? t('layout.extentFull')
+    : variant.design.extent === 'perimeter-band'
+      ? t('layout.extentPerimeter', { value: variant.design.perimeterBandM })
+      : t('layout.extentEdges');
+  return t('layout.variantDescription', {
+    system: t(systemTranslationKey(variant.design.system)),
+    extent,
+    bearing: Math.round(variant.directionDegrees),
+    objective: localizedEnum(variant.design.orientationObjective, t),
+  });
+}
+function localizedIrrigationRecommendation(irrigation: IrrigationEstimate, t: (key: string, values?: Record<string, string | number>) => string) {
+  const adjustment = irrigation.satelliteScheduling.adjustmentPercent;
+  if (adjustment > 0) return t('water.recommendIncrease', { value: adjustment });
+  if (adjustment < 0) return t('water.recommendReduce', { value: Math.abs(adjustment) });
+  return t('water.recommendStable');
+}
+function systemTranslationKey(system: DesignConfiguration['system']) {
+  return {
+    syntropic: 'system.syntropic',
+    'alley-cropping': 'system.alley',
+    'mixed-orchard': 'system.mixedOrchard',
+    monoculture: 'system.monoculture',
+    windbreak: 'system.windbreak',
+    'boundary-buffer': 'system.boundary',
   }[system];
 }
 function stratumOrder(stratum: DesignSpecies['stratum']) { return { ground: 0, low: 1, medium: 2, climber: 3, high: 4, emergent: 5 }[stratum]; }

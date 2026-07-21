@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { distanceToSiteBoundaryM } from '../src/lib/siteGeometry';
-import type { LayoutVariant, SiteBoundary, SiteProfile } from '../src/types';
+import type { LayoutVariant, SiteProfile } from '../src/types';
+import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
+import { importSiteFixture } from './support/siteFixture';
 
 test('keeps the crop interior empty in perimeter mode and exposes measured solar evidence', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.gm-style')).toBeVisible({ timeout: 15_000 });
-  const config = await (await page.request.get('/api/config')).json() as { defaultSite: SiteBoundary };
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
 
   const profilePromise = page.waitForResponse((response) => response.url().endsWith('/api/site/profile') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Analyse this field' }).click();
@@ -19,7 +21,7 @@ test('keeps the crop interior empty in perimeter mode and exposes measured solar
   await page.getByTestId('step-species').click();
   await page.getByLabel('Design system').selectOption('boundary-buffer');
   await expect(page.getByRole('button', { name: 'Perimeter only' })).toHaveClass(/active/);
-  await page.getByLabel('Perimeter band width').fill('7');
+  await page.getByRole('slider', { name: 'Boundary band' }).fill('7');
   await page.getByLabel('Orientation objective').selectOption('solar-crop');
 
   const layoutPromise = page.waitForResponse((response) => response.url().endsWith('/api/layout/generate') && response.request().method() === 'POST');
@@ -37,8 +39,8 @@ test('keeps the crop interior empty in perimeter mode and exposes measured solar
     expect(variant.solar.terrainPlaneKwhM2Year).toBeGreaterThan(1_000);
     expect(variant.trees.length).toBeGreaterThan(20);
     expect(variant.trees.every((tree) => {
-      const distance = distanceToSiteBoundaryM(config.defaultSite, tree.coordinate);
-      return distance >= config.defaultSite.setbackM - 0.05 && distance <= 7.05;
+      const distance = distanceToSiteBoundaryM(TEMPERATE_OPEN_FIELD_FIXTURE, tree.coordinate);
+      return distance >= TEMPERATE_OPEN_FIELD_FIXTURE.setbackM - 0.05 && distance <= 7.05;
     })).toBe(true);
   }
 

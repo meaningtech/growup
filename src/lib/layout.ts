@@ -1,4 +1,5 @@
-import type { Coordinate, DesignConfiguration, DesignSpecies, LayoutVariant, SiteBoundary, SiteProfile, TreeInstance } from '../types';
+import type { Coordinate, DesignConfiguration, DesignSpecies, LayoutVariant, MachineryPlan, SiteBoundary, SiteProfile, TreeInstance } from '../types';
+import { DEFAULT_MACHINERY_CONFIGURATION, machineryEnvelope, normalizeMachineryConfiguration } from '../data/machinery';
 import { growthState } from './growth';
 import { compositionTargets, DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives, speciesObjectiveScore } from './objectives';
 import { distanceToSiteBoundaryM, distanceToSitePathM, estimatedPlantableAreaM2, siteContainsCoordinate, sitePolygons } from './siteGeometry';
@@ -26,6 +27,19 @@ type VariantDefinition = {
   treeSpacingM: number;
 };
 
+type GenerationOptions = {
+  mode: 'full' | 'partial';
+  lockedTrees: TreeInstance[];
+};
+
+type LockedPlacement = {
+  tree: TreeInstance;
+  point: PointM;
+  species: DesignSpecies;
+};
+
+export const LAYOUT_ENGINE_VERSION = 'growaf-layout-1.1.0';
+
 export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   system: 'syntropic',
   extent: 'full-field',
@@ -38,6 +52,7 @@ export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   monocultureSpeciesId: null,
   seed: 41,
   objectives: DEFAULT_DESIGN_OBJECTIVES,
+  machinery: DEFAULT_MACHINERY_CONFIGURATION,
 };
 
 export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration> | null): DesignConfiguration {
@@ -58,6 +73,7 @@ export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration
     monocultureSpeciesId: typeof value?.monocultureSpeciesId === 'string' ? value.monocultureSpeciesId : null,
     seed: Math.round(clamp(Number(value?.seed ?? 41), 1, 2_147_483_647)),
     objectives: normalizeDesignObjectives(value?.objectives),
+    machinery: normalizeMachineryConfiguration(value?.machinery),
   };
 }
 
@@ -68,6 +84,42 @@ export function generateLayoutVariants(
   configuration: DesignConfiguration = DEFAULT_DESIGN_CONFIGURATION,
 ): LayoutVariant[] {
   const design = normalizeDesignConfiguration(configuration);
+  assertLayoutInputs(site, siteProfile, selectedSpecies, design);
+  const permitted = systemSpecies(selectedSpecies, design);
+  if (!permitted.length) throw new Error('The selected palette has no species compatible with this design system');
+
+  const definitions = variantDefinitions(site, siteProfile, permitted, design);
+  return definitions.map((definition) => generateVariant(site, siteProfile, permitted, definition, design, { mode: 'full', lockedTrees: [] }));
+}
+
+export function regenerateLayoutVariant(
+  site: SiteBoundary,
+  siteProfile: SiteProfile,
+  selectedSpecies: DesignSpecies[],
+  previousVariant: LayoutVariant,
+  configuration: DesignConfiguration = previousVariant.design,
+): LayoutVariant {
+  const design = normalizeDesignConfiguration(configuration);
+  assertLayoutInputs(site, siteProfile, selectedSpecies, design);
+  const permitted = systemSpecies(selectedSpecies, design);
+  if (!permitted.length) throw new Error('The selected palette has no species compatible with this design system');
+  const permittedIds = new Set(permitted.map((species) => species.id));
+  const lockedTrees = previousVariant.trees.filter((tree) => tree.locked).map((tree) => ({ ...tree, coordinate: { ...tree.coordinate } }));
+  const missingLockedSpecies = lockedTrees.find((tree) => !permittedIds.has(tree.speciesId));
+  if (missingLockedSpecies) throw new Error(`Locked tree ${missingLockedSpecies.id} uses a species unavailable to the selected design system.`);
+  const geometry = systemGeometry(permitted, design);
+  const definition: VariantDefinition = {
+    id: `${design.system}-${design.extent}-${Math.round(previousVariant.directionDegrees)}-${design.seed}`,
+    name: previousVariant.name,
+    description: variantDescription(design, previousVariant.directionDegrees, siteProfile),
+    directionDegrees: previousVariant.directionDegrees,
+    rowSpacingM: geometry.rowSpacingM,
+    treeSpacingM: geometry.treeSpacingM,
+  };
+  return generateVariant(site, siteProfile, permitted, definition, design, { mode: 'partial', lockedTrees });
+}
+
+function assertLayoutInputs(site: SiteBoundary, siteProfile: SiteProfile, selectedSpecies: DesignSpecies[], design: DesignConfiguration) {
   if (site.polygon.length < 3) throw new Error('A valid site polygon is required');
   if (design.system === 'syntropic' && selectedSpecies.length < 3) throw new Error('Select at least three species to generate a syntropic layout');
   if (design.system !== 'monoculture' && design.system !== 'syntropic' && selectedSpecies.length < 2) throw new Error('Select at least two species for this design system');
@@ -75,9 +127,9 @@ export function generateLayoutVariants(
   if (siteProfile.satellite.existingVegetation.suitability === 'reject') {
     throw new Error('This parcel has too much existing woody vegetation for a blank-slate layout. Refine or replace the boundary first.');
   }
+}
 
-  const permitted = systemSpecies(selectedSpecies, design);
-  if (!permitted.length) throw new Error('The selected palette has no species compatible with this design system');
+function variantDefinitions(site: SiteBoundary, siteProfile: SiteProfile, permitted: DesignSpecies[], design: DesignConfiguration): VariantDefinition[] {
   const dimensions = averageCanopy(permitted, design.analysisYear);
   const contourDirection = normalizeDirection(siteProfile.terrain.aspectDegrees + 90);
   const operationsDirection = normalizeDirection(longestEdgeDirection(site.polygon));
@@ -95,7 +147,7 @@ export function generateLayoutVariants(
   const bearings = uniqueBearings([preferred, solarRanked[0]?.bearing ?? 0, contourDirection, operationsDirection, windDirection]);
   const geometry = systemGeometry(permitted, design);
   const names = ['Preferred', 'Solar alternative', 'Field alternative'];
-  const definitions: VariantDefinition[] = bearings.slice(0, 3).map((directionDegrees, index) => ({
+  return bearings.slice(0, 3).map((directionDegrees, index) => ({
     id: `${design.system}-${design.extent}-${Math.round(directionDegrees)}-${design.seed}`,
     name: `${names[index]} · ${systemLabel(design.system)}`,
     description: variantDescription(design, directionDegrees, siteProfile),
@@ -103,11 +155,9 @@ export function generateLayoutVariants(
     rowSpacingM: geometry.rowSpacingM,
     treeSpacingM: geometry.treeSpacingM,
   }));
-
-  return definitions.map((definition) => generateVariant(site, siteProfile, permitted, definition, design));
 }
 
-function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: DesignSpecies[], definition: VariantDefinition, design: DesignConfiguration): LayoutVariant {
+function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: DesignSpecies[], definition: VariantDefinition, design: DesignConfiguration, options: GenerationOptions): LayoutVariant {
   const permitted = species.filter((item) => item.invasiveStatus !== 'blocked');
   const origin = polygonCentroid(site.polygon);
   const projection = createLocalProjection(origin);
@@ -116,17 +166,30 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const allExclusions = [...site.exclusions, ...protectedVegetation];
   const exclusions = allExclusions.map((exclusion) => exclusion.map(projection.project));
   const candidates = design.extent === 'full-field'
-    ? fullFieldCandidates(site, polygons, projection, exclusions, definition)
+    ? fullFieldCandidates(site, polygons, projection, exclusions, definition, design)
     : perimeterCandidates(site, polygons, projection, exclusions, definition, design);
 
+  const speciesById = new Map(permitted.map((item) => [item.id, item]));
+  const lockedPlacements: LockedPlacement[] = options.lockedTrees.map((tree) => ({ tree, point: projection.project(tree.coordinate), species: speciesById.get(tree.speciesId)! }));
+  for (const locked of lockedPlacements) {
+    if (!isPlantableCandidate(locked.tree.coordinate, locked.point, site, exclusions)) {
+      throw new Error(`Locked tree ${locked.tree.id} violates a current site, exclusion, path or protected-tree constraint.`);
+    }
+  }
   const placedBySpecies = new Map<string, PointM[]>();
-  const trees: TreeInstance[] = [];
+  for (const locked of lockedPlacements) placedBySpecies.set(locked.tree.speciesId, [...(placedBySpecies.get(locked.tree.speciesId) ?? []), locked.point]);
+  const trees: TreeInstance[] = options.lockedTrees.map((tree) => ({ ...tree, coordinate: { ...tree.coordinate } }));
+  let lockedCandidateSkips = 0;
 
   for (const candidate of candidates) {
     const missing = permitted.filter((item) => !placedBySpecies.has(item.id));
     const ordered = speciesOrder(missing.length ? missing : permitted, candidate.rowIndex, candidate.positionIndex, design);
     const selected = ordered.find((item) => canPlaceSpecies(item, candidate, placedBySpecies)) ?? ordered[0];
     if (!selected) continue;
+    if (lockedPlacements.some((locked) => lockedTreeConflict(candidate, selected, locked, definition))) {
+      lockedCandidateSkips += 1;
+      continue;
+    }
     const id = `${definition.id}-r${candidate.rowIndex}-p${candidate.positionIndex}-${selected.id}-${design.seed}`;
     const plantedYear = selected.succession === 'placenta' ? 0 : selected.succession === 'secondary' ? 1 : 2;
     const removedYear = selected.succession === 'placenta' && selected.roles.includes('biomass') ? 10 : null;
@@ -165,12 +228,21 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const dimensions = averageCanopy(permitted, design.analysisYear);
   const solar = assessSolarOrientation(siteProfile, design, definition.directionDegrees, dimensions);
   const cropInteriorAreaM2 = estimateCropInteriorArea(site, areaM2, design, definition);
-  const composition = layoutComposition(trees, permitted, design);
+  const composition = layoutComposition(trees, permitted, design, siteProfile);
+  const machinery = buildMachineryPlan(site, trees, projection, definition, design);
 
-  if (design.system !== 'monoculture' && composition.nativePercent < composition.targets.nativePercent) warnings.push(`Native composition ${composition.nativePercent}% is below the ${composition.targets.nativePercent}% objective target.`);
+  if (design.system !== 'monoculture' && composition.nativePercent !== null && composition.nativePercent < composition.targets.nativePercent) warnings.push(`Native composition ${composition.nativePercent}% is below the ${composition.targets.nativePercent}% objective target.`);
   if (design.system === 'syntropic' && composition.nitrogenFixerPercent < composition.targets.nitrogenFixerPercent) warnings.push(`Nitrogen-fixer composition ${composition.nitrogenFixerPercent}% is below the ${composition.targets.nitrogenFixerPercent}% target.`);
   if (design.system === 'syntropic' && representedStrata.size < composition.targets.minimumStrata) warnings.push(`${representedStrata.size} strata are represented; the biodiversity objective targets ${composition.targets.minimumStrata}.`);
   const score = Math.max(0, Math.min(100, Math.round(45 + orientationScore(solar, design) * 0.35 + representedSpecies.size * 1.2 + representedStrata.size * 2 - warnings.length * 4)));
+  const conflicts = lockedSpacingConflicts(lockedPlacements, definition);
+  if (lockedCandidateSkips > 0) conflicts.push({
+    code: 'LOCKED_TREE_SKIPPED_CANDIDATE',
+    severity: 'warning',
+    message: `${lockedCandidateSkips} generated candidate ${lockedCandidateSkips === 1 ? 'was' : 'were'} skipped to preserve locked-tree clearance.`,
+    treeIds: options.lockedTrees.map((tree) => tree.id),
+  });
+  if (options.mode === 'partial') warnings.push(`Partial regeneration preserved ${options.lockedTrees.length} locked ${options.lockedTrees.length === 1 ? 'plant' : 'plants'} unchanged and reflowed ${trees.length - options.lockedTrees.length} unlocked positions.`);
 
   return {
     ...definition,
@@ -179,6 +251,16 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
     score,
     trees,
     warnings,
+    generation: {
+      engineVersion: LAYOUT_ENGINE_VERSION,
+      mode: options.mode,
+      seed: design.seed,
+      lockedTreeCount: options.lockedTrees.length,
+      generatedTreeCount: trees.length - options.lockedTrees.length,
+      assumptions: generationAssumptions(site, definition, design),
+      conflicts,
+    },
+    machinery,
     composition,
     metrics: {
       totalTrees: trees.length,
@@ -197,8 +279,10 @@ function fullFieldCandidates(
   projection: ReturnType<typeof createLocalProjection>,
   exclusions: PointM[][],
   definition: VariantDefinition,
+  design: DesignConfiguration,
 ) {
   const candidates: Array<PointM & { rowIndex: number; positionIndex: number }> = [];
+  const { headlandDepthM } = machineryEnvelope(design.machinery);
   let rowIndex = 0;
   for (const polygon of polygons) {
     const rotatedPolygon = polygon.map((point) => rotate(point, -definition.directionDegrees));
@@ -206,13 +290,16 @@ function fullFieldCandidates(
     for (let y = fieldBounds.minY + definition.rowSpacingM / 2; y <= fieldBounds.maxY; y += definition.rowSpacingM) {
       const stagger = rowIndex % 2 === 0 ? 0 : definition.treeSpacingM / 2;
       let positionIndex = 0;
-      for (let x = fieldBounds.minX + definition.treeSpacingM / 2 + stagger; x <= fieldBounds.maxX; x += definition.treeSpacingM) {
+      const rowStart = fieldBounds.minX + headlandDepthM + definition.treeSpacingM / 2 + stagger;
+      const rowEnd = fieldBounds.maxX - headlandDepthM;
+      for (let x = rowStart; x <= rowEnd; x += definition.treeSpacingM) {
+        const currentPositionIndex = positionIndex;
+        positionIndex += 1;
         const local = rotate({ x, y }, definition.directionDegrees);
         if (!pointInPolygon(local, polygon) || distanceToPolygonEdge(local, polygon) < site.setbackM) continue;
         const coordinate = projection.unproject(local);
         if (!isPlantableCandidate(coordinate, local, site, exclusions)) continue;
-        candidates.push({ ...local, rowIndex, positionIndex });
-        positionIndex += 1;
+        candidates.push({ ...local, rowIndex, positionIndex: currentPositionIndex });
       }
       rowIndex += 1;
     }
@@ -230,6 +317,7 @@ function perimeterCandidates(
 ) {
   const candidates: Array<PointM & { rowIndex: number; positionIndex: number }> = [];
   const bandM = design.perimeterBandM;
+  const { headlandDepthM } = machineryEnvelope(design.machinery);
   let rowIndex = 0;
   for (const polygon of polygons) {
     const center = polygon.reduce((result, point) => ({ x: result.x + point.x / polygon.length, y: result.y + point.y / polygon.length }), { x: 0, y: 0 });
@@ -257,7 +345,9 @@ function perimeterCandidates(
         const offset = site.setbackM + definition.treeSpacingM * 0.45 + row * definition.rowSpacingM;
         if (offset > bandM) continue;
         let positionIndex = 0;
-        for (let along = definition.treeSpacingM / 2; along < edge.length; along += definition.treeSpacingM) {
+        for (let along = headlandDepthM + definition.treeSpacingM / 2; along < edge.length - headlandDepthM; along += definition.treeSpacingM) {
+          const currentPositionIndex = positionIndex;
+          positionIndex += 1;
           const local = {
             x: edge.start.x + tangent.x * along + inward.x * offset,
             y: edge.start.y + tangent.y * along + inward.y * offset,
@@ -266,8 +356,7 @@ function perimeterCandidates(
           if (!pointInPolygon(local, polygon) || !isPlantableCandidate(coordinate, local, site, exclusions)) continue;
           if (distanceToSiteBoundaryM(site, coordinate) > bandM) continue;
           if (candidates.some((candidate) => Math.hypot(candidate.x - local.x, candidate.y - local.y) < definition.treeSpacingM * 0.65)) continue;
-          candidates.push({ ...local, rowIndex, positionIndex });
-          positionIndex += 1;
+          candidates.push({ ...local, rowIndex, positionIndex: currentPositionIndex });
         }
         rowIndex += 1;
       }
@@ -302,12 +391,11 @@ function speciesOrder(species: DesignSpecies[], row: number, position: number, d
   });
 }
 
-function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], design: DesignConfiguration): LayoutVariant['composition'] {
+function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], design: DesignConfiguration, profile: SiteProfile): LayoutVariant['composition'] {
   const byId = new Map(species.map((item) => [item.id, item]));
   const byStratum: LayoutVariant['composition']['byStratum'] = {};
   const bySuccession: LayoutVariant['composition']['bySuccession'] = {};
   let productive = 0;
-  let native = 0;
   let nitrogenFixer = 0;
   for (const tree of trees) {
     const item = byId.get(tree.speciesId);
@@ -315,7 +403,6 @@ function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], desi
     byStratum[item.stratum] = (byStratum[item.stratum] ?? 0) + 1;
     bySuccession[item.succession] = (bySuccession[item.succession] ?? 0) + 1;
     if (item.productiveFromYear !== null || item.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role))) productive += 1;
-    if (item.nativeItaly) native += 1;
     if (item.nitrogenFixer) nitrogenFixer += 1;
   }
   const count = Math.max(1, trees.length);
@@ -323,7 +410,8 @@ function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], desi
     byStratum,
     bySuccession,
     productivePercent: Math.round(productive / count * 100),
-    nativePercent: Math.round(native / count * 100),
+    nativePercent: null,
+    nativeDataAvailable: false,
     nitrogenFixerPercent: Math.round(nitrogenFixer / count * 100),
     targets: compositionTargets(design.objectives),
   };
@@ -332,6 +420,65 @@ function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], desi
 function canPlaceSpecies(species: DesignSpecies, candidate: PointM, placedBySpecies: Map<string, PointM[]>): boolean {
   const minimum = Math.max(1.6, species.spacingM * 0.72);
   return (placedBySpecies.get(species.id) ?? []).every((point) => Math.hypot(point.x - candidate.x, point.y - candidate.y) >= minimum);
+}
+
+function lockedTreeConflict(
+  candidate: PointM,
+  species: DesignSpecies,
+  locked: LockedPlacement,
+  definition: VariantDefinition,
+): boolean {
+  const biologicalClearanceM = (species.spacingM + locked.species.spacingM) * 0.36;
+  const gridClearanceM = definition.treeSpacingM * 0.65;
+  const minimumClearanceM = Math.max(1.6, biologicalClearanceM, gridClearanceM);
+  return Math.hypot(candidate.x - locked.point.x, candidate.y - locked.point.y) < minimumClearanceM;
+}
+
+function lockedSpacingConflicts(
+  lockedPlacements: LockedPlacement[],
+  definition: VariantDefinition,
+): LayoutVariant['generation']['conflicts'] {
+  const conflicts: LayoutVariant['generation']['conflicts'] = [];
+  for (let index = 0; index < lockedPlacements.length; index += 1) {
+    for (let nextIndex = index + 1; nextIndex < lockedPlacements.length; nextIndex += 1) {
+      const current = lockedPlacements[index];
+      const next = lockedPlacements[nextIndex];
+      const distanceM = Math.hypot(current.point.x - next.point.x, current.point.y - next.point.y);
+      const requiredM = Math.max(
+        1.6,
+        (current.species.spacingM + next.species.spacingM) * 0.36,
+        definition.treeSpacingM * 0.65,
+      );
+      if (distanceM >= requiredM) continue;
+      conflicts.push({
+        code: 'LOCKED_TREE_SPACING',
+        severity: 'warning',
+        message: `Locked plants ${current.tree.id} and ${next.tree.id} are ${distanceM.toFixed(1)} m apart; ${requiredM.toFixed(1)} m is required by the current spacing rule.`,
+        treeIds: [current.tree.id, next.tree.id],
+      });
+    }
+  }
+  return conflicts;
+}
+
+function generationAssumptions(
+  site: SiteBoundary,
+  definition: VariantDefinition,
+  design: DesignConfiguration,
+): LayoutVariant['generation']['assumptions'] {
+  const polygons = sitePolygons(site).length;
+  const extent = design.extent === 'full-field'
+    ? 'full plantable field'
+    : design.extent === 'perimeter-band'
+      ? `${design.perimeterBandM.toFixed(1)} m inward perimeter band`
+      : 'selected boundary edges';
+  return [
+    { label: 'Placement seed', value: String(design.seed) },
+    { label: 'Boundary rule', value: `${polygons} planting ${polygons === 1 ? 'polygon' : 'polygons'}; ${site.setbackM.toFixed(1)} m setback` },
+    { label: 'Grid geometry', value: `${definition.rowSpacingM.toFixed(1)} m rows × ${definition.treeSpacingM.toFixed(1)} m plants at ${Math.round(definition.directionDegrees)}°` },
+    { label: 'Planting extent', value: extent },
+    { label: 'Hard constraints', value: 'holes, exclusions, paths, observed trees and detected woody vegetation' },
+  ];
 }
 
 function canopyCoverage(trees: TreeInstance[], species: DesignSpecies[], year: number, areaM2: number): number {
@@ -366,12 +513,102 @@ function systemSpecies(species: DesignSpecies[], design: DesignConfiguration) {
 
 function systemGeometry(species: DesignSpecies[], design: DesignConfiguration) {
   const averageSpacing = species.reduce((sum, item) => sum + item.spacingM, 0) / Math.max(1, species.length);
-  if (design.system === 'alley-cropping') return { rowSpacingM: design.cropAlleyWidthM, treeSpacingM: clamp(averageSpacing * 0.8, 3.5, 8) };
-  if (design.system === 'mixed-orchard') return { rowSpacingM: clamp(averageSpacing * 1.08, 5, 11), treeSpacingM: clamp(averageSpacing, 4, 10) };
-  if (design.system === 'monoculture') return { rowSpacingM: clamp(averageSpacing, 3, 12), treeSpacingM: clamp(averageSpacing, 3, 12) };
-  if (design.system === 'windbreak') return { rowSpacingM: 3.5, treeSpacingM: clamp(averageSpacing * 0.55, 2.8, 5) };
-  if (design.system === 'boundary-buffer') return { rowSpacingM: 4.5, treeSpacingM: clamp(averageSpacing * 0.65, 2.8, 6) };
-  return { rowSpacingM: 6.5, treeSpacingM: 3.8 };
+  const machineCorridorM = machineryEnvelope(design.machinery).corridorWidthM;
+  const result = design.system === 'alley-cropping' ? { rowSpacingM: design.cropAlleyWidthM, treeSpacingM: clamp(averageSpacing * 0.8, 3.5, 8) }
+    : design.system === 'mixed-orchard' ? { rowSpacingM: clamp(averageSpacing * 1.08, 5, 11), treeSpacingM: clamp(averageSpacing, 4, 10) }
+      : design.system === 'monoculture' ? { rowSpacingM: clamp(averageSpacing, 3, 12), treeSpacingM: clamp(averageSpacing, 3, 12) }
+        : design.system === 'windbreak' ? { rowSpacingM: 3.5, treeSpacingM: clamp(averageSpacing * 0.55, 2.8, 5) }
+          : design.system === 'boundary-buffer' ? { rowSpacingM: 4.5, treeSpacingM: clamp(averageSpacing * 0.65, 2.8, 6) }
+            : { rowSpacingM: 6.5, treeSpacingM: 3.8 };
+  return { ...result, rowSpacingM: Math.max(result.rowSpacingM, machineCorridorM) };
+}
+
+function buildMachineryPlan(
+  site: SiteBoundary,
+  trees: TreeInstance[],
+  projection: ReturnType<typeof createLocalProjection>,
+  definition: VariantDefinition,
+  design: DesignConfiguration,
+): MachineryPlan {
+  const configuration = design.machinery;
+  const envelope = machineryEnvelope(configuration);
+  if (!configuration.enabled) {
+    return {
+      enabled: false,
+      presetId: configuration.presetId,
+      machineWidthM: configuration.widthM,
+      machineLengthM: configuration.lengthM,
+      implementWidthM: configuration.implementWidthM,
+      safetyClearanceM: configuration.safetyClearanceM,
+      requiredCorridorWidthM: 0,
+      headlandDepthM: 0,
+      effectiveRowSpacingM: definition.rowSpacingM,
+      reservedAreaM2: 0,
+      corridors: [],
+      turningAreas: [],
+      clearanceSatisfied: true,
+      notes: ['Machinery clearance is disabled for this design.'],
+    };
+  }
+  const rows = [...groupTreesByRow(trees, projection, definition.directionDegrees).entries()]
+    .filter(([, points]) => points.length > 0)
+    .sort((a, b) => rowMeanY(a[1]) - rowMeanY(b[1]));
+  const corridors: MachineryPlan['corridors'] = [];
+  const turningAreas: MachineryPlan['turningAreas'] = [];
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    const [firstRowIndex, first] = rows[index];
+    const [secondRowIndex, second] = rows[index + 1];
+    const startX = Math.max(Math.min(...first.map((point) => point.x)), Math.min(...second.map((point) => point.x))) - definition.treeSpacingM / 2;
+    const endX = Math.min(Math.max(...first.map((point) => point.x)), Math.max(...second.map((point) => point.x))) + definition.treeSpacingM / 2;
+    if (endX <= startX) continue;
+    const y = (rowMeanY(first) + rowMeanY(second)) / 2;
+    const start = projection.unproject(rotate({ x: startX, y }, definition.directionDegrees));
+    const end = projection.unproject(rotate({ x: endX, y }, definition.directionDegrees));
+    const id = `machine-corridor-${firstRowIndex}-${secondRowIndex}`;
+    corridors.push({ id, points: [start, end], widthM: envelope.corridorWidthM });
+    turningAreas.push(
+      { id: `${id}-start`, center: start, radiusM: envelope.turningAreaRadiusM, rowIndexes: [firstRowIndex, secondRowIndex] },
+      { id: `${id}-end`, center: end, radiusM: envelope.turningAreaRadiusM, rowIndexes: [firstRowIndex, secondRowIndex] },
+    );
+  }
+  const corridorAreaM2 = corridors.reduce((sum, corridor) => {
+    const start = projection.project(corridor.points[0]);
+    const end = projection.project(corridor.points[1]);
+    return sum + Math.hypot(end.x - start.x, end.y - start.y) * corridor.widthM;
+  }, 0);
+  const turningAreaM2 = turningAreas.length * Math.PI * envelope.turningAreaRadiusM ** 2;
+  return {
+    enabled: true,
+    presetId: configuration.presetId,
+    machineWidthM: configuration.widthM,
+    machineLengthM: configuration.lengthM,
+    implementWidthM: configuration.implementWidthM,
+    safetyClearanceM: configuration.safetyClearanceM,
+    requiredCorridorWidthM: envelope.corridorWidthM,
+    headlandDepthM: envelope.headlandDepthM,
+    effectiveRowSpacingM: definition.rowSpacingM,
+    reservedAreaM2: Math.round(Math.min(estimatedPlantableAreaM2(site), corridorAreaM2 + turningAreaM2)),
+    corridors,
+    turningAreas,
+    clearanceSatisfied: definition.rowSpacingM + 1e-6 >= envelope.corridorWidthM,
+    notes: [
+      `${envelope.corridorWidthM.toFixed(2)} m operating corridors include machine, implement and lateral safety clearance.`,
+      `${envelope.headlandDepthM.toFixed(2)} m headlands are reserved at row ends for turning.`,
+    ],
+  };
+}
+
+function groupTreesByRow(trees: TreeInstance[], projection: ReturnType<typeof createLocalProjection>, bearingDegrees: number) {
+  const rows = new Map<number, PointM[]>();
+  for (const tree of trees) {
+    const local = rotate(projection.project(tree.coordinate), -bearingDegrees);
+    rows.set(tree.rowIndex, [...(rows.get(tree.rowIndex) ?? []), local]);
+  }
+  return rows;
+}
+
+function rowMeanY(points: PointM[]) {
+  return points.reduce((sum, point) => sum + point.y, 0) / points.length;
 }
 
 function averageCanopy(species: DesignSpecies[], year: number) {

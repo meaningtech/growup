@@ -45,7 +45,7 @@ export function assessSolarOrientation(
     bearingDegrees: round(modulo(bearingDegrees, 180), 0),
     windAlignmentDegrees: windBearing === null ? null : round(axisDifference(bearingDegrees, windBearing), 1),
     contourAlignmentDegrees: round(axisDifference(bearingDegrees, contourBearing), 1),
-    method: 'Open-Meteo 2021–2025 hourly radiation climatology; NOAA/Meeus solar geometry; terrain-plane incidence; geometric crown-shadow comparison',
+    method: 'Open-Meteo 2021–2025 UTC hourly radiation climatology; NOAA/Meeus solar geometry; terrain-plane incidence; geometric crown-shadow comparison',
     limitations: [
       'Comparative irradiance is not crop PAR and does not model local horizon obstructions.',
       'Crown transmittance, pruning response and leaf-area density require field calibration.',
@@ -83,8 +83,7 @@ export function assessSolarOrientation(
 
   for (const bin of climatology) {
     const days = daysInMonth(bin.month);
-    const utcOffset = europeRomeUtcOffset(bin.month);
-    const date = new Date(Date.UTC(2024, bin.month - 1, 15, bin.hour - utcOffset, 30));
+    const date = new Date(Date.UTC(2024, bin.month - 1, 15, bin.hour, 30));
     const sun = solarPositionNoaa(date, profile.centroid.lat, profile.centroid.lng);
     if (sun.elevationDegrees <= 0) continue;
     const elevation = toRadians(sun.elevationDegrees);
@@ -142,7 +141,6 @@ export function orientationScore(assessment: SolarOrientationAssessment, design:
   return round(solar * 0.75 + contour * 0.25, 0);
 }
 
-function europeRomeUtcOffset(month: number) { return month >= 4 && month <= 10 ? 2 : 1; }
 function daysInMonth(month: number) { return [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]; }
 function axisDifference(a: number, b: number) { const difference = Math.abs(modulo(a, 180) - modulo(b, 180)); return Math.min(difference, 180 - difference); }
 function modulo(value: number, divisor: number) { return ((value % divisor) + divisor) % divisor; }

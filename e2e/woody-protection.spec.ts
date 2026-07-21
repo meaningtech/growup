@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { RAGUSA_IBLA_WOODY_REGRESSION_SITE } from '../src/data/ragusaIblaSite';
+import { WOODY_FIELD_FIXTURE } from '../test/fixtures/sites';
 import type { Coordinate, DesignSpecies, LayoutVariant, SiteProfile } from '../src/types';
 
-test('detects the known Ragusa tree and rejects or protects the wooded parcel', async ({ request }) => {
-  const profileResponse = await request.post('/api/site/profile', { data: RAGUSA_IBLA_WOODY_REGRESSION_SITE });
+test('detects a known tree and rejects or protects the wooded test parcel', async ({ request }) => {
+  const profileResponse = await request.post('/api/site/profile', { data: WOODY_FIELD_FIXTURE });
   expect(profileResponse.ok()).toBeTruthy();
   const profile = await profileResponse.json() as SiteProfile;
   const vegetation = profile.satellite.existingVegetation;
@@ -22,7 +22,7 @@ test('detects the known Ragusa tree and rejects or protects the wooded parcel', 
   const selectedSpeciesIds = recommendationPayload.palette.map((species) => species.id);
 
   const layoutResponse = await request.post('/api/layout/generate', {
-    data: { site: RAGUSA_IBLA_WOODY_REGRESSION_SITE, siteProfile: profile, selectedSpeciesIds },
+    data: { site: WOODY_FIELD_FIXTURE, siteProfile: profile, selectedSpeciesIds },
   });
   if (vegetation.suitability === 'reject') {
     expect(layoutResponse.status()).toBe(422);

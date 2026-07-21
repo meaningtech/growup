@@ -74,7 +74,7 @@ In one continuous workspace, a user can move from a geographic perimeter to an e
 
 ### 3.3 Initial geographic posture
 
-The architecture and catalogue are global. The first calibration and end-to-end validation region will be Sicily and the Mediterranean because Solaraf already centers on Ragusa and this gives a concrete climate, mapping, and field-validation context. The application must never assume that a globally listed species is appropriate for Sicily merely because it exists in the catalogue.
+The architecture, catalogue, and runtime are global. No calibration field is bundled or selected at startup. Regional profiles are activated explicitly from the field coordinates, and the application must never infer that a globally listed species is locally appropriate without country-level evidence.
 
 ### 3.4 Included in the complete target
 
@@ -1402,7 +1402,7 @@ Exit gate:
 ## 21. Assumptions requiring validation during implementation
 
 - Google Maps remains the base map to maximize Solaraf code reuse and satellite familiarity.
-- Sicily/Ragusa is the first calibration region, not a permanent geographic restriction.
+- Country and regional calibration profiles are explicit modules, never permanent restrictions or startup defaults.
 - PostgreSQL/PostGIS is acceptable for persistent spatial projects.
 - The first design-ready catalogue can be intentionally smaller than the full discoverable catalogue as long as the distinction is explicit.
 - Users prefer explainable deterministic variants to an opaque AI-generated layout.

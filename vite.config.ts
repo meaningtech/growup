@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
+    headers: {
+      'Referrer-Policy': 'no-referrer-when-downgrade',
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8788',

@@ -1,6 +1,6 @@
 import { fromArrayBuffer } from 'geotiff';
 import { bounds, createLocalProjection, haversineM, polygonAreaM2, polygonCentroid, polygonPerimeterM } from '../src/lib/geometry.js';
-import { sitePolygons } from '../src/lib/siteGeometry.js';
+import { siteContainsCoordinate, sitePolygons } from '../src/lib/siteGeometry.js';
 import type { Coordinate, Evidence, LocationSearchResult, SiteBoundary, SiteProfile, SolarClimateBin, SolarResourceProfile } from '../src/types.js';
 import { fetchSatelliteProfile, type SentinelProviderConfig, unavailableSatelliteProfile } from './sentinel.js';
 
@@ -56,7 +56,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
 
   const fetchImpl = config.fetchImpl ?? fetch;
   const centroid = weightedSiteCentroid(polygons);
-  const sampleCoordinates = samplingPoints(polygons.flat(), centroid);
+  const sampleCoordinates = terrainSamplingPoints(site, centroid);
   const [location, elevations, climate, solar, soil, landCover, satellite] = await Promise.all([
     safeProvider(() => fetchLocation(centroid, fetchImpl, config), 'Reverse geocoding is unavailable.'),
     safeProvider(() => fetchElevations(sampleCoordinates, fetchImpl, config), 'Terrain elevation is unavailable.'),
@@ -166,7 +166,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
         const resolution = average(results.map((item) => Number(item.resolution ?? 0)).filter((value) => value > 0));
         return {
           samples: points.map((point, index) => ({ ...point, elevationM: Number(results[index].elevation) })),
-          evidence: evidence('Google Maps Elevation API', baseUrl, 'live', new Date().toISOString(), resolution <= 30 ? 'high' : 'medium', resolution ? `${round(resolution, 1)} m mean source resolution` : 'sampled field points'),
+          evidence: evidence('Google Maps Elevation API', baseUrl, 'live', new Date().toISOString(), resolution <= 30 ? 'high' : 'medium', `${resolution ? `${round(resolution, 1)} m mean source resolution; ` : ''}${points.length} field-clipped terrain samples`),
         };
       }
     }
@@ -178,7 +178,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
     longitude: points.map((point) => point.lng.toFixed(6)).join(','),
     current: 'temperature_2m',
     forecast_days: '1',
-    timezone: 'Europe/Rome',
+    timezone: 'auto',
   }).toString();
   const response = await fetchWithTimeout(fetchImpl, url);
   if (!response.ok) throw new Error(`Open-Meteo terrain request returned ${response.status}`);
@@ -187,7 +187,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
   if (records.length !== points.length || records.some((record) => !Number.isFinite(record.elevation))) throw new Error('Open-Meteo returned incomplete elevation samples');
   return {
     samples: points.map((point, index) => ({ ...point, elevationM: Number(records[index].elevation) })),
-    evidence: evidence('Open-Meteo elevation API', baseUrl, '90 m DEM', new Date().toISOString(), 'medium', 'centroid and field boundary samples'),
+    evidence: evidence('Open-Meteo elevation API', baseUrl, '90 m DEM', new Date().toISOString(), 'medium', `${points.length} field-clipped terrain samples`),
   };
 }
 
@@ -197,7 +197,7 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
   url.search = new URLSearchParams({
     latitude: String(centroid.lat), longitude: String(centroid.lng), start_date: CLIMATE_START, end_date: CLIMATE_END,
     hourly: 'direct_normal_irradiance,diffuse_radiation,shortwave_radiation,wind_speed_10m,wind_direction_10m',
-    wind_speed_unit: 'ms', timezone: 'Europe/Rome',
+    wind_speed_unit: 'ms', timezone: 'GMT',
   }).toString();
   const response = await fetchWithTimeout(fetchImpl, url, {}, 45_000);
   if (!response.ok) throw new Error(`Open-Meteo solar request returned ${response.status}`);
@@ -294,7 +294,7 @@ async function fetchClimate(centroid: Coordinate, fetchImpl: typeof fetch, confi
   const url = new URL(baseUrl);
   url.search = new URLSearchParams({
     latitude: String(centroid.lat), longitude: String(centroid.lng), start_date: CLIMATE_START, end_date: CLIMATE_END,
-    daily: 'temperature_2m_mean,temperature_2m_min,temperature_2m_max,precipitation_sum,et0_fao_evapotranspiration', timezone: 'Europe/Rome',
+    daily: 'temperature_2m_mean,temperature_2m_min,temperature_2m_max,precipitation_sum,et0_fao_evapotranspiration', timezone: 'auto',
   }).toString();
   const response = await fetchWithTimeout(fetchImpl, url);
   if (!response.ok) throw new Error(`Open-Meteo climate request returned ${response.status}`);
@@ -416,11 +416,39 @@ function summarizeTerrain(samples: Array<Coordinate & { elevationM: number }>, t
   };
 }
 
-function samplingPoints(polygon: Coordinate[], centroid: Coordinate): Coordinate[] {
-  const limit = 9;
-  if (polygon.length <= limit - 1) return [centroid, ...polygon];
-  const step = polygon.length / (limit - 1);
-  return [centroid, ...Array.from({ length: limit - 1 }, (_, index) => polygon[Math.floor(index * step)])];
+export function terrainSamplingPoints(site: SiteBoundary, centroid = weightedSiteCentroid(sitePolygons(site))): Coordinate[] {
+  const projection = createLocalProjection(centroid);
+  const projectedPolygons = sitePolygons(site).map((polygon) => polygon.map(projection.project));
+  const fieldBounds = bounds(projectedPolygons.flat());
+  const divisions = 9;
+  const candidates: Coordinate[] = [centroid];
+
+  for (const polygon of sitePolygons(site)) {
+    const polygonCentre = polygonCentroid(polygon);
+    for (const vertex of polygon) {
+      candidates.push({
+        lat: vertex.lat * 0.94 + polygonCentre.lat * 0.06,
+        lng: vertex.lng * 0.94 + polygonCentre.lng * 0.06,
+      });
+    }
+  }
+
+  for (let row = 0; row < divisions; row += 1) {
+    for (let column = 0; column < divisions; column += 1) {
+      const point = projection.unproject({
+        x: fieldBounds.minX + (fieldBounds.maxX - fieldBounds.minX) * (column + 0.5) / divisions,
+        y: fieldBounds.minY + (fieldBounds.maxY - fieldBounds.minY) * (row + 0.5) / divisions,
+      });
+      if (siteContainsCoordinate(site, point)) candidates.push(point);
+    }
+  }
+
+  const unique = new Map<string, Coordinate>();
+  for (const point of candidates) {
+    if (!siteContainsCoordinate(site, point)) continue;
+    unique.set(`${point.lat.toFixed(7)},${point.lng.toFixed(7)}`, point);
+  }
+  return [...unique.values()].slice(0, 100);
 }
 
 function fitTerrainPlane(samples: Array<Coordinate & { elevationM: number }>): { a: number; b: number; c: number } | null {
