@@ -17,6 +17,9 @@
 - Growaf owns only `growaf_users` and `growaf_projects`. Preserve owner isolation and the READY indexes: unique user `_id`, unique sparse email, unique project `_id`, and `{ ownerUserId: 1, updatedAt: -1 }`.
 - Google sign-in is optional. Anonymous users can analyse and design. Saving, reopening and exporting stored projects require a verified Google ID token and the signed HttpOnly `growaf_session` cookie.
 - The AI assistant is provider-agnostic through an OpenAI-compatible server adapter. Keep provider keys server-only, resolve proposed species against the curated catalogue, validate every action, and require user confirmation before mutation.
+- `server/economics.ts` resolves one global USD planning basket through a live country-to-currency mapping and USD exchange table. Never add country-specific pricing branches; local rates are explicit user overrides.
+- `server/export.ts` is the only project export composer. GeoJSON and CSV output must remain deterministic for the same stored project and include calculation/model metadata without credentials or private identity data.
+- The production container is a two-stage Node 20 image. Cloud Run injects PostGIS, Mongo, Maps, OAuth, AI and session credentials through environment variables or Secret Manager; no deployment secret belongs in the image.
 
 ## API surface
 
@@ -35,10 +38,16 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - `LayoutVariant.composition` records actual stratum/succession counts plus productive, native and nitrogen-fixer shares and their targets.
 - Species with `invasiveStatus: blocked` never enter a layout. `monitor` species can never be rated `recommended`. Missing critical soil pH caps a result at `conditional`.
 - Every layout is deterministic for the same normalized site, species, configuration and seed. Existing woody Sentinel polygons, field-observed trees, exclusions, paths and setbacks are hard placement constraints.
+- `LayoutVariant.generation` records the layout engine version, seed, full/partial mode, locked-tree count, assumptions and conflicts. Partial regeneration must preserve every valid locked tree byte-for-byte and reflow only unlocked candidates.
+- `LayoutVariant.machinery` records exact corridor centre lines, required widths, turning areas and clearance results. Planned trees, machinery, irrigation, boundary, constraints, infrastructure and evidence overlays are independently switchable map layers.
+- `GrowthState` exposes deterministic low/base/high height and crown estimates plus model version, hierarchy and confidence. Zero values outside the active planting/removal interval are intentional.
+- `IrrigationConfiguration` includes source, flow, pressure, emitter, distribution-efficiency, operating-window and manual line-override inputs. `IrrigationNetworkPlan` must preserve source placement, editable geometry, obstacle routing, head/flow checks, measured versus purchase pipe quantities and the component bill of materials.
+- Economic values use `EconomicConfiguration.baseCurrencyCode = USD`; displayed currency is a conversion estimate unless the user supplies local rates. Syntropic operating curves may decline with succession, while establishment CAPEX remains a historical total.
 - Sentinel-1 output is a same-orbit backscatter anomaly, not volumetric soil moisture. Keep this distinction in UI, API and exports.
 
 ## Verification
 
 - Baseline: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`.
+- Property and performance gates live in `src/lib/layout.property.test.ts` and `server/performance.test.ts`; do not weaken plantability, determinism, catalogue, growth or layout thresholds to hide regressions.
 - Live Mongo: set `GROWAF_LIVE_MONGO_TEST=1` with in-memory `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
 - Browser behavior must be verified with explicit imported field fixtures; production must never bundle or auto-load a localized default field. Keep screenshots and generated test artifacts out of Git.
