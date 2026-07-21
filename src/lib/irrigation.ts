@@ -5,6 +5,8 @@ import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid, typ
 import { siteContainsCoordinate } from './siteGeometry';
 import { managementLaborHours, supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
 
+export const IRRIGATION_MODEL_VERSION = 'growaf-irrigation-1.0.0';
+
 export const DEFAULT_IRRIGATION_CONFIGURATION: IrrigationConfiguration = {
   sourceType: 'network',
   sourcePointId: null,
@@ -213,7 +215,7 @@ function designIrrigationNetwork(
   const centroid = polygonCentroid(boundary.polygon);
   const highest = [...profile.terrain.samples].sort((a, b) => {
     const elevationDifference = b.elevationM - a.elevationM;
-    if (Math.abs(elevationDifference) > 0.05) return elevationDifference;
+    if (elevationDifference !== 0) return elevationDifference;
     return haversineM(b, centroid) - haversineM(a, centroid);
   })[0];
   const sourceCoordinate = sourcePoint?.coordinate ?? (highest ? { lat: highest.lat, lng: highest.lng } : centroid);

@@ -14,7 +14,7 @@
 - `src/` is the React/Vite map-first client. `server/` is the Express API. Shared domain contracts live in `src/types.ts`; deterministic calculation code lives in `src/lib/`.
 - PostGIS is authoritative only for boundary, exclusion, path and protected-tree geometry validation/measurement. Do not store project documents in PostGIS.
 - Project persistence reuses the explicitly configured Firestore Enterprise Mongo-compatible database path `/solaraf` as infrastructure only. Runtime code must pass the host/database guard in `server/mongo.ts`; do not create another database or Mongo user.
-- Growaf owns only `growaf_users` and `growaf_projects`. Preserve owner isolation and the READY indexes: unique user `_id`, unique sparse email, unique project `_id`, and `{ ownerUserId: 1, updatedAt: -1 }`.
+- Growaf owns only `growaf_users`, `growaf_projects`, `growaf_project_revisions` and `growaf_calculation_runs`. Preserve owner isolation and every READY index: unique document `_id` indexes, sparse unique user email, `{ ownerUserId: 1, updatedAt: -1 }` for projects, `{ ownerUserId: 1, projectId: 1, revision: -1 }` for revisions and `{ ownerUserId: 1, projectId: 1, createdAt: -1 }` for calculation runs.
 - Google sign-in is optional. Anonymous users can analyse and design. Saving, reopening and exporting stored projects require a verified Google ID token and the signed HttpOnly `growaf_session` cookie.
 - The AI assistant is provider-agnostic through an OpenAI-compatible server adapter. Keep provider keys server-only, resolve proposed species against the curated catalogue, validate every action, and require user confirmation before mutation.
 - `server/economics.ts` resolves one global USD planning basket through a live country-to-currency mapping and USD exchange table. Never add country-specific pricing branches; local rates are explicit user overrides.
@@ -28,7 +28,7 @@
 - Species/design: `GET /api/catalog/stats`, `GET /api/catalog/search`, `GET /api/design-species`, `POST /api/recommendations`, `POST /api/layout/generate`, `POST /api/layout/regenerate`.
 - Water/cost: `POST /api/irrigation/calculate`, `POST /api/costs/calculate`.
 - Assistant: `GET /api/assistant/status`, `POST /api/assistant/plan`.
-- Private projects: `GET /api/projects`, `GET|PUT /api/projects/:id`, `GET /api/projects/:id/export.geojson`, `GET /api/projects/:id/export.csv`.
+- Private projects: `GET /api/projects`, `GET|PUT /api/projects/:id`, `GET /api/projects/:id/revisions`, `GET /api/projects/:id/revisions/:revision`, `POST /api/projects/:id/revisions/:revision/restore`, `GET /api/projects/:id/calculations/:calculationRunId`, `GET /api/projects/:id/export.geojson`, `GET /api/projects/:id/export.csv`.
 
 New or changed backend behavior must extend `server/app.integration.test.ts`; real persistence changes must also extend the opt-in `server/mongo.live.integration.test.ts` and clean up exact test IDs.
 
@@ -40,6 +40,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - Every layout is deterministic for the same normalized site, species, configuration and seed. Existing woody Sentinel polygons, field-observed trees, exclusions, paths and setbacks are hard placement constraints.
 - `LayoutVariant.generation` records the layout engine version, seed, full/partial mode, locked-tree count, assumptions and conflicts. Partial regeneration must preserve every valid locked tree byte-for-byte and reflow only unlocked candidates.
 - `LayoutVariant.machinery` records exact corridor centre lines, required widths, turning areas and clearance results. Planned trees, machinery, irrigation, boundary, constraints, infrastructure and evidence overlays are independently switchable map layers.
+- Every authenticated save appends an immutable project revision and, when calculated results exist, an immutable calculation run. Use optimistic revision checks; never overwrite revision history or embed an unbounded history array in the current project document.
 - `GrowthState` exposes deterministic low/base/high height and crown estimates plus model version, hierarchy and confidence. Zero values outside the active planting/removal interval are intentional.
 - `IrrigationConfiguration` includes source, flow, pressure, emitter, distribution-efficiency, operating-window and manual line-override inputs. `IrrigationNetworkPlan` must preserve source placement, editable geometry, obstacle routing, head/flow checks, measured versus purchase pipe quantities and the component bill of materials.
 - Economic values use `EconomicConfiguration.baseCurrencyCode = USD`; displayed currency is a conversion estimate unless the user supplies local rates. Syntropic operating curves may decline with succession, while establishment CAPEX remains a historical total.
@@ -48,6 +49,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 ## Verification
 
 - Baseline: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`.
+- The deployed acceptance workflow is `GROWAF_BASE_URL=<cloud-run-url> npm run test:acceptance`; it must exercise live evidence, layout, hydraulics, economics and perimeter planting against one explicit imported field.
 - Property and performance gates live in `src/lib/layout.property.test.ts` and `server/performance.test.ts`; do not weaken plantability, determinism, catalogue, growth or layout thresholds to hide regressions.
-- Live Mongo: set `GROWAF_LIVE_MONGO_TEST=1` with in-memory `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
+- Live Mongo: set `GROWAF_LIVE_MONGO_TEST=1` with the guarded existing `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
 - Browser behavior must be verified with explicit imported field fixtures; production must never bundle or auto-load a localized default field. Keep screenshots and generated test artifacts out of Git.

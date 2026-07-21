@@ -11,8 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:acceptance": "tsx scripts/validateAcceptanceField.ts",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx server/migrate.ts",
+    "db:migrate:mongo": "tsx server/migrateMongo.ts",
     "data:import": "tsx scripts/importCatalog.ts"
   },
   "dependencies": {

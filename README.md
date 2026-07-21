@@ -16,7 +16,8 @@ The workflow is location-independent and starts with an empty workspace. Runtime
 - six planting systems, full-field and perimeter planting, three deterministic layouts, locked partial regeneration, species-parameterized growth uncertainty, solar/shade assessment and composition targets;
 - independently switchable boundary, constraint, infrastructure, existing-vegetation, planned-tree, machinery, irrigation and satellite map layers;
 - editable irrigation sizing, pipe routing and bill of materials, annual water/energy cost, plant purchase cost and planting person-hours;
-- PostGIS geometry validation plus owner-isolated project persistence in Growaf-specific collections on the existing Mongo-compatible database instance;
+- printable planting, irrigation, procurement and management schedules backed by exact generated quantities and evidence records;
+- PostGIS geometry validation plus owner-isolated current projects, immutable revisions and calculation runs in Growaf-specific collections on the existing Mongo-compatible database instance;
 - optional Google sign-in: anonymous users can analyse and design, while authenticated users can save private projects;
 - reproducible GeoJSON and per-tree CSV exports with site infrastructure, protected vegetation, machinery, irrigation, model metadata, growth ranges and unit planting costs;
 - a provider-agnostic AI planning assistant that can propose catalogue-backed species and project changes, while Growaf validates every action and requires explicit confirmation before applying it.
@@ -34,7 +35,7 @@ npm run db:migrate
 MONGODB_URI=... AUTH_SESSION_SECRET=... GOOGLE_MAPS_BROWSER_API_KEY=... AI_PROVIDER_API_KEY=... npm run dev
 ```
 
-The default PostGIS URL is `postgresql://growaf:growaf@127.0.0.1:55432/growaf`; it is used only for authoritative geometry operations. Project and user documents use the exact Mongo-compatible database selected through `MONGODB_URI`, with dedicated `growaf_users` and `growaf_projects` collections.
+The default PostGIS URL is `postgresql://growaf:growaf@127.0.0.1:55432/growaf`; it is used only for authoritative geometry operations. Project and user documents use the exact Mongo-compatible database selected through `MONGODB_URI`, with dedicated `growaf_users`, `growaf_projects`, `growaf_project_revisions` and `growaf_calculation_runs` collections.
 The configured AI-provider credential is read only by the API process. The browser receives a configured flag and model capability metadata, never the credential. The current deployment uses the OpenAI-compatible DeepSeek API through the provider adapter.
 
 ## Verification
@@ -43,6 +44,7 @@ The configured AI-provider credential is read only by the API process. The brows
 npm run typecheck
 npm test
 GROWAF_BASE_URL=http://localhost:5174 npm run test:e2e
+GROWAF_BASE_URL=https://your-deployed-origin.example npm run test:acceptance
 npm run build
 ```
 

@@ -11,6 +11,7 @@ import { distanceToSiteBoundaryM, siteContainsCoordinate } from '../src/lib/site
 import type { Evidence, ProjectState, SiteProfile } from '../src/types.js';
 import { createApp, type GrowafAppConfig } from './app.js';
 import type { GrowafUser } from './mongo.js';
+import { buildRevisionArtifacts } from './revisions.js';
 import { unavailableSatelliteProfile } from './sentinel.js';
 
 const observedAt = '2026-07-21T00:00:00.000Z';
@@ -346,6 +347,8 @@ describe('Growaf API integration', () => {
 
   it('generates a protected layout, calculates costs, persists it and exports evidence geometry', async () => {
     let stored: ProjectState | null = null;
+    const revisionStates: ProjectState[] = [];
+    const calculationRuns = new Map<string, ReturnType<typeof buildRevisionArtifacts>['calculation']>();
     const database: NonNullable<GrowafAppConfig['database']> = {
       health: async () => true,
       geometryMetrics: async () => geometryValidation,
@@ -353,10 +356,24 @@ describe('Growaf API integration', () => {
       upsertUser: async () => testUser,
       getProject: async (ownerUserId, id) => ownerUserId === testUser.id && stored?.id === id ? stored : null,
       listProjects: async (ownerUserId) => ownerUserId === testUser.id && stored ? [{ id: stored.id, name: stored.name, updatedAt: stored.updatedAt }] : [],
+      listProjectRevisions: async (ownerUserId, projectId) => ownerUserId === testUser.id && projectId === stored?.id
+        ? revisionStates.map((state) => buildRevisionArtifacts(testUser.id, state, state.revision ?? 0).summary).reverse()
+        : [],
+      getProjectRevision: async (ownerUserId, projectId, revision) => ownerUserId === testUser.id && projectId === stored?.id
+        ? revisionStates.find((state) => state.revision === revision) ?? null
+        : null,
+      getCalculationRun: async (ownerUserId, projectId, calculationRunId) => ownerUserId === testUser.id && projectId === stored?.id
+        ? calculationRuns.get(calculationRunId) ?? null
+        : null,
       saveProject: async (ownerUserId, project) => {
         expect(ownerUserId).toBe(testUser.id);
-        stored = project;
-        return project;
+        const currentRevision = stored?.revision ?? 0;
+        if ((project.revision ?? 0) !== currentRevision) throw { code: 409, status: 'PROJECT_REVISION_CONFLICT', message: 'Reload before saving.' };
+        const artifacts = buildRevisionArtifacts(ownerUserId, project, currentRevision + 1);
+        stored = artifacts.state;
+        revisionStates.push(artifacts.state);
+        if (artifacts.calculation) calculationRuns.set(artifacts.calculation.id, artifacts.calculation);
+        return artifacts.state;
       },
     };
     const app = createApp({ database, skipDatabaseMigration: true, ...testAuth });
@@ -494,9 +511,29 @@ describe('Growaf API integration', () => {
       updatedAt: observedAt,
     };
     await request(app).put(`/api/projects/${project.id}`).send(project).expect(401);
-    await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send(project).expect(200);
+    const saved = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send(project).expect(200);
+    expect(saved.body).toEqual(expect.objectContaining({ revision: 1, revisionId: expect.any(String), calculationRunId: expect.any(String) }));
     const storedResponse = await request(app).get(`/api/projects/${project.id}`).set('Cookie', sessionCookie).expect(200);
-    expect(storedResponse.body.id).toBe(project.id);
+    expect(storedResponse.body).toEqual(expect.objectContaining({ id: project.id, revision: 1 }));
+    const revisions = await request(app).get(`/api/projects/${project.id}/revisions`).set('Cookie', sessionCookie).expect(200);
+    expect(revisions.body).toEqual([expect.objectContaining({ revision: 1, treeCount: variant.trees.length })]);
+    const historical = await request(app).get(`/api/projects/${project.id}/revisions/1`).set('Cookie', sessionCookie).expect(200);
+    expect(historical.body).toEqual(expect.objectContaining({ id: project.id, revision: 1 }));
+    const calculation = await request(app).get(`/api/projects/${project.id}/calculations/${saved.body.calculationRunId}`).set('Cookie', sessionCookie).expect(200);
+    expect(calculation.body).toEqual(expect.objectContaining({
+      projectId: project.id,
+      revision: 1,
+      inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      geometryHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      modelVersions: expect.objectContaining({ growth: 'growaf-growth-1.0.0', irrigation: 'growaf-irrigation-1.0.0' }),
+      outputSummary: expect.objectContaining({ treeCount: variant.trees.length }),
+    }));
+    const second = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send({ ...saved.body, name: 'Revised API project', updatedAt: '2026-07-21T01:00:00.000Z' }).expect(200);
+    expect(second.body.revision).toBe(2);
+    const conflict = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send({ ...project, name: 'Stale edit' }).expect(409);
+    expect(conflict.body.error.status).toBe('PROJECT_REVISION_CONFLICT');
+    const restored = await request(app).post(`/api/projects/${project.id}/revisions/1/restore`).set('Cookie', sessionCookie).expect(200);
+    expect(restored.body).toEqual(expect.objectContaining({ revision: 3, name: project.name }));
 
     const exportResponse = await request(app).get(`/api/projects/${project.id}/export.geojson`).set('Cookie', sessionCookie).expect(200);
     expect(exportResponse.type).toContain('application/geo+json');
@@ -527,6 +564,52 @@ describe('Growaf API integration', () => {
     expect(String(logout.headers['set-cookie'][0])).toContain('Max-Age=0');
   });
 
+  it('validates audited site overrides and advanced design-ready catalogue filters', async () => {
+    const app = createApp({ skipDatabaseMigration: true, now: () => new Date('2026-07-21T12:30:00.000Z') });
+    const profile = siteProfile();
+    const overridden = await request(app)
+      .post('/api/site/profile/override')
+      .send({
+        siteProfile: profile,
+        override: {
+          field: 'soil.ph',
+          value: '6.4',
+          reason: 'Composite laboratory sample from five field points.',
+          sourceLabel: 'Accredited soil laboratory',
+          observedAt: '2026-07-18',
+        },
+      })
+      .expect(200);
+    expect(overridden.body.soil.ph).toBe(6.4);
+    expect(overridden.body.generatedAt).toBe('2026-07-21T12:30:00.000Z');
+    expect(overridden.body.overrides).toEqual([expect.objectContaining({
+      field: 'soil.ph',
+      previousValue: 7.2,
+      value: 6.4,
+      unit: 'pH',
+      sourceLabel: 'Accredited soil laboratory',
+      observedAt: '2026-07-18T00:00:00.000Z',
+    })]);
+    await request(app)
+      .post('/api/site/profile/override')
+      .send({ siteProfile: profile, override: { field: 'soil.ph', value: 15, reason: 'Measured', sourceLabel: 'Lab', observedAt: '2026-07-18' } })
+      .expect(400);
+
+    const filtered = await request(app)
+      .get('/api/catalog/search?q=Olea&designReady=true&stratum=medium&succession=climax&evergreen=true&droughtMin=4&evidenceMin=3')
+      .expect(200);
+    expect(filtered.body.results).toEqual([expect.objectContaining({
+      scientificName: 'Olea europaea',
+      designReady: true,
+      stratum: 'medium',
+      succession: 'climax',
+      evergreen: true,
+      droughtTolerance: 5,
+    })]);
+    const mismatched = await request(app).get('/api/catalog/search?q=Olea&evergreen=false').expect(200);
+    expect(mismatched.body.total).toBe(0);
+  });
+
   it('rejects invalid palettes and mismatched project IDs', async () => {
     const app = createApp({
       skipDatabaseMigration: true,
@@ -537,6 +620,9 @@ describe('Growaf API integration', () => {
         upsertUser: async () => testUser,
         getProject: async () => null,
         listProjects: async () => [],
+        listProjectRevisions: async () => [],
+        getProjectRevision: async () => null,
+        getCalculationRun: async () => null,
         saveProject: async (_ownerUserId, project) => project,
       },
       ...testAuth,

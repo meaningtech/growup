@@ -1,6 +1,7 @@
 import { fromArrayBuffer } from 'geotiff';
 import { bounds, createLocalProjection, haversineM, polygonAreaM2, polygonCentroid, polygonPerimeterM } from '../src/lib/geometry.js';
 import { siteContainsCoordinate, sitePolygons } from '../src/lib/siteGeometry.js';
+import { defaultFieldConditions } from '../src/lib/siteOverrides.js';
 import type { Coordinate, Evidence, LocationSearchResult, SiteBoundary, SiteProfile, SolarClimateBin, SolarResourceProfile } from '../src/types.js';
 import { fetchSatelliteProfile, type SentinelProviderConfig, unavailableSatelliteProfile } from './sentinel.js';
 
@@ -107,6 +108,8 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
       status: 'unavailable',
       evidence: evidence('SoilGrids WCS', config.soilGridsWcsUrl ?? process.env.SOILGRIDS_WCS_URL ?? 'https://maps.isric.org/mapserv', '2.0', generatedAt, 'low', '250 m'),
     },
+    fieldConditions: defaultFieldConditions(),
+    overrides: [],
     landCover: landCover.value ?? {
       classification: 'Unknown',
       osmTags: {},

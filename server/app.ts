@@ -8,8 +8,9 @@ import { generateLayoutVariants, normalizeDesignConfiguration, regenerateLayoutV
 import { calculateIrrigation } from '../src/lib/irrigation.js';
 import { normalizeDesignObjectives } from '../src/lib/objectives.js';
 import { rankSpecies, recommendedPalette } from '../src/lib/recommendations.js';
+import { applySiteProfileOverride } from '../src/lib/siteOverrides.js';
 import { localSiteValidation, normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
-import type { LayoutVariant, ProjectState, SiteBoundary, SiteProfile } from '../src/types.js';
+import type { LayoutVariant, ProjectState, SiteBoundary, SiteProfile, SiteProfileOverrideField } from '../src/types.js';
 import type { AssistantProjectContext } from '../src/types.js';
 import { assistantStatus, planAssistantAction, type AssistantProviderConfig } from './assistant.js';
 import {
@@ -28,7 +29,10 @@ import { exportProjectCsv, exportProjectGeoJson } from './export.js';
 import {
   assertMongoIndexesReady,
   getProject,
+  getProjectRevision,
+  getCalculationRun,
   getUser,
+  listProjectRevisions,
   listProjects,
   mongoHealth,
   saveProject,
@@ -52,6 +56,9 @@ export function createApp(config: GrowafAppConfig = {}) {
     upsertUser,
     getProject,
     listProjects,
+    listProjectRevisions,
+    getProjectRevision,
+    getCalculationRun,
     saveProject,
   };
 
@@ -117,6 +124,13 @@ export function createApp(config: GrowafAppConfig = {}) {
       treeOnly: booleanQuery(req.query.tree),
       globUntOnly: booleanQuery(req.query.globunt),
       designReadyOnly: booleanQuery(req.query.designReady),
+      stratum: stringQuery(req.query.stratum),
+      succession: stringQuery(req.query.succession),
+      role: stringQuery(req.query.role),
+      evergreen: optionalBooleanQuery(req.query.evergreen),
+      nitrogenFixer: optionalBooleanQuery(req.query.nitrogenFixer),
+      droughtMinimum: numberQuery(req.query.droughtMin),
+      evidenceMinimum: numberQuery(req.query.evidenceMin),
       limit: numberQuery(req.query.limit),
       offset: numberQuery(req.query.offset),
     }));
@@ -155,6 +169,17 @@ export function createApp(config: GrowafAppConfig = {}) {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       return resolveEconomicConfiguration(siteProfile.location.countryCode, config);
     });
+  });
+
+  app.post('/api/site/profile/override', async (req: Request, res: Response) => {
+    await handle(res, async () => applySiteProfileOverride(requireSiteProfile(req.body?.siteProfile), {
+      field: String(req.body?.override?.field ?? '') as SiteProfileOverrideField,
+      value: req.body?.override?.value,
+      reason: String(req.body?.override?.reason ?? ''),
+      sourceLabel: String(req.body?.override?.sourceLabel ?? ''),
+      observedAt: String(req.body?.override?.observedAt ?? ''),
+      appliedAt: (config.now?.() ?? new Date()).toISOString(),
+    }));
   });
 
   app.post('/api/recommendations', async (req: Request, res: Response) => {
@@ -261,6 +286,58 @@ export function createApp(config: GrowafAppConfig = {}) {
     });
   });
 
+  app.get('/api/projects/:id/revisions', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const projectId = paramValue(req.params.id);
+      const project = await database.getProject(user.id, projectId);
+      if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      return database.listProjectRevisions(user.id, projectId);
+    });
+  });
+
+  app.get('/api/projects/:id/revisions/:revision', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const projectId = paramValue(req.params.id);
+      const revision = integerParam(req.params.revision, 'INVALID_PROJECT_REVISION');
+      const project = await database.getProjectRevision(user.id, projectId, revision);
+      if (!project) throw httpError(404, 'PROJECT_REVISION_NOT_FOUND', 'Project revision not found');
+      return project;
+    });
+  });
+
+  app.post('/api/projects/:id/revisions/:revision/restore', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const projectId = paramValue(req.params.id);
+      const revision = integerParam(req.params.revision, 'INVALID_PROJECT_REVISION');
+      const [current, historical] = await Promise.all([
+        database.getProject(user.id, projectId),
+        database.getProjectRevision(user.id, projectId, revision),
+      ]);
+      if (!current) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      if (!historical) throw httpError(404, 'PROJECT_REVISION_NOT_FOUND', 'Project revision not found');
+      return database.saveProject(user.id, {
+        ...historical,
+        revision: current.revision ?? 0,
+        revisionId: current.revisionId ?? null,
+        calculationRunId: current.calculationRunId ?? null,
+        updatedAt: (config.now?.() ?? new Date()).toISOString(),
+      });
+    });
+  });
+
+  app.get('/api/projects/:id/calculations/:calculationRunId', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const projectId = paramValue(req.params.id);
+      const calculation = await database.getCalculationRun(user.id, projectId, paramValue(req.params.calculationRunId));
+      if (!calculation) throw httpError(404, 'CALCULATION_RUN_NOT_FOUND', 'Calculation run not found');
+      return calculation;
+    });
+  });
+
   app.get('/api/projects/:id/export.geojson', async (req: Request, res: Response) => {
     try {
       const user = await requireAuthenticatedUser(req, database, config);
@@ -363,5 +440,15 @@ function requireAssistantContext(value: unknown): AssistantProjectContext {
 
 function stringQuery(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined; }
 function booleanQuery(value: unknown): boolean { return value === 'true' || value === '1'; }
+function optionalBooleanQuery(value: unknown): boolean | undefined {
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  return undefined;
+}
 function numberQuery(value: unknown): number | undefined { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined; }
 function paramValue(value: string | string[]): string { return Array.isArray(value) ? value[0] : value; }
+function integerParam(value: string | string[], status: string): number {
+  const parsed = Number(paramValue(value));
+  if (!Number.isInteger(parsed) || parsed < 1) throw httpError(400, status, 'A positive integer revision is required');
+  return parsed;
+}

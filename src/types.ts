@@ -225,6 +225,19 @@ export type SiteProfile = {
     evidence: Evidence;
     status: 'available' | 'partial' | 'unavailable';
   };
+  fieldConditions?: {
+    soilDepthM: number | null;
+    drainageClass: 'very-poor' | 'poor' | 'moderate' | 'good' | 'rapid' | 'unknown';
+    availableWaterMmM: number | null;
+    frostRisk: 'low' | 'moderate' | 'high' | 'unknown';
+    droughtRisk: 'low' | 'moderate' | 'high' | 'unknown';
+    salinityRisk: 'low' | 'moderate' | 'high' | 'unknown';
+    windExposure: 'sheltered' | 'moderate' | 'exposed' | 'unknown';
+    waterloggingRisk: 'low' | 'moderate' | 'high' | 'unknown';
+    irrigationAvailable: boolean | null;
+    waterQualityClass: 'good' | 'restricted' | 'unsuitable' | 'unknown';
+  };
+  overrides?: SiteProfileOverride[];
   landCover: {
     classification: string;
     osmTags: Record<string, string>;
@@ -232,6 +245,44 @@ export type SiteProfile = {
   };
   satellite: SatelliteProfile;
   warnings: string[];
+};
+
+export type SiteProfileOverrideField =
+  | 'terrain.elevationMeanM'
+  | 'terrain.slopePercent'
+  | 'terrain.aspectDegrees'
+  | 'climate.meanTemperatureC'
+  | 'climate.absoluteMinTemperatureC'
+  | 'climate.absoluteMaxTemperatureC'
+  | 'climate.annualPrecipitationMm'
+  | 'climate.annualEt0Mm'
+  | 'soil.ph'
+  | 'soil.sandPercent'
+  | 'soil.siltPercent'
+  | 'soil.clayPercent'
+  | 'soil.organicCarbonGKg'
+  | 'soil.textureClass'
+  | 'fieldConditions.soilDepthM'
+  | 'fieldConditions.drainageClass'
+  | 'fieldConditions.availableWaterMmM'
+  | 'fieldConditions.frostRisk'
+  | 'fieldConditions.droughtRisk'
+  | 'fieldConditions.salinityRisk'
+  | 'fieldConditions.windExposure'
+  | 'fieldConditions.waterloggingRisk'
+  | 'fieldConditions.irrigationAvailable'
+  | 'fieldConditions.waterQualityClass';
+
+export type SiteProfileOverride = {
+  id: string;
+  field: SiteProfileOverrideField;
+  previousValue: string | number | boolean | null;
+  value: string | number | boolean | null;
+  unit: string | null;
+  reason: string;
+  sourceLabel: string;
+  observedAt: string;
+  appliedAt: string;
 };
 
 export type SolarClimateBin = {
@@ -321,6 +372,13 @@ export type CatalogueSpecies = {
   wcvpId: string | null;
   globUnt: boolean;
   designReady: boolean;
+  stratum: Stratum | null;
+  succession: SuccessionPhase | null;
+  roles: string[];
+  evergreen: boolean | null;
+  nitrogenFixer: boolean | null;
+  droughtTolerance: number | null;
+  evidenceCount: number;
 };
 
 export type SuitabilityComponent = {
@@ -714,8 +772,47 @@ export type ProjectState = {
   timelineYear: number;
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
+  revision?: number;
+  revisionId?: string | null;
+  calculationRunId?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProjectRevisionSummary = {
+  revision: number;
+  revisionId: string;
+  calculationRunId: string | null;
+  createdAt: string;
+  contentHash: string;
+  name: string;
+  selectedVariantId: string | null;
+  treeCount: number;
+};
+
+export type CalculationSnapshot = {
+  id: string;
+  projectId: string;
+  revision: number;
+  createdAt: string;
+  inputHash: string;
+  geometryHash: string;
+  selectedVariantId: string | null;
+  selectedSpeciesIds: string[];
+  modelVersions: {
+    application: string;
+    layout: string | null;
+    growth: string;
+    irrigation: string;
+    economics: string;
+  };
+  evidenceVersions: Array<{ source: string; version: string; observedAt: string }>;
+  outputSummary: {
+    treeCount: number;
+    annualWaterM3: number | null;
+    establishmentCost: number | null;
+    currencyCode: string;
+  };
 };
 
 export type AssistantProjectContext = {

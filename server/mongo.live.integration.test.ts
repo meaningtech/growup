@@ -11,7 +11,10 @@ import { geometryMetrics } from './db.js';
 import {
   assertMongoIndexesReady,
   getProject,
+  getProjectRevision,
+  getCalculationRun,
   getUser,
+  listProjectRevisions,
   listProjects,
   mongoDatabase,
   mongoHealth,
@@ -41,7 +44,7 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, getProject, listProjects, saveProject };
+    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, getProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
     const app = createApp({
       database,
       skipDatabaseMigration: true,
@@ -60,18 +63,41 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       await assertMongoIndexesReady();
       const login = await request(app).post('/api/auth/google').send({ credential: 'live-test-token' }).expect(200);
       const cookie = String(login.headers['set-cookie'][0]).split(';')[0];
-      await request(app).put(`/api/projects/${marker}`).set('Cookie', cookie).send(project).expect(200);
+      const saved = await request(app).put(`/api/projects/${marker}`).set('Cookie', cookie).send(project).expect(200);
+      expect(saved.body.revision).toBe(1);
       const list = await request(app).get('/api/projects').set('Cookie', cookie).expect(200);
       expect(list.body).toContainEqual(expect.objectContaining({ id: marker, name: project.name }));
       const reopened = await request(app).get(`/api/projects/${marker}`).set('Cookie', cookie).expect(200);
-      expect(reopened.body).toEqual(expect.objectContaining({ id: marker, name: project.name }));
+      expect(reopened.body).toEqual(expect.objectContaining({ id: marker, name: project.name, revision: 1 }));
+      const revisions = await request(app).get(`/api/projects/${marker}/revisions`).set('Cookie', cookie).expect(200);
+      expect(revisions.body).toEqual([expect.objectContaining({ revision: 1 })]);
+      const revision = await request(app).get(`/api/projects/${marker}/revisions/1`).set('Cookie', cookie).expect(200);
+      expect(revision.body).toEqual(expect.objectContaining({ id: marker, revision: 1 }));
+      const updated = { ...saved.body, name: 'Growaf live persistence test · revised', updatedAt: new Date(Date.now() + 1_000).toISOString() };
+      const savedAgain = await request(app).put(`/api/projects/${marker}`).set('Cookie', cookie).send(updated).expect(200);
+      expect(savedAgain.body.revision).toBe(2);
+      const immutableHistory = await request(app).get(`/api/projects/${marker}/revisions`).set('Cookie', cookie).expect(200);
+      expect(immutableHistory.body.map((item: { revision: number }) => item.revision)).toEqual([2, 1]);
+      const original = await request(app).get(`/api/projects/${marker}/revisions/1`).set('Cookie', cookie).expect(200);
+      expect(original.body.name).toBe('Growaf live persistence test');
+      await request(app).put(`/api/projects/${marker}`).set('Cookie', cookie).send({ ...project, name: 'Stale overwrite attempt' }).expect(409);
       expect(await getProject('another-owner', marker)).toBeNull();
+
+      const liveDatabase = await mongoDatabase();
+      const projectPlan = JSON.stringify(await liveDatabase.collection('growaf_projects').find({ ownerUserId: marker }).sort({ updatedAt: -1 }).limit(100).explain('executionStats'));
+      const revisionPlan = JSON.stringify(await liveDatabase.collection('growaf_project_revisions').find({ ownerUserId: marker, projectId: marker }).sort({ revision: -1 }).limit(200).explain('executionStats'));
+      expect(projectPlan).not.toMatch(/COLLSCAN|collection scan/i);
+      expect(revisionPlan).not.toMatch(/COLLSCAN|collection scan/i);
+      expect(projectPlan).toMatch(/index/i);
+      expect(revisionPlan).toMatch(/index/i);
     } finally {
       if (marker.startsWith('growaf-live-')) {
         const database = await mongoDatabase();
         await database.collection<{ _id: string }>('growaf_projects').deleteOne({ _id: marker });
         await database.collection<{ _id: string }>('growaf_users').deleteOne({ _id: marker });
+        await database.collection<{ ownerUserId: string }>('growaf_project_revisions').deleteMany({ ownerUserId: marker });
+        await database.collection<{ ownerUserId: string }>('growaf_calculation_runs').deleteMany({ ownerUserId: marker });
       }
     }
-  });
+  }, 60_000);
 });

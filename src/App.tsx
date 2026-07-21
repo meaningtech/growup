@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronRight,
+  ClipboardCheck,
   CircleDollarSign,
   CircleOff,
   CloudSun,
@@ -21,6 +22,7 @@ import {
   MousePointer2,
   PencilRuler,
   Plus,
+  Printer,
   Redo2,
   Route,
   Satellite,
@@ -42,9 +44,11 @@ import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
 import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
 import { growthState } from './lib/growth';
-import { DEFAULT_IRRIGATION_CONFIGURATION } from './lib/irrigation';
+import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
+import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration } from './lib/layout';
+import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
 import {
   distanceToSiteBoundaryM,
   distanceToSitePathM,
@@ -73,8 +77,10 @@ import type {
   LayoutVariant,
   LocationSearchResult,
   ProjectState,
+  ProjectRevisionSummary,
   SiteBoundary,
   SiteProfile,
+  SiteProfileOverrideField,
   SiteValidation,
   SpeciesRecommendation,
   SuitabilityComponent,
@@ -105,6 +111,8 @@ type AuthUser = {
 };
 
 type AuthSession = { authenticated: boolean; configured: boolean; user: AuthUser | null };
+type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
+type SaveStatus = 'idle' | 'local' | 'unsaved' | 'saving' | 'saved' | 'conflict';
 
 type CatalogueStats = {
   total: number;
@@ -117,6 +125,13 @@ type CatalogueFilters = {
   treeOnly: boolean;
   globUntOnly: boolean;
   designReadyOnly: boolean;
+  stratum: string;
+  succession: string;
+  role: string;
+  evergreen: '' | 'true' | 'false';
+  nitrogenFixer: '' | 'true' | 'false';
+  droughtMinimum: number;
+  evidenceMinimum: number;
 };
 
 const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }> = [
@@ -182,7 +197,18 @@ export default function App() {
   const [clearSiteOpen, setClearSiteOpen] = useState(false);
   const [projectName, setProjectName] = useState(() => t('project.newTitle'));
   const [projectId, setProjectId] = useState(() => `growaf-${crypto.randomUUID().slice(0, 8)}`);
+  const [projectRevision, setProjectRevision] = useState(0);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [revisions, setRevisions] = useState<ProjectRevisionSummary[]>([]);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [recoveryDraft, setRecoveryDraft] = useState<ProjectState | null>(null);
   const createdAtRef = useRef(new Date().toISOString());
+  const projectRevisionRef = useRef(0);
+  const dirtySerialRef = useRef(0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const suppressDirtyRef = useRef(false);
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const fittedSiteRef = useRef<string | null>(null);
@@ -220,6 +246,7 @@ export default function App() {
         setConfig(appConfig);
         setCatalogueStats(stats);
         setAuthUser(session.user);
+        if (session.user) void refreshProjects();
         setBusy(null);
       })
       .catch((loadError) => {
@@ -227,6 +254,38 @@ export default function App() {
         setBusy(null);
       });
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('growaf:draft:v2');
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as ProjectState;
+      if (parsed?.site?.polygon?.length >= 3) setRecoveryDraft(parsed);
+    } catch {
+      window.localStorage.removeItem('growaf:draft:v2');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!site) return;
+    if (suppressDirtyRef.current) {
+      suppressDirtyRef.current = false;
+      return;
+    }
+    const serial = ++dirtySerialRef.current;
+    setSaveStatus(authUser ? 'unsaved' : 'local');
+    const timer = window.setTimeout(() => {
+      const snapshot = currentProjectState(new Date().toISOString());
+      if (!snapshot) return;
+      try {
+        window.localStorage.setItem('growaf:draft:v2', JSON.stringify(snapshot));
+      } catch {
+        setError(t('errors.localDraftStorage'));
+      }
+      if (authUser) queueProjectSave(snapshot, serial);
+    }, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, authUser]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -807,6 +866,11 @@ export default function App() {
     setShowNdmi(false);
     setShowWaterSamples(false);
     setProjectId(`growaf-${crypto.randomUUID().slice(0, 8)}`);
+    setProjectRevision(0);
+    projectRevisionRef.current = 0;
+    setRevisions([]);
+    setSaveStatus('idle');
+    window.localStorage.removeItem('growaf:draft:v2');
     projectNameEditedRef.current = false;
     setProjectName(t('project.newTitle'));
     createdAtRef.current = new Date().toISOString();
@@ -862,6 +926,27 @@ export default function App() {
       setShowExistingVegetation(true);
       const woody = profile.satellite.existingVegetation;
       setNotice(t('notices.evidenceReady', { count: woody.patches.length }));
+    });
+  }
+
+  async function overrideSiteProfile(input: {
+    field: SiteProfileOverrideField;
+    value: string;
+    reason: string;
+    sourceLabel: string;
+    observedAt: string;
+  }) {
+    if (!siteProfile) return;
+    await runBusy(t('busy.applyingOverride'), async () => {
+      const profile = await api<SiteProfile>('/api/site/profile/override', post({ siteProfile, override: input }));
+      const result = await api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives }));
+      setSiteProfile(profile);
+      setRecommendations(result.recommendations);
+      setVariants([]);
+      setSelectedVariantId(null);
+      setIrrigation(null);
+      setCosts(null);
+      setNotice(t('notices.overrideApplied'));
     });
   }
 
@@ -1100,15 +1185,9 @@ export default function App() {
     }
   }
 
-  async function saveProject() {
-    if (!site) return;
-    if (!authUser) {
-      setAuthOpen(true);
-      setNotice(t('auth.signInToSave'));
-      return;
-    }
-    const now = new Date().toISOString();
-    const project: ProjectState = {
+  function currentProjectState(updatedAt: string): ProjectState | null {
+    if (!site) return null;
+    return {
       id: projectId,
       name: projectName.trim() || t('project.newTitle'),
       site,
@@ -1122,13 +1201,124 @@ export default function App() {
       timelineYear,
       irrigation,
       costs,
+      revision: projectRevisionRef.current,
+      revisionId: revisions[0]?.revisionId ?? null,
+      calculationRunId: null,
       createdAt: createdAtRef.current,
-      updatedAt: now,
+      updatedAt,
     };
-    await runBusy(t('auth.saving'), async () => {
-      await api(`/api/projects/${projectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(project) });
-      setNotice(t('auth.saved'));
+  }
+
+  function queueProjectSave(snapshot: ProjectState, serial: number, announce = false): Promise<void> {
+    saveQueueRef.current = saveQueueRef.current.then(async () => {
+      setSaveStatus('saving');
+      try {
+        const request = { ...snapshot, revision: projectRevisionRef.current, updatedAt: new Date().toISOString() };
+        const saved = await api<ProjectState>(`/api/projects/${snapshot.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+        const revision = saved.revision ?? projectRevisionRef.current;
+        projectRevisionRef.current = revision;
+        setProjectRevision(revision);
+        if (serial === dirtySerialRef.current) {
+          setSaveStatus('saved');
+          window.localStorage.removeItem('growaf:draft:v2');
+        } else {
+          setSaveStatus('unsaved');
+        }
+        void refreshProjects(saved.id).catch((refreshError) => setError(messageOf(refreshError)));
+        if (announce) setNotice(t('auth.savedRevision', { revision }));
+      } catch (saveError) {
+        const conflict = saveError instanceof GrowafApiError && saveError.status === 'PROJECT_REVISION_CONFLICT';
+        setSaveStatus(conflict ? 'conflict' : 'unsaved');
+        setError(conflict ? t('auth.conflict') : messageOf(saveError));
+      }
     });
+    return saveQueueRef.current;
+  }
+
+  async function saveProject() {
+    if (!site) return;
+    if (!authUser) {
+      setAuthOpen(true);
+      setNotice(t('auth.signInToSave'));
+      return;
+    }
+    const snapshot = currentProjectState(new Date().toISOString());
+    if (!snapshot) return;
+    await queueProjectSave(snapshot, dirtySerialRef.current, true);
+  }
+
+  async function refreshProjects(activeProjectId = projectId) {
+    const list = await api<ProjectSummary[]>('/api/projects');
+    setProjects(list);
+    if (activeProjectId && list.some((item) => item.id === activeProjectId)) {
+      setRevisions(await api<ProjectRevisionSummary[]>(`/api/projects/${activeProjectId}/revisions`));
+    }
+  }
+
+  function loadProjectIntoWorkspace(project: ProjectState, status: SaveStatus) {
+    suppressDirtyRef.current = true;
+    const revision = project.revision ?? 0;
+    projectRevisionRef.current = revision;
+    setProjectRevision(revision);
+    setProjectId(project.id);
+    setProjectName(project.name);
+    projectNameEditedRef.current = true;
+    createdAtRef.current = project.createdAt;
+    setSite(normalizeSiteBoundary(project.site));
+    setSiteProfile(project.siteProfile);
+    setSelectedSpeciesIds(project.selectedSpeciesIds);
+    setTreeSpeciesId(project.selectedSpeciesIds[0] ?? '');
+    setDesignConfiguration(normalizeDesignConfiguration(project.designConfiguration));
+    setIrrigationConfiguration(normalizeIrrigationConfiguration(project.irrigationConfiguration));
+    setEconomicConfiguration(normalizeEconomicConfiguration(project.economicConfiguration, project.siteProfile?.location.countryCode ?? project.economicConfiguration?.countryCode ?? ''));
+    setVariants(project.variants);
+    setSelectedVariantId(project.selectedVariantId);
+    setTimelineYear(project.timelineYear);
+    setIrrigation(project.irrigation);
+    setCosts(project.costs);
+    setSelectedTreeId(null);
+    fittedSiteRef.current = null;
+    setSection(project.costs ? 'costs' : project.irrigation ? 'water' : project.variants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
+    setSaveStatus(status);
+    if (project.siteProfile) {
+      void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives }))
+        .then((result) => setRecommendations(result.recommendations))
+        .catch((recommendationError) => setError(messageOf(recommendationError)));
+    } else {
+      setRecommendations([]);
+    }
+  }
+
+  async function openProject(id: string) {
+    if (!id) return;
+    await runBusy(t('auth.opening'), async () => {
+      const project = await api<ProjectState>(`/api/projects/${id}`);
+      loadProjectIntoWorkspace(project, 'saved');
+      setRevisions(await api<ProjectRevisionSummary[]>(`/api/projects/${id}/revisions`));
+      setNotice(t('auth.opened', { revision: project.revision ?? 0 }));
+    });
+  }
+
+  async function restoreRevision(revision: number) {
+    await runBusy(t('auth.restoring'), async () => {
+      const project = await api<ProjectState>(`/api/projects/${projectId}/revisions/${revision}/restore`, post({}));
+      loadProjectIntoWorkspace(project, 'saved');
+      setRevisions(await api<ProjectRevisionSummary[]>(`/api/projects/${projectId}/revisions`));
+      setHistoryOpen(false);
+      setNotice(t('auth.restored', { revision }));
+    });
+  }
+
+  function recoverLocalDraft() {
+    if (!recoveryDraft) return;
+    loadProjectIntoWorkspace(recoveryDraft, 'local');
+    setRecoveryDraft(null);
+    setNotice(t('auth.draftRecovered'));
+  }
+
+  function discardLocalDraft() {
+    window.localStorage.removeItem('growaf:draft:v2');
+    setRecoveryDraft(null);
   }
 
   async function authenticateGoogle(credential: string) {
@@ -1136,6 +1326,7 @@ export default function App() {
       const session = await api<{ authenticated: true; user: AuthUser }>('/api/auth/google', post({ credential }));
       setAuthUser(session.user);
       setAuthOpen(false);
+      await refreshProjects();
       setNotice(t('auth.signedIn', { name: session.user.name }));
     });
   }
@@ -1143,15 +1334,35 @@ export default function App() {
   async function logout() {
     await api('/api/auth/logout', post({}));
     setAuthUser(null);
+    setProjects([]);
+    setRevisions([]);
     setNotice(t('auth.signedOut'));
   }
 
-  async function searchCatalogue(filters: CatalogueFilters = { treeOnly: false, globUntOnly: false, designReadyOnly: false }) {
+  async function searchCatalogue(filters: CatalogueFilters = {
+    treeOnly: false,
+    globUntOnly: false,
+    designReadyOnly: false,
+    stratum: '',
+    succession: '',
+    role: '',
+    evergreen: '',
+    nitrogenFixer: '',
+    droughtMinimum: 0,
+    evidenceMinimum: 0,
+  }) {
     await runBusy(t('busy.searchingCatalogue'), async () => {
       const parameters = new URLSearchParams({ q: catalogueQuery, limit: '18' });
       if (filters.treeOnly) parameters.set('tree', 'true');
       if (filters.globUntOnly) parameters.set('globunt', 'true');
       if (filters.designReadyOnly) parameters.set('designReady', 'true');
+      if (filters.stratum) parameters.set('stratum', filters.stratum);
+      if (filters.succession) parameters.set('succession', filters.succession);
+      if (filters.role) parameters.set('role', filters.role);
+      if (filters.evergreen) parameters.set('evergreen', filters.evergreen);
+      if (filters.nitrogenFixer) parameters.set('nitrogenFixer', filters.nitrogenFixer);
+      if (filters.droughtMinimum > 0) parameters.set('droughtMin', String(filters.droughtMinimum));
+      if (filters.evidenceMinimum > 0) parameters.set('evidenceMin', String(filters.evidenceMinimum));
       const result = await api<{ results: CatalogueSpecies[] }>(`/api/catalog/search?${parameters.toString()}`);
       setCatalogueResults(result.results);
     });
@@ -1303,10 +1514,12 @@ export default function App() {
           />
         </div>
         <div className="top-actions">
-          <span className="source-status"><span /> {siteProfile ? t('status.siteData', { date: shortDay(siteProfile.generatedAt, locale) }) : t(site ? 'status.awaiting' : 'status.noField')}</span>
+          {authUser && projects.length > 0 && <label className="project-select"><span className="visually-hidden">{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => void openProject(event.target.value)}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+          {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
           <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
           <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
           <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
+          <button className="button ghost" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
           <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
           <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
           {authUser ? (
@@ -1317,6 +1530,8 @@ export default function App() {
           ) : <button className="button auth-trigger" onClick={() => setAuthOpen(true)}><LogIn size={15} /> {t('auth.signIn')}</button>}
         </div>
       </header>
+
+      {recoveryDraft && !site && <div className="recovery-banner" role="status"><span><Save size={16} /><strong>{t('auth.recoveryTitle')}</strong><small>{t('auth.recoveryBody', { name: recoveryDraft.name })}</small></span><button onClick={recoverLocalDraft}>{t('auth.recover')}</button><button onClick={discardLocalDraft}>{t('auth.discard')}</button></div>}
 
       <aside className="step-rail" aria-label={t('nav.workflow')}>
         {STEPS.map((step, index) => {
@@ -1422,11 +1637,11 @@ export default function App() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={setSelectedVariantId} selectedTree={selectedTree} onTreeSelect={setSelectedTreeId} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} />}
           {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
-          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} />}
+          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
         </section>
       </main>
 
@@ -1452,6 +1667,21 @@ export default function App() {
       />}
 
       {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
+
+      {historyOpen && <ProjectHistoryPanel revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
+
+      {scheduleOpen && site && siteProfile && selectedVariant && irrigation && costs && <OperationalSchedulePanel
+        projectName={projectName}
+        site={site}
+        profile={siteProfile}
+        variant={selectedVariant}
+        species={selectedSpecies}
+        irrigation={irrigation}
+        costs={costs}
+        revision={projectRevision}
+        calculationRunId={revisions[0]?.calculationRunId ?? null}
+        onClose={() => setScheduleOpen(false)}
+      />}
 
       {(busy || error || notice) && (
         <div className={`toast ${error ? 'error' : notice ? 'success' : ''}`} role="status">
@@ -1737,8 +1967,117 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void }) {
+function ProjectHistoryPanel({ revisions, onRestore, onClose }: { revisions: ProjectRevisionSummary[]; onRestore: (revision: number) => Promise<void>; onClose: () => void }) {
   const { t, locale } = useI18n();
+  return <div className="modal-backdrop" role="presentation"><section className="history-panel" role="dialog" aria-modal="true" aria-labelledby="history-title">
+    <header><span><small>{t('auth.historyEyebrow')}</small><h2 id="history-title">{t('auth.historyTitle')}</h2></span><button aria-label={t('auth.closeHistory')} onClick={onClose}><X size={18} /></button></header>
+    <p>{t('auth.historyBody')}</p>
+    <div className="revision-list">{revisions.map((revision, index) => <article key={revision.revisionId}>
+      <span className="revision-number">r{revision.revision}</span>
+      <span><strong>{revision.name}</strong><small>{shortDate(revision.createdAt, locale)} · {t('auth.revisionTrees', { count: revision.treeCount })}{revision.calculationRunId ? ` · ${t('auth.calculationCaptured')}` : ''}</small><code>{revision.contentHash.slice(0, 12)}</code></span>
+      <button disabled={index === 0} onClick={() => void onRestore(revision.revision)}>{index === 0 ? t('auth.currentRevision') : t('auth.restoreRevision')}</button>
+    </article>)}</div>
+  </section></div>;
+}
+
+function OperationalSchedulePanel({ projectName, site, profile, variant, species, irrigation, costs, revision, calculationRunId, onClose }: { projectName: string; site: SiteBoundary; profile: SiteProfile; variant: LayoutVariant; species: DesignSpecies[]; irrigation: IrrigationEstimate; costs: EstablishmentCost; revision: number; calculationRunId: string | null; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const schedule = buildOperationalSchedule(profile, variant, species, irrigation, costs);
+  const speciesById = new Map(species.map((item) => [item.id, item]));
+  const reportLocale = locale === 'it' ? 'it-IT' : 'en-GB';
+  const monthLabel = (month: number) => new Intl.DateTimeFormat(reportLocale, { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)));
+  return <div className="schedule-backdrop" role="presentation"><article className="schedule-panel" role="dialog" aria-modal="true" aria-labelledby="schedule-title" data-testid="operational-schedule">
+    <header className="schedule-header">
+      <span className="schedule-mark"><ClipboardCheck size={24} /></span>
+      <span><small>{t('schedule.eyebrow')}</small><h1 id="schedule-title">{t('schedule.title')}</h1><p>{projectName} · {site.name}</p></span>
+      <div className="schedule-actions"><button onClick={() => window.print()}><Printer size={16} />{t('schedule.print')}</button><button aria-label={t('schedule.close')} onClick={onClose}><X size={18} /></button></div>
+    </header>
+    <div className="schedule-audit-strip">
+      <span><small>{t('schedule.location')}</small><strong>{profile.location.displayName}</strong></span>
+      <span><small>{t('schedule.design')}</small><strong>{t(systemTranslationKey(variant.design.system))} · {Math.round(variant.directionDegrees)}°</strong></span>
+      <span><small>{t('schedule.analysis')}</small><strong>{shortDate(profile.generatedAt, locale)}</strong></span>
+      <span><small>{t('schedule.record')}</small><strong>{revision > 0 ? `r${revision}` : t('schedule.localDraft')}{calculationRunId ? ` · ${calculationRunId.slice(-18)}` : ''}</strong></span>
+    </div>
+    <div className="schedule-readiness"><ShieldCheck size={18} /><span><strong>{t('schedule.readinessTitle')}</strong><small>{t('schedule.readinessBody')}</small></span></div>
+    <section className="schedule-summary">
+      <ScheduleMetric label={t('schedule.trees')} value={formatNumber(schedule.summary.treeCount, 0)} detail={t('schedule.speciesCount', { count: schedule.summary.speciesCount })} />
+      <ScheduleMetric label={t('schedule.plantingLabour')} value={`${formatNumber(schedule.summary.plantingLaborHours, 1)} h`} detail={t('schedule.personHours')} />
+      <ScheduleMetric label={t('schedule.pipe')} value={`${formatNumber(schedule.summary.purchasePipeM, 0)} m`} detail={t('schedule.zonesEmitters', { zones: schedule.summary.zones, emitters: schedule.summary.emitterCount })} />
+      <ScheduleMetric label={t('schedule.hydraulicDuty')} value={`${formatNumber(schedule.summary.requiredFlowM3Hour, 2)} m³/h`} detail={`${formatNumber(schedule.summary.requiredDynamicHeadM, 1)} m · ${schedule.summary.pumpRequired ? t('schedule.pump') : t('schedule.gravityPressure')}`} />
+      <ScheduleMetric label={t('schedule.annualWater')} value={`${formatNumber(schedule.summary.annualWaterM3, 0)} m³`} detail={t('schedule.designYear', { year: irrigation.designYear })} />
+      <ScheduleMetric label={t('schedule.annualOperation')} value={currency(schedule.summary.annualOperatingCost, costs.economics)} detail={t('schedule.designYear', { year: irrigation.designYear })} />
+    </section>
+    <ScheduleSection number="01" title={t('schedule.executionTitle')} subtitle={t('schedule.executionBody')}>
+      <div className="schedule-task-list">{schedule.tasks.map((task, index) => <article key={task}><i>{index + 1}</i><span><small>{t(`schedule.task.${task}.timing`)}</small><strong>{t(`schedule.task.${task}.title`)}</strong><p>{t(`schedule.task.${task}.body`, scheduleTaskValues(schedule, site, profile, irrigation, costs))}</p></span><b>□</b></article>)}</div>
+    </ScheduleSection>
+    <ScheduleSection number="02" title={t('schedule.plantingTitle')} subtitle={t('schedule.plantingBody')}>
+      <div className="schedule-table planting"><div><b>{t('schedule.species')}</b><b>{t('schedule.quantity')}</b><b>{t('schedule.unitCost')}</b><b>{t('schedule.labour')}</b><b>{t('schedule.subtotal')}</b></div>{schedule.planting.map((row) => {
+        const item = speciesById.get(row.speciesId);
+        return <div key={row.speciesId}><span><strong>{item ? speciesDisplayName(item, t) : row.commonName}</strong><small>{row.scientificName}</small></span><span>{row.count}</span><span>{currency(row.unitPlantCost, costs.economics)}</span><span>{formatNumber(row.laborHours, 1)} h</span><span>{currency(row.subtotalCost, costs.economics)}</span></div>;
+      })}</div>
+    </ScheduleSection>
+    <ScheduleSection number="03" title={t('schedule.irrigationTitle')} subtitle={t('schedule.irrigationBody')}>
+      <div className="schedule-table infrastructure"><div><b>{t('schedule.component')}</b><b>{t('schedule.specification')}</b><b>{t('schedule.measured')}</b><b>{t('schedule.purchase')}</b></div>{schedule.infrastructure.map((component) => <div key={component.id}><span><strong>{localizedNetworkComponent(component.label, t)}</strong><small>{component.category}</small></span><span>{localizedNetworkSpecification(component.specification, t)}</span><span>{formatNumber(component.measuredQuantity, component.unit === 'm' ? 1 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span><span>{formatNumber(component.purchaseQuantity, 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span></div>)}</div>
+      <div className="schedule-months">{schedule.irrigationMonths.map((month) => <span key={month.month}><small>{monthLabel(month.month)}</small><strong>{formatNumber(month.grossM3, 1)} m³</strong><b>{currency(month.cost, costs.economics)}</b></span>)}</div>
+      <p className="schedule-note">{t('schedule.satelliteAdjustment', { adjustment: signed(irrigation.satelliteScheduling.adjustmentPercent), confidence: translatedStatus(irrigation.satelliteScheduling.confidence, t) })}</p>
+    </ScheduleSection>
+    <ScheduleSection number="04" title={t('schedule.managementTitle')} subtitle={t('schedule.managementBody')}>
+      <div className="schedule-management">{schedule.managementPhases.map((phase) => <article key={phase}><small>{t(`schedule.phase.${phase}.years`)}</small><strong>{t(`schedule.phase.${phase}.title`)}</strong><p>{t(`schedule.phase.${phase}.body`)}</p><em>{t(`schedule.management.system.${variant.design.system}`)}</em><span>□ {t('schedule.recordActuals')}</span></article>)}</div>
+      {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1) })}</small></span></div>}
+    </ScheduleSection>
+    <ScheduleSection number="05" title={t('schedule.evidenceTitle')} subtitle={t('schedule.evidenceBody')}>
+      <div className="schedule-evidence">{schedule.evidence.map((item, index) => {
+        const usage = evidenceUsageKey(item);
+        return <article key={`${item.source}-${item.version}-${index}`}><span><strong>{item.source}</strong><small>{item.version} · {shortDate(item.observedAt, locale)}</small></span><span><b>{t('evidence.decision')}</b><small>{t(`${usage}.decision`)}</small></span><i>{translatedStatus(item.confidence, t)}</i></article>;
+      })}</div>
+    </ScheduleSection>
+    {schedule.warnings.length > 0 && <section className="schedule-warnings"><strong>{t('schedule.warnings')}</strong>{schedule.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</section>}
+    <footer className="schedule-footer"><span>growaf · {t('schedule.footer')}</span><span>{t('schedule.generatedFrom', { version: variant.generation.engineVersion })}</span></footer>
+  </article></div>;
+}
+
+function ScheduleSection({ number, title, subtitle, children }: { number: string; title: string; subtitle: string; children: ReactNode }) {
+  return <section className="schedule-section"><header><i>{number}</i><span><h2>{title}</h2><p>{subtitle}</p></span></header>{children}</section>;
+}
+
+function ScheduleMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <span><small>{label}</small><strong>{value}</strong><i>{detail}</i></span>;
+}
+
+function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, profile: SiteProfile, irrigation: IrrigationEstimate, costs: EstablishmentCost): Record<string, string | number> {
+  const values = {
+    area: formatNumber(profile.areaM2, 0),
+    trees: schedule.summary.treeCount,
+    existing: site.existingTrees.length + profile.satellite.existingVegetation.patches.length,
+    overrides: profile.overrides?.length ?? 0,
+    corridors: schedule.summary.machineryCorridorCount,
+    reserved: formatNumber(schedule.summary.machineryReservedAreaM2, 0),
+    headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1),
+    pipe: formatNumber(schedule.summary.purchasePipeM, 0),
+    zones: schedule.summary.zones,
+    flow: formatNumber(schedule.summary.requiredFlowM3Hour, 2),
+    head: formatNumber(schedule.summary.requiredDynamicHeadM, 1),
+    labor: formatNumber(costs.plantingLaborHours, 1),
+    emitters: schedule.summary.emitterCount,
+    peak: formatNumber(irrigation.peakDayM3, 2),
+    adjustment: signed(irrigation.satelliteScheduling.adjustmentPercent),
+  };
+  return values;
+}
+
+function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void> }) {
+  const { t, locale } = useI18n();
+  const [overrideField, setOverrideField] = useState<SiteProfileOverrideField>(SITE_PROFILE_OVERRIDE_DEFINITIONS[0].field);
+  const [overrideInput, setOverrideInput] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideSource, setOverrideSource] = useState('Field measurement');
+  const [overrideObservedAt, setOverrideObservedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const selectedOverrideDefinition = SITE_PROFILE_OVERRIDE_DEFINITIONS.find((item) => item.field === overrideField) ?? SITE_PROFILE_OVERRIDE_DEFINITIONS[0];
+  useEffect(() => {
+    if (!profile) return;
+    const current = overrideValue(profile, overrideField);
+    setOverrideInput(current === null ? '' : String(current));
+  }, [profile, overrideField]);
   if (!profile) return <EmptyState icon={FlaskConical} title={t('profile.emptyTitle')} body={t(hasSite ? 'profile.emptyBody' : 'profile.emptyNoSiteBody')} action={t(hasSite ? 'profile.analyse' : 'profile.openSite')} onAction={hasSite ? onAnalyze : onOpenSite} />;
   const optical = profile.satellite.optical.latest;
   const radar = profile.satellite.radar;
@@ -1757,6 +2096,22 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi }: {
       <div className="evidence-card soil-card">
         <div className="card-heading"><div><FlaskConical size={17} /><span><small>SoilGrids · 0–5 cm</small><strong>{profile.soil.textureClass ? localizedEnum(profile.soil.textureClass, t) : t('profile.fieldTestRequired')}</strong></span></div><StatusPill status={profile.soil.status} /></div>
         <div className="soil-values"><span><small>pH</small><strong>{profile.soil.ph ?? '—'}</strong></span><span><small>{t('profile.sand')}</small><strong>{profile.soil.sandPercent ?? '—'}%</strong></span><span><small>{t('profile.clay')}</small><strong>{profile.soil.clayPercent ?? '—'}%</strong></span><span><small>{t('profile.soc')}</small><strong>{profile.soil.organicCarbonGKg ?? '—'}</strong></span></div>
+      </div>
+      <div className="profile-overrides" data-testid="profile-overrides">
+        <div className="card-heading"><div><PencilRuler size={17} /><span><small>{t('profile.overrideEyebrow')}</small><strong>{t('profile.overrideTitle')}</strong></span></div><StatusPill status={(profile.overrides?.length ?? 0) > 0 ? 'available' : 'partial'} /></div>
+        <p>{t('profile.overrideBody')}</p>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          void onOverride({ field: overrideField, value: overrideInput, reason: overrideReason, sourceLabel: overrideSource, observedAt: overrideObservedAt }).then(() => setOverrideReason(''));
+        }}>
+          <label className="select-label"><span>{t('profile.overrideField')}</span><select aria-label={t('profile.overrideField')} value={overrideField} onChange={(event) => setOverrideField(event.target.value as SiteProfileOverrideField)}>{SITE_PROFILE_OVERRIDE_DEFINITIONS.map((item) => <option key={item.field} value={item.field}>{t(item.labelKey)}</option>)}</select></label>
+          <label className="select-label"><span>{t('profile.overrideValue')}</span>{selectedOverrideDefinition.valueType === 'choice' ? <select aria-label={t('profile.overrideValue')} value={overrideInput} onChange={(event) => setOverrideInput(event.target.value)}>{selectedOverrideDefinition.options?.map((option) => <option key={option} value={option}>{localizedEnum(option, t)}</option>)}</select> : selectedOverrideDefinition.valueType === 'boolean' ? <select aria-label={t('profile.overrideValue')} value={overrideInput} onChange={(event) => setOverrideInput(event.target.value)}><option value="true">{t('actions.yes')}</option><option value="false">{t('actions.no')}</option></select> : <span className="input-with-unit"><input aria-label={t('profile.overrideValue')} type={selectedOverrideDefinition.valueType === 'number' ? 'number' : 'text'} min={selectedOverrideDefinition.minimum} max={selectedOverrideDefinition.maximum} step="any" required value={overrideInput} onChange={(event) => setOverrideInput(event.target.value)} />{selectedOverrideDefinition.unit && <small>{selectedOverrideDefinition.unit}</small>}</span>}</label>
+          <label><span>{t('profile.overrideSource')}</span><input aria-label={t('profile.overrideSource')} minLength={2} maxLength={160} required value={overrideSource} onChange={(event) => setOverrideSource(event.target.value)} /></label>
+          <label><span>{t('profile.overrideObservedAt')}</span><input aria-label={t('profile.overrideObservedAt')} type="date" required value={overrideObservedAt} onChange={(event) => setOverrideObservedAt(event.target.value)} /></label>
+          <label><span>{t('profile.overrideReason')}</span><textarea aria-label={t('profile.overrideReason')} minLength={4} maxLength={500} required value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder={t('profile.overrideReasonPlaceholder')} /></label>
+          <button className="button primary" type="submit" disabled={!overrideInput || overrideReason.trim().length < 4}>{t('profile.applyOverride')}</button>
+        </form>
+        {(profile.overrides?.length ?? 0) > 0 && <div className="override-audit"><strong>{t('profile.overrideAudit')}</strong>{[...(profile.overrides ?? [])].reverse().slice(0, 8).map((item) => <article key={item.id}><span><b>{t(SITE_PROFILE_OVERRIDE_DEFINITIONS.find((definition) => definition.field === item.field)?.labelKey ?? item.field)}</b><small>{item.sourceLabel} · {shortDate(item.observedAt, locale)}</small></span><span><s>{String(item.previousValue ?? '—')}</s><strong>{String(item.value)}{item.unit ? ` ${item.unit}` : ''}</strong></span><p>{item.reason}</p></article>)}</div>}
       </div>
       <div className="vegetation-audit" data-testid="existing-vegetation-audit">
         <div className="card-heading"><div><TreePine size={17} /><span><small>{t('profile.vegetationAudit')}</small><strong>{t('profile.protectedAreas', { count: vegetation.patches.length })}</strong></span></div><StatusPill status={vegetation.suitability} /></div>
@@ -1796,7 +2151,18 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi }: {
 function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<CatalogueFilters>({ treeOnly: true, globUntOnly: false, designReadyOnly: false });
+  const [filters, setFilters] = useState<CatalogueFilters>({
+    treeOnly: true,
+    globUntOnly: false,
+    designReadyOnly: false,
+    stratum: '',
+    succession: '',
+    role: '',
+    evergreen: '',
+    nitrogenFixer: '',
+    droughtMinimum: 0,
+    evidenceMinimum: 0,
+  });
   const visible = recommendations.filter((item) => item.status !== 'blocked').slice(0, 18);
   const blocked = recommendations.filter((item) => item.status === 'blocked');
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
@@ -1874,8 +2240,18 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
       <div className="catalogue-filters" aria-label={t('species.catalogueFilters')}>{([
         ['treeOnly', t('species.filterTrees')], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', t('species.filterDesignReady')],
       ] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.checked })} /><span>{label}</span></label>)}</div>
+      <div className="catalogue-advanced-filters" data-testid="catalogue-advanced-filters">
+        <p>{t('species.advancedFiltersBody')}</p>
+        <label><span>{t('species.filterStratum')}</span><select aria-label={t('species.filterStratum')} value={filters.stratum} onChange={(event) => setFilters({ ...filters, stratum: event.target.value })}><option value="">{t('species.filterAny')}</option>{['emergent', 'high', 'medium', 'low', 'ground', 'climber'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterSuccession')}</span><select aria-label={t('species.filterSuccession')} value={filters.succession} onChange={(event) => setFilters({ ...filters, succession: event.target.value })}><option value="">{t('species.filterAny')}</option>{['placenta', 'secondary', 'climax'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterRole')}</span><select aria-label={t('species.filterRole')} value={filters.role} onChange={(event) => setFilters({ ...filters, role: event.target.value })}><option value="">{t('species.filterAny')}</option>{['food', 'fruit', 'biomass', 'nitrogen fixation', 'timber', 'fodder', 'wind protection', 'pollinator resource'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterEvergreen')}</span><select aria-label={t('species.filterEvergreen')} value={filters.evergreen} onChange={(event) => setFilters({ ...filters, evergreen: event.target.value as CatalogueFilters['evergreen'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('species.evergreen')}</option><option value="false">{t('species.deciduous')}</option></select></label>
+        <label><span>{t('species.filterNitrogen')}</span><select aria-label={t('species.filterNitrogen')} value={filters.nitrogenFixer} onChange={(event) => setFilters({ ...filters, nitrogenFixer: event.target.value as CatalogueFilters['nitrogenFixer'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('actions.yes')}</option><option value="false">{t('actions.no')}</option></select></label>
+        <label><span>{t('species.filterDrought')}</span><select aria-label={t('species.filterDrought')} value={filters.droughtMinimum} onChange={(event) => setFilters({ ...filters, droughtMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[3, 4, 5].map((value) => <option key={value} value={value}>{value}/5+</option>)}</select></label>
+        <label><span>{t('species.filterEvidence')}</span><select aria-label={t('species.filterEvidence')} value={filters.evidenceMinimum} onChange={(event) => setFilters({ ...filters, evidenceMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[2, 3, 4].map((value) => <option key={value} value={value}>{value}+</option>)}</select></label>
+      </div>
       <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
-      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}</span></span>)}</div>}
+      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}</span></span>)}</div>}
       {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
         const selected = selectedIds.includes(item.species.id);
         return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>
@@ -2023,7 +2399,7 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
   );
 }
 
-function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void }) {
+function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare, onSchedule }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onSchedule: () => void }) {
   const { t, locale } = useI18n();
   const update = (patch: Partial<EconomicConfiguration>) => onConfiguration({
     ...configuration,
@@ -2067,6 +2443,7 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
         return <div className="cost-table-row" key={item.speciesId}><span><strong>{entry ? speciesDisplayName(entry, t) : item.speciesId}</strong><i>{entry?.scientificName}</i></span><span>{item.count}</span><span>{currency(item.unitPlantCost, costs.economics)}</span><span>{formatNumber(item.unitLaborHours, 2)} h</span><span>{currency(item.subtotalCost, costs.economics)}</span></div>;
       })}</div>
       <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>
+      <button className="button schedule-button wide" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} /> {t('schedule.open')}</button>
       <button className="button primary wide" onClick={onCalculate}>{t('costs.recalculate')} <ChevronRight size={18} /></button>
     </div>
   );
@@ -2127,10 +2504,20 @@ function StatusPill({ status }: { status: string }) { const { t } = useI18n(); r
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
 function post(value: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
+class GrowafApiError extends Error {
+  readonly statusCode: number;
+  readonly status: string;
+  constructor(message: string, statusCode: number, status: string) {
+    super(message);
+    this.name = 'GrowafApiError';
+    this.statusCode = statusCode;
+    this.status = status;
+  }
+}
 async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.error?.message ?? `Growaf API returned ${response.status}`);
+  if (!response.ok) throw new GrowafApiError(body?.error?.message ?? `Growaf API returned ${response.status}`, response.status, body?.error?.status ?? 'API_ERROR');
   return body as T;
 }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Unexpected Growaf error'; }
