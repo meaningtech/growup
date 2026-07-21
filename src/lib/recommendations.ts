@@ -1,0 +1,135 @@
+import type { DesignObjectives, DesignSpecies, SiteProfile, SpeciesRecommendation, SuitabilityComponent } from '../types';
+import { DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives } from './objectives';
+
+type SuitabilityKey = 'climate' | 'soil' | 'water' | 'native' | 'purpose' | 'syntropic' | 'maintenance' | 'evidence';
+
+export function rankSpecies(
+  species: DesignSpecies[],
+  site: SiteProfile,
+  objectives: DesignObjectives = DEFAULT_DESIGN_OBJECTIVES,
+): SpeciesRecommendation[] {
+  const normalized = normalizeDesignObjectives(objectives);
+  return species
+    .map((item) => recommendSpecies(item, site, normalized))
+    .sort((a, b) => b.score - a.score || a.species.scientificName.localeCompare(b.species.scientificName));
+}
+
+export function recommendedPalette(recommendations: SpeciesRecommendation[], size = 9): SpeciesRecommendation[] {
+  const eligible = recommendations.filter((item) => item.status === 'recommended' || item.status === 'conditional');
+  const selected: SpeciesRecommendation[] = [];
+  const strata = ['emergent', 'high', 'medium', 'low', 'ground', 'climber'] as const;
+  const phases = ['placenta', 'secondary', 'climax'] as const;
+
+  for (const stratum of strata) {
+    const candidate = eligible.find((item) => item.species.stratum === stratum && !selected.includes(item));
+    if (candidate) selected.push(candidate);
+  }
+
+  for (const phase of phases) {
+    const candidate = eligible.find((item) => item.species.succession === phase && !selected.includes(item));
+    if (candidate) selected.push(candidate);
+  }
+
+  for (const candidate of eligible) {
+    if (selected.length >= size) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+
+  return selected.slice(0, size);
+}
+
+export function suitabilityWeights(objectives: DesignObjectives): Record<SuitabilityKey, number> {
+  const value = normalizeDesignObjectives(objectives);
+  const raw: Record<SuitabilityKey, number> = {
+    climate: 24 + value.waterResilience * 0.05,
+    soil: 17,
+    water: 10 + value.waterResilience * 0.18,
+    native: 4 + value.nativeHabitat * 0.2 + value.biodiversity * 0.04,
+    purpose: 4 + value.production * 0.21,
+    syntropic: 4 + value.biodiversity * 0.17,
+    maintenance: 3 + value.lowMaintenance * 0.15,
+    evidence: 8,
+  };
+  const total = Object.values(raw).reduce((sum, weight) => sum + weight, 0);
+  return Object.fromEntries(Object.entries(raw).map(([key, weight]) => [key, weight / total])) as Record<SuitabilityKey, number>;
+}
+
+function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives: DesignObjectives): SpeciesRecommendation {
+  if (species.invasiveStatus === 'blocked') {
+    const blocked: SuitabilityComponent = {
+      key: 'safety', label: 'Jurisdictional safety', score: 0, weight: 1, status: 'blocked',
+      explanation: species.invasiveNote ?? 'This species is blocked for the project jurisdiction.',
+    };
+    return { species, score: 0, status: 'blocked', components: [blocked], reasons: [], mitigations: [blocked.explanation] };
+  }
+
+  const weights = suitabilityWeights(objectives);
+  const climateScore = intervalScore(
+    [site.climate.absoluteMinTemperatureC, site.climate.absoluteMaxTemperatureC],
+    [species.minTemperatureC, species.maxTemperatureC],
+  );
+  const rainScore = rangeScore(site.climate.annualPrecipitationMm, species.annualRainMinMm, species.annualRainMaxMm);
+  const soilScore = site.soil.ph === null ? null : rangeScore(site.soil.ph, species.phMin, species.phMax);
+  const aridityDemand = site.climate.annualEt0Mm > 0 ? site.climate.annualPrecipitationMm / site.climate.annualEt0Mm : null;
+  const droughtScore = species.droughtTolerance * 20;
+  const waterScore = Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
+  const nativeScore = species.nativeItaly ? 100 : species.nativeMediterranean ? 82 : 48;
+  const productive = species.productiveFromYear !== null || species.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role));
+  const productionScore = productive ? Math.max(68, 100 - Math.max(0, (species.productiveFromYear ?? 5) - 1) * 5) : species.roles.includes('timber') ? 62 : 30;
+  const biodiversityScore = Math.min(100, 42 + species.roles.length * 8 + (species.nitrogenFixer ? 15 : 0) + (species.nativeItaly ? 10 : 0));
+  const purposeScore = Math.round((productionScore * objectives.production + biodiversityScore * objectives.biodiversity) / Math.max(1, objectives.production + objectives.biodiversity));
+  const syntropicScore = Math.min(100, 48 + (species.nitrogenFixer ? 24 : 0) + (species.roles.includes('biomass') ? 16 : 0) + (species.succession === 'placenta' ? 10 : 0));
+  const maintenanceScore = Math.round(clamp(86 + droughtScore * 0.16 - species.growthRate * 65 - (species.roles.includes('biomass') ? 8 : 0), 15, 100));
+  const evidenceScore = species.sources.length >= 3 ? 92 : species.sources.length === 2 ? 76 : 58;
+
+  const components: SuitabilityComponent[] = [
+    component('climate', 'Climate fit', climateScore, weights.climate, `Observed ${site.climate.absoluteMinTemperatureC}–${site.climate.absoluteMaxTemperatureC} °C; supported envelope ${species.minTemperatureC}–${species.maxTemperatureC} °C.`),
+    component('soil', 'Soil reaction', soilScore, weights.soil, site.soil.ph === null ? 'Soil pH is unavailable; a representative field test is required before recommendation.' : `SoilGrids pH ${site.soil.ph}; supported range ${species.phMin}–${species.phMax}.`),
+    component('water', 'Water resilience', waterScore, weights.water, `${site.climate.annualPrecipitationMm} mm annual rain versus ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.`),
+    component('native', 'Native habitat value', nativeScore, weights.native, species.nativeItaly ? 'Native in Italy.' : species.nativeMediterranean ? 'Native within the Mediterranean basin.' : 'Introduced crop; ecological spread and habitat fit require management.'),
+    component('purpose', 'Objective value', purposeScore, weights.purpose, `${productive ? 'Productive' : 'Support'} species; functions: ${species.roles.join(', ')}.`),
+    component('syntropic', 'Successional function', syntropicScore, weights.syntropic, `${species.stratum} stratum, ${species.succession} succession${species.nitrogenFixer ? ', nitrogen fixer' : ''}.`),
+    component('maintenance', 'Maintenance demand', maintenanceScore, weights.maintenance, `Growth coefficient ${species.growthRate.toFixed(2)}, drought tolerance ${species.droughtTolerance}/5${species.roles.includes('biomass') ? ', planned biomass management' : ''}.`),
+    component('evidence', 'Evidence readiness', evidenceScore, weights.evidence, `${species.sources.length} linked evidence groups cover taxonomy, ecology and establishment economics.`),
+  ];
+  const weighted = components.reduce((sum, item) => sum + item.score * item.weight, 0);
+  const monitorPenalty = species.invasiveStatus === 'monitor' ? 14 : 0;
+  const score = Math.max(0, Math.round(weighted - monitorPenalty));
+  const criticalUnknown = components.some((item) => item.key === 'soil' && item.status === 'unknown');
+  const criticalMismatch = climateScore < 38 || waterScore < 34;
+  let status: SpeciesRecommendation['status'] = score >= 75 ? 'recommended' : score >= 58 ? 'conditional' : 'poor';
+  if (criticalMismatch) status = 'poor';
+  if ((criticalUnknown || species.invasiveStatus === 'monitor') && status === 'recommended') status = 'conditional';
+  const reasons = components.filter((item) => item.status === 'good').sort((a, b) => b.weight - a.weight).map((item) => item.explanation).slice(0, 3);
+  const mitigations = components.filter((item) => item.status === 'poor' || item.status === 'unknown').map((item) => item.explanation);
+  if (species.invasiveStatus === 'monitor' && species.invasiveNote) mitigations.unshift(species.invasiveNote);
+  if (criticalMismatch) mitigations.unshift('A critical climate or water mismatch prevents recommendation for this site.');
+
+  return { species, score, status, components, reasons, mitigations };
+}
+
+function component(key: SuitabilityKey, label: string, score: number | null, weight: number, explanation: string): SuitabilityComponent {
+  if (score === null) return { key, label, score: 50, weight, status: 'unknown', explanation };
+  return { key, label, score, weight, status: score >= 72 ? 'good' : score >= 52 ? 'conditional' : 'poor', explanation };
+}
+
+function intervalScore(observed: [number, number], supported: [number, number]): number {
+  const low = rangeScore(observed[0], supported[0], supported[1]);
+  const high = rangeScore(observed[1], supported[0], supported[1]);
+  return Math.round((low + high) / 2);
+}
+
+function rangeScore(value: number, minimum: number, maximum: number): number {
+  if (value >= minimum && value <= maximum) {
+    const midpoint = (minimum + maximum) / 2;
+    const halfRange = Math.max(1, (maximum - minimum) / 2);
+    return Math.round(100 - Math.abs(value - midpoint) / halfRange * 15);
+  }
+  const distance = value < minimum ? minimum - value : value - maximum;
+  const range = Math.max(1, maximum - minimum);
+  return Math.max(0, Math.round(70 - distance / range * 180));
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
