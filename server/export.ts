@@ -66,6 +66,7 @@ export function exportProjectGeoJson(project: ProjectState) {
         kind: 'irrigation_line',
         id: line.id,
         lineKind: line.kind,
+        routingStatus: line.routingStatus,
         zoneId: line.zoneId,
         lengthM: line.lengthM,
         diameterMm: line.diameterMm,

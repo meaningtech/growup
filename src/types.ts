@@ -610,6 +610,7 @@ export type EconomicConfiguration = {
 export type IrrigationLine = {
   id: string;
   kind: 'mainline' | 'submain' | 'lateral' | 'protected-crossing';
+  routingStatus: 'clear' | 'blocked';
   zoneId: string | null;
   points: Coordinate[];
   lengthM: number;
@@ -652,6 +653,8 @@ export type IrrigationNetworkPlan = {
   peakZoneRuntimeHours: number;
   protectedCrossingCount: number;
   routedObstacleCount: number;
+  routingValid: boolean;
+  unroutableLineIds: string[];
   manualOverrideCount: number;
   totalMeasuredPipeM: number;
   totalPurchasePipeM: number;

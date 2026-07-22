@@ -42,8 +42,9 @@ import {
   type GrowupDatabase,
 } from './mongo.js';
 import { buildSiteProfile, searchLocations, type SiteProviderConfig } from './site.js';
+import { allowedOrigins, rateLimit, securityHeaders, type SecurityConfig } from './security.js';
 
-export type GrowupAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & {
+export type GrowupAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & SecurityConfig & {
   skipDatabaseMigration?: boolean;
   database?: GrowupDatabase;
   staticRoot?: string | null;
@@ -51,6 +52,8 @@ export type GrowupAppConfig = SiteProviderConfig & AssistantProviderConfig & Aut
 
 export function createApp(config: GrowupAppConfig = {}) {
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
   const database = config.database ?? {
     health: async () => (await databaseHealth()) && (await mongoHealth()),
     geometryMetrics,
@@ -65,8 +68,13 @@ export function createApp(config: GrowupAppConfig = {}) {
     saveProject,
   };
 
-  app.use(cors({ credentials: true, origin: true }));
+  const origins = allowedOrigins(config);
+  app.use(cors({ credentials: true, origin: (origin, callback) => callback(null, !origin || origins.has(origin)) }));
+  app.use(securityHeaders);
   app.use(express.json({ limit: '8mb' }));
+  const assistantLimiter = rateLimit('assistant', config.assistantRateLimit ?? 10, config);
+  const computeLimiter = rateLimit('compute', config.computeRateLimit ?? 80, config);
+  const authLimiter = rateLimit('auth', config.authRateLimit ?? 20, { ...config, rateLimitWindowMs: 15 * 60_000 });
 
   app.get('/api/health', async (_req: Request, res: Response) => {
     const db = await database.health();
@@ -94,7 +102,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/auth/google', async (req: Request, res: Response) => {
+  app.post('/api/auth/google', authLimiter, async (req: Request, res: Response) => {
     try {
       const result = await signInWithGoogle(typeof req.body?.credential === 'string' ? req.body.credential : '', database, config);
       setSessionResponseCookie(res, result.cookie);
@@ -118,7 +126,7 @@ export function createApp(config: GrowupAppConfig = {}) {
 
   app.get('/api/assistant/status', (_req: Request, res: Response) => res.json(assistantStatus(config)));
 
-  app.post('/api/assistant/plan', async (req: Request, res: Response) => {
+  app.post('/api/assistant/plan', assistantLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => planAssistantAction(
       typeof req.body?.message === 'string' ? req.body.message : '',
       requireAssistantContext(req.body?.context),
@@ -148,7 +156,7 @@ export function createApp(config: GrowupAppConfig = {}) {
 
   app.get('/api/design-species', (_req: Request, res: Response) => res.json({ total: DESIGN_SPECIES.length, results: DESIGN_SPECIES }));
 
-  app.get('/api/locations/search', async (req: Request, res: Response) => {
+  app.get('/api/locations/search', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, () => {
       const query = stringQuery(req.query.q)?.trim() ?? '';
       if (query.length < 2 || query.length > 200) throw httpError(400, 'INVALID_LOCATION_QUERY', 'Location search must contain 2–200 characters.');
@@ -156,15 +164,15 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/geometry/metrics', async (req: Request, res: Response) => {
+  app.post('/api/geometry/metrics', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => database.geometryMetrics(requireBoundary(req.body)));
   });
 
-  app.post('/api/site/validate', async (req: Request, res: Response) => {
+  app.post('/api/site/validate', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => database.geometryMetrics(requireBoundary(req.body)));
   });
 
-  app.post('/api/site/profile', async (req: Request, res: Response) => {
+  app.post('/api/site/profile', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const site = requireBoundary(req.body);
       const validation = await database.geometryMetrics(site);
@@ -174,14 +182,14 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/economics/profile', async (req: Request, res: Response) => {
+  app.post('/api/economics/profile', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       return resolveEconomicConfiguration(siteProfile.location.countryCode, config);
     });
   });
 
-  app.post('/api/site/profile/override', async (req: Request, res: Response) => {
+  app.post('/api/site/profile/override', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => applySiteProfileOverride(requireSiteProfile(req.body?.siteProfile), {
       field: String(req.body?.override?.field ?? '') as SiteProfileOverrideField,
       value: req.body?.override?.value,
@@ -192,7 +200,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     }));
   });
 
-  app.post('/api/recommendations', async (req: Request, res: Response) => {
+  app.post('/api/recommendations', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       const recommendations = rankSpecies(DESIGN_SPECIES, siteProfile, normalizeDesignObjectives(req.body?.objectives));
@@ -200,7 +208,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/layout/generate', async (req: Request, res: Response) => {
+  app.post('/api/layout/generate', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
@@ -213,7 +221,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/layout/regenerate', async (req: Request, res: Response) => {
+  app.post('/api/layout/regenerate', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
@@ -224,7 +232,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/irrigation/calculate', async (req: Request, res: Response) => {
+  app.post('/api/irrigation/calculate', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const variant = requireVariant(req.body?.variant);
       const site = requireBoundary(req.body?.site);
@@ -234,7 +242,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
-  app.post('/api/costs/calculate', async (req: Request, res: Response) => {
+  app.post('/api/costs/calculate', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const variant = requireVariant(req.body?.variant);
       const site = requireBoundary(req.body?.site);

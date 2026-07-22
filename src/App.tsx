@@ -705,17 +705,19 @@ export default function App() {
     irrigationNetworkOverlaysRef.current = [];
     if (!irrigation || !showIrrigation) return;
     for (const line of irrigation.network.lines) {
-      const color = line.kind === 'mainline' ? '#1c5f88' : line.kind === 'submain' ? '#278c9e' : line.kind === 'protected-crossing' ? '#f0a536' : '#61b9c7';
+      const blocked = line.routingStatus === 'blocked';
+      const color = blocked ? '#d24f3d' : line.kind === 'mainline' ? '#1c5f88' : line.kind === 'submain' ? '#278c9e' : line.kind === 'protected-crossing' ? '#f0a536' : '#61b9c7';
       const editable = editingIrrigation && line.kind !== 'protected-crossing';
       const overlay = new maps.Polyline({
         map,
         path: line.points,
         strokeColor: color,
-        strokeOpacity: line.kind === 'protected-crossing' ? 1 : 0.9,
-        strokeWeight: line.kind === 'mainline' ? 5 : line.kind === 'submain' ? 4 : line.kind === 'protected-crossing' ? 7 : 2,
+        strokeOpacity: blocked ? 0 : line.kind === 'protected-crossing' ? 1 : 0.9,
+        strokeWeight: blocked ? 4 : line.kind === 'mainline' ? 5 : line.kind === 'submain' ? 4 : line.kind === 'protected-crossing' ? 7 : 2,
+        icons: blocked ? [{ icon: { path: 'M 0,-1 0,1', strokeColor: color, strokeOpacity: 1, strokeWeight: 4, scale: 3 }, offset: '0', repeat: '12px' }] : undefined,
         clickable: editable,
         editable,
-        zIndex: line.kind === 'protected-crossing' ? 33 : 30,
+        zIndex: blocked ? 35 : line.kind === 'protected-crossing' ? 33 : 30,
       });
       if (editable) overlay.addListener('mouseup', (event: any) => {
         if (typeof event.vertex !== 'number') return;
@@ -2596,6 +2598,8 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
   </div>;
   if (!irrigation) return <div className="panel-body">{sourceConfiguration}<EmptyState icon={Droplets} title={t('water.emptyTitle')} body={t('water.emptyBody')} action={t(canCalculate ? 'water.calculate' : 'water.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
   const maxMonthly = Math.max(...irrigation.monthly.map((month) => month.grossM3), 1);
+  const routingValid = irrigation.network.routingValid !== false;
+  const routingConflictCount = irrigation.network.unroutableLineIds?.length ?? 0;
   return (
     <div className="panel-body">
       <div className="panel-intro compact"><span className="eyebrow">{t('water.eyebrow')}</span><h1>{t('water.annual', { value: formatNumber(irrigation.annualWaterM3, 0) })}</h1><p>{t('water.method')}</p></div>
@@ -2626,15 +2630,16 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
         <p>{t('water.dragSourceHint')}</p>
         {irrigation.network.protectedCrossingCount > 0 && <p>{t('water.protectedCrossings', { count: irrigation.network.protectedCrossingCount })}</p>}
         {irrigation.network.routedObstacleCount > 0 && <p>{t('water.routedObstacles', { count: irrigation.network.routedObstacleCount })}</p>}
+        {!routingValid && <p className="hydraulic-conflict">{t('water.routingConflicts', { count: routingConflictCount })}</p>}
         {irrigation.network.manualOverrideCount > 0 && <p>{t('water.manualOverrides', { count: irrigation.network.manualOverrideCount })}</p>}
         {irrigation.network.warnings.map((warning) => <p className="hydraulic-warning" key={warning}>• {localizedDomainMessage(warning, t)}</p>)}
       </div>
-      <div className="network-lines"><div className="card-heading"><div><Route size={17} /><span><small>{t('water.lineScheduleEyebrow')}</small><strong>{t('water.lineSchedule')}</strong></span></div><button className={editingIrrigation ? 'line-edit active' : 'line-edit'} onClick={onEditIrrigation}>{t(editingIrrigation ? 'water.finishLineEdit' : 'water.editLines')}</button></div><p className="line-edit-hint">{t('water.editLinesHint')}</p>{(['mainline', 'submain', 'lateral', 'protected-crossing'] as const).map((kind) => {
+      <div className={`network-lines${routingValid ? '' : ' has-conflicts'}`}><div className="card-heading"><div><Route size={17} /><span><small>{t('water.lineScheduleEyebrow')}</small><strong>{t('water.lineSchedule')}</strong></span></div><button className={editingIrrigation ? 'line-edit active' : 'line-edit'} onClick={onEditIrrigation}>{t(editingIrrigation ? 'water.finishLineEdit' : 'water.editLines')}</button></div><p className="line-edit-hint">{t('water.editLinesHint')}</p>{!routingValid && <p className="routing-conflict">{t('water.editBlockedLines')}</p>}{(['mainline', 'submain', 'lateral', 'protected-crossing'] as const).map((kind) => {
         const lines = irrigation.network.lines.filter((line) => line.kind === kind);
         if (!lines.length) return null;
         return <div key={kind}><span><i className={kind} /><strong>{t(`water.line.${kind}`)}</strong><small>{t('water.lineCountLength', { count: lines.length, length: formatNumber(lines.reduce((sum, line) => sum + line.lengthM, 0), 0) })}</small></span><span>{[...new Set(lines.map((line) => `${line.diameterMm} mm`))].join(' · ')}</span></div>;
       })}</div>
-      <div className="network-bom" data-testid="irrigation-bom"><div className="card-heading"><div><Database size={17} /><span><small>{t('water.bomEyebrow')}</small><strong>{t('water.bomTitle')}</strong></span></div></div><div className="network-bom-head"><span>{t('water.component')}</span><span>{t('water.measured')}</span><span>{t('water.purchase')}</span></div>{irrigation.network.components.map((component) => <div className="network-bom-row" key={component.id}><span><strong>{localizedNetworkComponent(component.label, t)}</strong><small>{localizedNetworkSpecification(component.specification, t)}</small></span><span>{formatNumber(component.measuredQuantity, component.unit === 'm' ? 1 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span><span>{formatNumber(component.purchaseQuantity, component.unit === 'm' ? 0 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span></div>)}</div>
+      <div className={`network-bom${routingValid ? '' : ' provisional'}`} data-testid="irrigation-bom" data-procurement-ready={routingValid}><div className="card-heading"><div><Database size={17} /><span><small>{t('water.bomEyebrow')}</small><strong>{t(routingValid ? 'water.bomTitle' : 'water.bomDraftTitle')}</strong></span></div></div>{!routingValid && <p className="bom-conflict">{t('water.bomConflict')}</p>}<div className="network-bom-head"><span>{t('water.component')}</span><span>{t('water.measured')}</span><span>{t('water.purchase')}</span></div>{irrigation.network.components.map((component) => <div className="network-bom-row" key={component.id}><span><strong>{localizedNetworkComponent(component.label, t)}</strong><small>{localizedNetworkSpecification(component.specification, t)}</small></span><span>{formatNumber(component.measuredQuantity, component.unit === 'm' ? 1 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span><span>{formatNumber(component.purchaseQuantity, component.unit === 'm' ? 0 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span></div>)}</div>
       <div className="monthly-chart"><div className="card-heading"><div><Droplets size={17} /><span><small>{t('water.monthlyDemand')}</small><strong>{t('water.monthlyUnit')}</strong></span></div></div><div className="bars">{irrigation.monthly.map((month) => <div key={month.month}><span style={{ height: `${Math.max(3, month.grossM3 / maxMonthly * 100)}%` }} title={`${month.grossM3} m³`} /><small>{monthName(month.month)}</small></div>)}</div></div>
       <div className="satellite-schedule"><div><Satellite size={18} /><span><small>{t('water.satelliteSchedule')}</small><strong>{t('water.nextPulse', { value: signed(irrigation.satelliteScheduling.adjustmentPercent) })}</strong></span><StatusPill status={irrigation.satelliteScheduling.confidence} /></div><p>{localizedIrrigationRecommendation(irrigation, t)}</p><div className="priority-counts"><span className="high">{irrigation.satelliteScheduling.highPrioritySamples} {t('water.priorityHigh')}</span><span className="medium">{irrigation.satelliteScheduling.mediumPrioritySamples} {t('water.priorityMonitor')}</span><span className="low">{irrigation.satelliteScheduling.lowPrioritySamples} {t('water.priorityLow')}</span></div><button className="text-button" onClick={onShowZones}>{t('water.showZones')} <ChevronRight size={14} /></button></div>
       <div className="cost-breakdown"><Row label={t('water.water')} value={currency(irrigation.annualOperation.waterCost, irrigation.economics)} /><Row label={t('water.pumping', { value: formatNumber(irrigation.annualOperation.pumpingKwh, 0) })} value={currency(irrigation.annualOperation.energyCost, irrigation.economics)} /><Row label={t('water.systemCare', { hours: formatNumber(irrigation.annualOperation.managementLaborHours, 1) })} value={currency(irrigation.annualOperation.managementLaborCost, irrigation.economics)} /><Row label={t('water.annualMaintenance')} value={currency(irrigation.annualOperation.maintenanceCost, irrigation.economics)} /><Row label={t('water.installationMaterials')} value={currency(irrigation.installation.materialsCost, irrigation.economics)} strong /><Row label={t('water.installationLabour', { hours: irrigation.installation.laborHours })} value={currency(irrigation.installation.laborCost, irrigation.economics)} /></div>
@@ -2898,6 +2903,7 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
     'Well position is provisional at the highest sampled terrain point; hydrogeological survey and permitting are required before drilling.': 'water.warning.wellPosition',
     'The tank is provisionally placed at the highest sampled terrain point for gravity assistance; confirm access, bearing capacity and surveyed elevation.': 'water.warning.tankPosition',
     'Reservoir position requires a user-defined water point and geotechnical review.': 'water.warning.reservoirPosition',
+    'One or more irrigation lines could not be routed safely around protected obstacles. Edit the blocked lines before procurement.': 'water.warning.routingConflict',
   };
   if (exact[value]) return t(exact[value]);
   let match = value.match(/^Planting is restricted to an inward ([\d.]+) m boundary band; the central crop area remains unplanted\.$/);

@@ -259,8 +259,11 @@ function designIrrigationNetwork(
     if (override) manualOverrideCount += 1;
     const routed = routePolyline(override ?? line.points, obstacles, boundary);
     if (routed.routed) routedObstacleCount += 1;
-    return makeLine(line.id, line.kind, line.zoneId, routed.points, line.designFlowM3Hour, profile, configuration, line.diameterMm);
+    return makeLine(line.id, line.kind, line.zoneId, routed.points, line.designFlowM3Hour, profile, configuration, line.diameterMm, routed.clear ? 'clear' : 'blocked');
   });
+  const unroutableLineIds = lines.filter((line) => line.routingStatus === 'blocked').map((line) => line.id);
+  const routingValid = unroutableLineIds.length === 0;
+  if (!routingValid) warnings.push('One or more irrigation lines could not be routed safely around protected obstacles. Edit the blocked lines before procurement.');
   const protectedCrossings = configurationCrossings(boundary, variant, lines);
   lines.push(...protectedCrossings);
   const zoneLosses = zoneRows.map((_, zoneIndex) => {
@@ -300,6 +303,8 @@ function designIrrigationNetwork(
     peakZoneRuntimeHours,
     protectedCrossingCount: protectedCrossings.length,
     routedObstacleCount,
+    routingValid,
+    unroutableLineIds,
     manualOverrideCount,
     totalMeasuredPipeM,
     totalPurchasePipeM,
@@ -337,6 +342,7 @@ function makeLine(
   profile: SiteProfile,
   configuration: IrrigationConfiguration,
   minimumDiameterMm = 20,
+  routingStatus: IrrigationLine['routingStatus'] = 'clear',
 ): IrrigationLine {
   const lengthM = polylineLength(points) * 1.05;
   const diameterMm = selectPipeDiameter(flowM3Hour, configuration.targetVelocityMS, minimumDiameterMm);
@@ -344,6 +350,7 @@ function makeLine(
   return {
     id,
     kind,
+    routingStatus,
     zoneId,
     points,
     lengthM: round(lengthM),
@@ -373,19 +380,25 @@ function irrigationObstaclePolygons(boundary: SiteBoundary, profile: SiteProfile
   return polygons;
 }
 
-export function routePolyline(points: Coordinate[], obstaclePolygons: Coordinate[][], boundary: SiteBoundary): { points: Coordinate[]; routed: boolean } {
-  if (points.length < 2 || obstaclePolygons.length === 0) return { points, routed: false };
+export function routePolyline(points: Coordinate[], obstaclePolygons: Coordinate[][], boundary: SiteBoundary): { points: Coordinate[]; routed: boolean; clear: boolean } {
+  if (points.length < 2) return { points, routed: false, clear: false };
   const routedPoints: Coordinate[] = [points[0]];
   let routed = false;
+  let clear = true;
   for (let index = 1; index < points.length; index += 1) {
     const segment = shortestVisibleRoute(points[index - 1], points[index], obstaclePolygons, boundary);
+    if (!segment) {
+      clear = false;
+      routedPoints.push(points[index]);
+      continue;
+    }
     if (segment.length > 2) routed = true;
     routedPoints.push(...segment.slice(1));
   }
-  return { points: routedPoints, routed };
+  return { points: routedPoints, routed, clear };
 }
 
-function shortestVisibleRoute(start: Coordinate, end: Coordinate, obstacleCoordinates: Coordinate[][], boundary: SiteBoundary): Coordinate[] {
+function shortestVisibleRoute(start: Coordinate, end: Coordinate, obstacleCoordinates: Coordinate[][], boundary: SiteBoundary): Coordinate[] | null {
   const projection = createLocalProjection(polygonCentroid(boundary.polygon));
   const startM = projection.project(start);
   const endM = projection.project(end);
@@ -441,7 +454,7 @@ function shortestVisibleRoute(start: Coordinate, end: Coordinate, obstacleCoordi
       }
     }
   }
-  if (!Number.isFinite(distances[1])) return [start, end];
+  if (!Number.isFinite(distances[1])) return null;
   const route: PointM[] = [];
   for (let cursor = 1; cursor !== -1; cursor = previous[cursor]) route.push(nodes[cursor]);
   return route.reverse().map(projection.unproject);

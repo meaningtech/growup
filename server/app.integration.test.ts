@@ -255,6 +255,9 @@ describe('Growup API integration', () => {
     expect(irrigation.body.network.source).toEqual(expect.objectContaining({ placement: 'highest-terrain-sample', elevationM: 1151 }));
     expect(irrigation.body.network.source.coordinate).toEqual(EQUATORIAL_OPEN_FIELD_FIXTURE.polygon[0]);
     expect(irrigation.body.network.lines.filter((line: { kind: string }) => line.kind === 'lateral').length).toBeGreaterThan(2);
+    expect(irrigation.body.network.routingValid).toBe(true);
+    expect(irrigation.body.network.unroutableLineIds).toEqual([]);
+    expect(irrigation.body.network.lines.every((line: { routingStatus: string }) => line.routingStatus === 'clear')).toBe(true);
     expect(irrigation.body.network.components.length).toBeGreaterThan(8);
     expect(irrigation.body.network.totalPurchasePipeM).toBeGreaterThanOrEqual(irrigation.body.network.totalMeasuredPipeM);
     expect(irrigation.body.network.requiredDynamicHeadM).toBeGreaterThan(10);
@@ -281,6 +284,30 @@ describe('Growup API integration', () => {
       .expect(200);
     expect(editedLine.body.network.manualOverrideCount).toBe(1);
     expect(editedLine.body.network.lines.find((line: { id: string }) => line.id === editableLine.id).points.length).toBeGreaterThanOrEqual(3);
+
+    const blockedIrrigation = await request(app)
+      .post('/api/irrigation/calculate')
+      .send({
+        site: {
+          ...EQUATORIAL_OPEN_FIELD_FIXTURE,
+          existingTrees: [{
+            id: 'blocking-canopy',
+            name: 'Blocking canopy test fixture',
+            speciesName: null,
+            coordinate: polygonCentroid(EQUATORIAL_OPEN_FIELD_FIXTURE.polygon),
+            crownDiameterM: 500,
+            protectionBufferM: 10,
+          }],
+        },
+        siteProfile: profile,
+        variant: response.body.variants[0],
+        selectedSpeciesIds,
+        irrigationConfiguration: { sourceType: 'tank', availableFlowM3Hour: 4.5, tankCapacityM3: 20 },
+      })
+      .expect(200);
+    expect(blockedIrrigation.body.network.routingValid).toBe(false);
+    expect(blockedIrrigation.body.network.unroutableLineIds.length).toBeGreaterThan(0);
+    expect(blockedIrrigation.body.network.lines.some((line: { routingStatus: string }) => line.routingStatus === 'blocked')).toBe(true);
 
     const movedCoordinate = polygonCentroid(EQUATORIAL_OPEN_FIELD_FIXTURE.polygon);
     const movedSourceSite = {
@@ -731,6 +758,68 @@ describe('Growup API integration', () => {
     ]);
   });
 
+  it('retries only transient AI-provider failures and classifies provider timeouts', async () => {
+    const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    const context = {
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds,
+      designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      variants: [],
+      selectedVariantId: null,
+      timelineYear: 5,
+      irrigation: null,
+      costs: null,
+      section: 'species',
+    };
+    let transientCalls = 0;
+    const retryingApp = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      aiProviderMaxAttempts: 2,
+      aiProviderRetryDelayMs: 0,
+      fetchImpl: async () => {
+        transientCalls += 1;
+        if (transientCalls === 1) return new Response(JSON.stringify({ error: { message: 'Temporary provider outage' } }), { status: 503 });
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ summary: 'No changes required.', rationale: 'The current project remains valid.', warnings: [], actions: [] }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    await request(retryingApp).post('/api/assistant/plan').send({ message: 'Review this project.', context }).expect(200);
+    expect(transientCalls).toBe(2);
+
+    let rejectedCalls = 0;
+    const rejectedApp = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      aiProviderMaxAttempts: 3,
+      aiProviderRetryDelayMs: 0,
+      fetchImpl: async () => {
+        rejectedCalls += 1;
+        return new Response(JSON.stringify({ error: { message: 'Invalid provider credential' } }), { status: 401 });
+      },
+    });
+    const rejected = await request(rejectedApp).post('/api/assistant/plan').send({ message: 'Review this project.', context }).expect(502);
+    expect(rejected.body.error.status).toBe('AI_PROVIDER_ERROR');
+    expect(rejectedCalls).toBe(1);
+
+    let timeoutCalls = 0;
+    const timeoutApp = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      aiProviderMaxAttempts: 2,
+      aiProviderRetryDelayMs: 0,
+      fetchImpl: async () => {
+        timeoutCalls += 1;
+        throw new DOMException('Timed out', 'TimeoutError');
+      },
+    });
+    const timedOut = await request(timeoutApp).post('/api/assistant/plan').send({ message: 'Review this project.', context }).expect(504);
+    expect(timedOut.body.error.status).toBe('AI_PROVIDER_TIMEOUT');
+    expect(timeoutCalls).toBe(2);
+  });
+
   it('proxies address search without exposing provider details to the browser', async () => {
     const app = createApp({
       skipDatabaseMigration: true,
@@ -758,6 +847,42 @@ describe('Growup API integration', () => {
     })]);
     const invalid = await request(app).get('/api/locations/search?q=R').expect(400);
     expect(invalid.body.error.status).toBe('INVALID_LOCATION_QUERY');
+  });
+
+  it('falls back to server-side Google geocoding when the primary place search is unavailable', async () => {
+    const app = createApp({
+      skipDatabaseMigration: true,
+      googleMapsServerApiKey: 'server-only-geocoding-key',
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'nominatim.openstreetmap.org') return new Response(null, { status: 503 });
+        expect(url.hostname).toBe('maps.googleapis.com');
+        expect(url.searchParams.get('address')).toBe('Sample fallback');
+        expect(url.searchParams.get('key')).toBe('server-only-geocoding-key');
+        return new Response(JSON.stringify({
+          status: 'OK',
+          results: [{
+            place_id: 'google-place-1',
+            formatted_address: 'Sample fallback result',
+            types: ['locality'],
+            geometry: {
+              location: { lat: 1.0806, lng: 34.175 },
+              viewport: { southwest: { lat: 1.05, lng: 34.14 }, northeast: { lat: 1.11, lng: 34.2 } },
+            },
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+
+    const response = await request(app).get('/api/locations/search?q=Sample%20fallback').expect(200);
+    expect(response.body).toEqual([{
+      id: 'google-place-1',
+      displayName: 'Sample fallback result',
+      coordinate: { lat: 1.0806, lng: 34.175 },
+      boundingBox: { south: 1.05, north: 1.11, west: 34.14, east: 34.2 },
+      type: 'locality',
+    }]);
+    expect(JSON.stringify(response.body)).not.toContain('server-only-geocoding-key');
   });
 
   it('converts the single USD planning basket through a dynamic field currency without country branches', async () => {
@@ -809,5 +934,39 @@ describe('Growup API integration', () => {
     } finally {
       rmSync(staticRoot, { recursive: true, force: true });
     }
+  });
+
+  it('enforces origin, browser-header and compute-rate security boundaries', async () => {
+    const app = createApp({
+      skipDatabaseMigration: true,
+      allowedOrigins: ['https://growup.earth'],
+      computeRateLimit: 1,
+      rateLimitWindowMs: 60_000,
+    });
+
+    const allowed = await request(app)
+      .get('/api/config')
+      .set('Origin', 'https://growup.earth')
+      .set('X-Forwarded-Proto', 'https')
+      .expect(200);
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://growup.earth');
+    expect(allowed.headers['access-control-allow-credentials']).toBe('true');
+    expect(allowed.headers['x-powered-by']).toBeUndefined();
+    expect(allowed.headers['x-content-type-options']).toBe('nosniff');
+    expect(allowed.headers['strict-transport-security']).toContain('includeSubDomains');
+    expect(allowed.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(allowed.headers['content-security-policy']).not.toContain("'unsafe-eval'");
+    expect(allowed.headers['permissions-policy']).toContain('camera=()');
+
+    const denied = await request(app).get('/api/config').set('Origin', 'https://attacker.example').expect(200);
+    expect(denied.headers['access-control-allow-origin']).toBeUndefined();
+
+    const payload = { siteProfile: siteProfile(), objectives: DEFAULT_DESIGN_CONFIGURATION.objectives };
+    const first = await request(app).post('/api/recommendations').send(payload).expect(200);
+    expect(first.headers['ratelimit-limit']).toBe('1');
+    expect(first.headers['ratelimit-remaining']).toBe('0');
+    const limited = await request(app).post('/api/recommendations').send(payload).expect(429);
+    expect(limited.headers['retry-after']).toBe('60');
+    expect(limited.body.error).toEqual(expect.objectContaining({ code: 429, status: 'RATE_LIMITED' }));
   });
 });

@@ -55,3 +55,10 @@ test('keeps map, inspector and workflow navigation usable on a tablet viewport',
   const overflow = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
 });
+
+test('prevents focus zoom on a phone in landscape without disabling page zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto('/');
+  await expect(page.getByLabel('Search place or address')).toHaveCSS('font-size', '16px');
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', 'width=device-width, initial-scale=1.0');
+});

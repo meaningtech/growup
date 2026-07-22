@@ -22,6 +22,7 @@ describe('irrigation geometry', () => {
     ], [obstacle], boundary);
 
     expect(routed.routed).toBe(true);
+    expect(routed.clear).toBe(true);
     expect(routed.points.length).toBeGreaterThan(2);
     const localObstacle = obstacle.map(projection.project);
     for (let index = 1; index < routed.points.length; index += 1) {
@@ -29,6 +30,19 @@ describe('irrigation geometry', () => {
       const end = projection.project(routed.points[index]);
       expect(pointInPolygon({ x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }, localObstacle)).toBe(false);
     }
+  });
+
+  it('marks an impossible crossing as blocked instead of silently drawing through it', () => {
+    const projection = createLocalProjection(polygonCentroid(TEMPERATE_OPEN_FIELD_FIXTURE.polygon));
+    const obstacle = TEMPERATE_OPEN_FIELD_FIXTURE.polygon;
+    const routed = routePolyline([
+      projection.unproject({ x: -12, y: 0 }),
+      projection.unproject({ x: 12, y: 0 }),
+    ], [obstacle], TEMPERATE_OPEN_FIELD_FIXTURE);
+
+    expect(routed.clear).toBe(false);
+    expect(routed.routed).toBe(false);
+    expect(routed.points).toHaveLength(2);
   });
 
   it('keeps valid editable line vertices and rejects malformed overrides', () => {
@@ -73,6 +87,8 @@ describe('irrigation geometry', () => {
     })[0];
     const irrigation = calculateIrrigation(variant, species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5);
 
+    expect(irrigation.network.routingValid).toBe(true);
+    expect(irrigation.network.unroutableLineIds).toEqual([]);
     expect(irrigation.network.source.placement).toBe('highest-terrain-sample');
     expect(irrigation.network.source.coordinate).toEqual(highestCoordinate);
     expect(irrigation.network.source.elevationM).toBe(126.05);

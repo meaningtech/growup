@@ -18,6 +18,7 @@ export type SiteProviderConfig = SentinelProviderConfig & {
   nominatimUrl?: string;
   overpassUrl?: string;
   googleElevationUrl?: string;
+  googleGeocodingUrl?: string;
   googleMapsServerApiKey?: string;
 };
 
@@ -30,22 +31,29 @@ export async function searchLocations(query: string, config: SiteProviderConfig 
   const baseUrl = config.nominatimUrl ?? process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org';
   const url = new URL('/search', baseUrl);
   url.search = new URLSearchParams({ q: cleanQuery, format: 'jsonv2', addressdetails: '1', limit: '6' }).toString();
-  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
-  if (!response.ok) throw new Error(`Nominatim search returned ${response.status}`);
-  const payload = await response.json() as Array<{ place_id?: number; display_name?: string; lat?: string; lon?: string; boundingbox?: string[]; type?: string }>;
-  return payload.flatMap((item) => {
-    const lat = Number(item.lat);
-    const lng = Number(item.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !item.display_name) return [];
-    const bounds = item.boundingbox?.map(Number);
-    return [{
-      id: String(item.place_id ?? `${lat}-${lng}`),
-      displayName: item.display_name,
-      coordinate: { lat, lng },
-      boundingBox: bounds?.length === 4 && bounds.every(Number.isFinite) ? { south: bounds[0], north: bounds[1], west: bounds[2], east: bounds[3] } : null,
-      type: item.type ?? 'place',
-    }];
-  });
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
+    if (!response.ok) throw new Error(`Nominatim search returned ${response.status}`);
+    const payload = await response.json() as Array<{ place_id?: number; display_name?: string; lat?: string; lon?: string; boundingbox?: string[]; type?: string }>;
+    const results = payload.flatMap((item) => {
+      const lat = Number(item.lat);
+      const lng = Number(item.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !item.display_name) return [];
+      const itemBounds = item.boundingbox?.map(Number);
+      return [{
+        id: String(item.place_id ?? `${lat}-${lng}`),
+        displayName: item.display_name,
+        coordinate: { lat, lng },
+        boundingBox: itemBounds?.length === 4 && itemBounds.every(Number.isFinite) ? { south: itemBounds[0], north: itemBounds[1], west: itemBounds[2], east: itemBounds[3] } : null,
+        type: item.type ?? 'place',
+      }];
+    });
+    if (results.length) return results;
+    throw new Error('Nominatim search returned no usable locations');
+  } catch (error) {
+    if (!googleMapsKey(config)) throw error;
+    return searchGoogleLocations(cleanQuery, config);
+  }
 }
 
 export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderConfig = {}): Promise<SiteProfile> {
@@ -59,7 +67,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
   const centroid = weightedSiteCentroid(polygons);
   const sampleCoordinates = terrainSamplingPoints(site, centroid);
   const [location, elevations, climate, solar, soil, landCover, satellite] = await Promise.all([
-    safeProvider(() => fetchLocation(centroid, fetchImpl, config), 'Reverse geocoding is unavailable.'),
+    safeProvider(() => reverseGeocodeLocation(centroid, { ...config, fetchImpl }), 'Reverse geocoding is unavailable.'),
     safeProvider(() => fetchElevations(sampleCoordinates, fetchImpl, config), 'Terrain elevation is unavailable.'),
     safeProvider(() => fetchClimate(centroid, fetchImpl, config), 'Historical climate is unavailable.'),
     safeProvider(() => fetchSolarWeather(centroid, fetchImpl, config), 'Historical hourly radiation and wind are unavailable.'),
@@ -133,23 +141,99 @@ function validateBoundary(site: SiteBoundary) {
   if (polygons.reduce((sum, polygon) => sum + polygonAreaM2(polygon), 0) < 100) throw new Error('Site polygons must cover at least 100 m²');
 }
 
-async function fetchLocation(centroid: Coordinate, fetchImpl: typeof fetch, config: SiteProviderConfig) {
+export async function reverseGeocodeLocation(centroid: Coordinate, config: SiteProviderConfig = {}) {
+  const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = config.nominatimUrl ?? process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org';
   const url = new URL('/reverse', baseUrl);
   url.search = new URLSearchParams({ format: 'jsonv2', lat: String(centroid.lat), lon: String(centroid.lng), zoom: '14', addressdetails: '1' }).toString();
-  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
-  if (!response.ok) throw new Error(`Nominatim returned ${response.status}`);
-  const data = await response.json() as { display_name?: string; address?: Record<string, string> };
-  const address = data.address ?? {};
-  const now = new Date().toISOString();
-  return {
-    displayName: data.display_name ?? `${centroid.lat.toFixed(5)}, ${centroid.lng.toFixed(5)}`,
-    municipality: address.city ?? address.town ?? address.village ?? address.municipality ?? null,
-    province: address.province ?? address.county ?? null,
-    region: address.state ?? address.region ?? null,
-    countryCode: address.country_code?.toUpperCase() ?? null,
-    evidence: evidence('Nominatim / OpenStreetMap', url.toString(), 'live', now, 'high', 'reverse-geocoded centroid'),
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
+    if (!response.ok) throw new Error(`Nominatim returned ${response.status}`);
+    const data = await response.json() as { display_name?: string; address?: Record<string, string> };
+    const address = data.address ?? {};
+    if (!data.display_name && !Object.keys(address).length) throw new Error('Nominatim returned no usable reverse-geocoding result');
+    return {
+      displayName: data.display_name ?? `${centroid.lat.toFixed(5)}, ${centroid.lng.toFixed(5)}`,
+      municipality: address.city ?? address.town ?? address.village ?? address.municipality ?? null,
+      province: address.province ?? address.county ?? null,
+      region: address.state ?? address.region ?? null,
+      countryCode: address.country_code?.toUpperCase() ?? null,
+      evidence: evidence('Nominatim / OpenStreetMap', url.toString(), 'live', providerNow(config), 'high', 'reverse-geocoded centroid'),
+    };
+  } catch (error) {
+    if (!googleMapsKey(config)) throw error;
+    return reverseGeocodeGoogle(centroid, config);
+  }
+}
+
+type GoogleGeocodingResult = {
+  place_id?: string;
+  formatted_address?: string;
+  types?: string[];
+  geometry?: {
+    location?: { lat?: number; lng?: number };
+    viewport?: { southwest?: { lat?: number; lng?: number }; northeast?: { lat?: number; lng?: number } };
   };
+  address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>;
+};
+
+async function searchGoogleLocations(query: string, config: SiteProviderConfig): Promise<LocationSearchResult[]> {
+  const url = googleGeocodingUrl(config);
+  url.search = new URLSearchParams({ address: query, key: googleMapsKey(config) }).toString();
+  const payload = await fetchGoogleGeocoding(url, config);
+  return payload.slice(0, 6).flatMap((item) => {
+    const lat = Number(item.geometry?.location?.lat);
+    const lng = Number(item.geometry?.location?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !item.formatted_address) return [];
+    const southwest = item.geometry?.viewport?.southwest;
+    const northeast = item.geometry?.viewport?.northeast;
+    const boundingBox = [southwest?.lat, northeast?.lat, southwest?.lng, northeast?.lng].every(Number.isFinite)
+      ? { south: Number(southwest!.lat), north: Number(northeast!.lat), west: Number(southwest!.lng), east: Number(northeast!.lng) }
+      : null;
+    return [{ id: item.place_id ?? `${lat}-${lng}`, displayName: item.formatted_address, coordinate: { lat, lng }, boundingBox, type: item.types?.[0] ?? 'place' }];
+  });
+}
+
+async function reverseGeocodeGoogle(centroid: Coordinate, config: SiteProviderConfig) {
+  const url = googleGeocodingUrl(config);
+  url.search = new URLSearchParams({ latlng: `${centroid.lat},${centroid.lng}`, key: googleMapsKey(config) }).toString();
+  const [result] = await fetchGoogleGeocoding(url, config);
+  if (!result) throw new Error('Google Geocoding returned no reverse-geocoding result');
+  const components = result.address_components ?? [];
+  return {
+    displayName: result.formatted_address ?? `${centroid.lat.toFixed(5)}, ${centroid.lng.toFixed(5)}`,
+    municipality: googleAddressPart(components, ['locality', 'postal_town', 'administrative_area_level_3']),
+    province: googleAddressPart(components, ['administrative_area_level_2']),
+    region: googleAddressPart(components, ['administrative_area_level_1']),
+    countryCode: googleAddressPart(components, ['country'], true),
+    evidence: evidence('Google Maps Geocoding API', `${url.origin}${url.pathname}`, 'live fallback', providerNow(config), 'high', 'reverse-geocoded field centroid'),
+  };
+}
+
+async function fetchGoogleGeocoding(url: URL, config: SiteProviderConfig): Promise<GoogleGeocodingResult[]> {
+  const response = await fetchWithTimeout(config.fetchImpl ?? fetch, url);
+  if (!response.ok) throw new Error(`Google Geocoding returned ${response.status}`);
+  const payload = await response.json() as { status?: string; error_message?: string; results?: GoogleGeocodingResult[] };
+  if (payload.status !== 'OK' || !payload.results?.length) throw new Error(payload.error_message || `Google Geocoding returned ${payload.status ?? 'an invalid response'}`);
+  return payload.results;
+}
+
+function googleAddressPart(components: GoogleGeocodingResult['address_components'], types: string[], short = false): string | null {
+  const component = components?.find((item) => item.types?.some((type) => types.includes(type)));
+  const value = short ? component?.short_name : component?.long_name;
+  return value?.trim() || null;
+}
+
+function googleGeocodingUrl(config: SiteProviderConfig): URL {
+  return new URL(config.googleGeocodingUrl ?? process.env.GOOGLE_GEOCODING_URL ?? 'https://maps.googleapis.com/maps/api/geocode/json');
+}
+
+function googleMapsKey(config: SiteProviderConfig): string {
+  return config.googleMapsServerApiKey ?? process.env.GOOGLE_MAPS_SERVER_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY ?? '';
+}
+
+function providerNow(config: SiteProviderConfig): string {
+  return (config.now?.() ?? new Date()).toISOString();
 }
 
 async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, config: SiteProviderConfig) {

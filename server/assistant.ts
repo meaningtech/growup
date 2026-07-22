@@ -11,6 +11,9 @@ export type AssistantProviderConfig = {
   aiProviderApiKey?: string;
   aiProviderBaseUrl?: string;
   aiProviderModel?: string;
+  aiProviderTimeoutMs?: number;
+  aiProviderMaxAttempts?: number;
+  aiProviderRetryDelayMs?: number;
   deepseekApiKey?: string;
   deepseekBaseUrl?: string;
   deepseekModel?: string;
@@ -43,6 +46,9 @@ export async function planAssistantAction(
   const model = providerModel(config);
   const baseUrl = providerBaseUrl(config).replace(/\/$/, '');
   const fetchImpl = config.fetchImpl ?? fetch;
+  const timeoutMs = integerSetting(config.aiProviderTimeoutMs, process.env.AI_PROVIDER_TIMEOUT_MS, 25_000, 1_000, 60_000);
+  const maxAttempts = integerSetting(config.aiProviderMaxAttempts, process.env.AI_PROVIDER_MAX_ATTEMPTS, 2, 1, 3);
+  const retryDelayMs = integerSetting(config.aiProviderRetryDelayMs, process.env.AI_PROVIDER_RETRY_DELAY_MS, 250, 0, 5_000);
   const requestBody = {
     model,
     messages: [
@@ -55,24 +61,43 @@ export async function planAssistantAction(
   };
 
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const payload = await response.json().catch(() => null) as OpenAiCompatibleResponse | { error?: { message?: string } } | null;
       if (!response.ok) {
         const providerMessage = payload && 'error' in payload ? payload.error?.message : null;
-        throw assistantError(502, 'AI_PROVIDER_ERROR', providerMessage || `The configured AI provider returned ${response.status}.`);
+        const retryable = response.status === 429 || response.status >= 500;
+        throw assistantError(502, 'AI_PROVIDER_ERROR', boundedProviderMessage(providerMessage) || `The configured AI provider returned ${response.status}.`, retryable);
       }
       const content = payload && 'choices' in payload ? payload.choices?.[0]?.message?.content?.trim() : '';
-      if (!content) throw new Error('The configured AI provider returned an empty JSON response.');
-      return validateProposal(JSON.parse(content), context, model);
+      if (!content) throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned invalid JSON.');
+      }
+      try {
+        return validateProposal(parsed, context, model);
+      } catch (error) {
+        if (isAssistantError(error)) throw error;
+        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', error instanceof Error ? error.message : 'The configured AI provider returned an invalid response.');
+      }
     } catch (error) {
-      lastError = error;
+      const normalized = isTimeoutError(error)
+        ? assistantError(504, 'AI_PROVIDER_TIMEOUT', `The configured AI provider did not respond within ${timeoutMs} ms.`, true)
+        : isAssistantError(error)
+          ? error
+          : assistantError(502, 'AI_PROVIDER_UNAVAILABLE', 'The configured AI provider could not be reached.', true);
+      if (!normalized.retryable) throw normalized;
+      lastError = normalized;
+      if (attempt + 1 < maxAttempts && retryDelayMs > 0) await delay(retryDelayMs * (attempt + 1));
     }
   }
   if (isAssistantError(lastError)) throw lastError;
@@ -212,10 +237,27 @@ function providerModel(config: AssistantProviderConfig) {
   return config.aiProviderModel ?? process.env.AI_PROVIDER_MODEL ?? config.deepseekModel ?? process.env.DEEPSEEK_MODEL ?? DEFAULT_PROVIDER_MODEL;
 }
 
-function assistantError(code: number, status: string, message: string) {
-  return { code, status, message };
+function integerSetting(configured: number | undefined, environmental: string | undefined, fallback: number, minimum: number, maximum: number) {
+  const value = configured ?? Number(environmental);
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, Math.round(Number(value)))) : fallback;
 }
 
-function isAssistantError(value: unknown): value is { code: number; status: string; message: string } {
+function boundedProviderMessage(value: string | null | undefined) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 300) : '';
+}
+
+function isTimeoutError(value: unknown) {
+  return value instanceof Error && (value.name === 'TimeoutError' || value.name === 'AbortError');
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function assistantError(code: number, status: string, message: string, retryable = false) {
+  return { code, status, message, retryable };
+}
+
+function isAssistantError(value: unknown): value is { code: number; status: string; message: string; retryable?: boolean } {
   return Boolean(value && typeof value === 'object' && 'code' in value && typeof value.code === 'number' && 'status' in value && typeof value.status === 'string' && 'message' in value && typeof value.message === 'string');
 }
