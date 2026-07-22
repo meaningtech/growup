@@ -98,7 +98,7 @@ export function importSiteGeoJson(input: unknown, options: { id?: string; name?:
   const parsed = parseBoundaryGeometry(siteFeature.geometry);
   const site: SiteBoundary = normalizeSiteBoundary({
     id: options.id ?? stringProperty(siteFeature.properties, 'id') ?? `imported-${stableId(JSON.stringify(input))}`,
-    name: options.name ?? stringProperty(siteFeature.properties, 'name') ?? 'Imported Growaf site',
+    name: options.name ?? stringProperty(siteFeature.properties, 'name') ?? 'Imported Growup site',
     polygon: parsed.polygons[0],
     additionalPolygons: parsed.polygons.slice(1),
     holes: parsed.holes,

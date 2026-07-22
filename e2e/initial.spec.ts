@@ -11,7 +11,7 @@ test('starts with an empty editable workspace and no bundled local field', async
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await page.goto('/');
-  await expect(page.getByLabel('Project name')).toHaveValue('Untitled Growaf project');
+  await expect(page.getByLabel('Project name')).toHaveValue('Untitled Growup project');
   await expect(page.getByText('No active field')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Draw', exact: true })).toBeVisible();
   await expect(page.getByText('Import GeoJSON', { exact: true })).toBeVisible();
@@ -25,7 +25,7 @@ test('starts with an empty editable workspace and no bundled local field', async
 
   const config = await (await page.request.get('/api/config')).json();
   expect(config).not.toHaveProperty('defaultSite');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-initial-empty.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-initial-empty.png', fullPage: false });
 
   expect(pageErrors, pageErrors.join('\n')).toEqual([]);
   expect(consoleErrors.filter((message) => !message.includes('Google Maps JavaScript API has been loaded directly')), consoleErrors.join('\n')).toEqual([]);
@@ -70,7 +70,7 @@ test('shows a crosshair, progressive geometry and a numbered marker for every fi
     await expect(page.getByText(`${index + 1} points placed`)).toBeVisible();
   }
   await expect(page.getByText('Ready: use the check button to finish')).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-drawing.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-drawing.png', fullPage: false });
 
   await page.getByRole('button', { name: 'Finish geometry' }).click();
   await expect(page.getByText('Authoritative user-defined boundary')).toBeVisible();

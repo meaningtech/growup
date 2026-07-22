@@ -4,4 +4,4 @@ import { assertMongoIndexesReady, closeMongoConnection, ensureMongoIndexes } fro
 await ensureMongoIndexes();
 await assertMongoIndexesReady();
 await closeMongoConnection();
-console.log('Growaf Mongo-compatible indexes are READY');
+console.log('Growup Mongo-compatible indexes are READY');

@@ -37,7 +37,7 @@ export async function planAssistantAction(
   config: AssistantProviderConfig = {},
 ): Promise<AssistantProposal> {
   const key = apiKey(config);
-  if (!key) throw assistantError(503, 'AI_PROVIDER_NOT_CONFIGURED', 'Set AI_PROVIDER_API_KEY on the Growaf server to enable the internal assistant.');
+  if (!key) throw assistantError(503, 'AI_PROVIDER_NOT_CONFIGURED', 'Set AI_PROVIDER_API_KEY on the Growup server to enable the internal assistant.');
   const cleanMessage = message.trim();
   if (!cleanMessage || cleanMessage.length > 2_000) throw assistantError(400, 'INVALID_ASSISTANT_MESSAGE', 'The assistant message must contain 1–2,000 characters.');
   const model = providerModel(config);
@@ -80,7 +80,7 @@ export async function planAssistantAction(
 }
 
 function systemPrompt() {
-  return `You are the internal Growaf agroforestry planning assistant. Reply in the user's language. Return JSON only.
+  return `You are the internal Growup agroforestry planning assistant. Reply in the user's language. Return JSON only.
 Never invent species IDs, project values, field observations or costs. Use only availableSpecies and project.
 Explain uncertainty briefly. Proposed changes are not executed automatically and must be confirmed.
 If adding or removing species when a layout exists, also propose regenerate_layout and recalculate_water_and_costs.
@@ -150,7 +150,7 @@ function validateProposal(value: unknown, context: AssistantProjectContext, mode
   }
   const minimumSpecies = context.designConfiguration?.system === 'syntropic' ? 3 : context.designConfiguration?.system === 'monoculture' ? 1 : 2;
   if (projected.size < minimumSpecies) throw assistantError(422, 'ASSISTANT_UNSAFE_ACTION', `The proposed changes would leave fewer than ${minimumSpecies} selected species.`);
-  const summary = textValue(raw.summary, 'I reviewed the current Growaf project.');
+  const summary = textValue(raw.summary, 'I reviewed the current Growup project.');
   const rationale = textValue(raw.rationale, 'The proposal uses the current site profile and design-ready species catalogue.');
   const warnings = Array.isArray(raw.warnings) ? raw.warnings.filter((item): item is string => typeof item === 'string').slice(0, 6) : [];
   return { id: randomUUID(), model, summary, rationale, warnings, actions, requiresConfirmation: actions.length > 0 };

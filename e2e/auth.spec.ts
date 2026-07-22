@@ -28,8 +28,8 @@ test('loads the real optional Google sign-in client without exposing server cred
   const buttonBounds = await googleArea.boundingBox();
   expect(buttonBounds?.width).toBeGreaterThanOrEqual(300);
   expect(buttonBounds?.height).toBeGreaterThanOrEqual(40);
-  await expect(dialog.getByText('Only your verified Google identity and Growaf projects are stored.')).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-google-login.png', fullPage: false });
+  await expect(dialog.getByText('Only your verified Google identity and Growup projects are stored.')).toBeVisible();
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-google-login.png', fullPage: false });
 
   const popupPromise = page.waitForEvent('popup');
   await page.getByRole('button', { name: /Continue with Google/ }).click();

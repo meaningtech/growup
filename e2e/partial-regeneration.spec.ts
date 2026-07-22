@@ -20,7 +20,7 @@ test('preserves locked trees and exposes deterministic growth uncertainty during
   await page.getByLabel('Select planned tree').selectOption(originalTree.id);
   await expect(page.getByTestId('tree-growth-model')).toContainText('Height low · base · high');
   await expect(page.getByTestId('tree-growth-model')).toContainText('Crown low · base · high');
-  await expect(page.getByTestId('tree-growth-model')).toContainText('growaf-growth-1.0.0');
+  await expect(page.getByTestId('tree-growth-model')).toContainText('growup-growth-1.0.0');
   await page.getByRole('button', { name: 'Lock', exact: true }).click();
 
   const regenerationPromise = page.waitForResponse((response) => response.url().endsWith('/api/layout/regenerate') && response.request().method() === 'POST');
@@ -32,9 +32,9 @@ test('preserves locked trees and exposes deterministic growth uncertainty during
   expect(regenerated.variant.trees.find((tree) => tree.id === originalTree.id)).toEqual({ ...originalTree, locked: true });
 
   await expect(page.getByTestId('generation-audit')).toContainText('Partial deterministic regeneration');
-  await expect(page.getByTestId('generation-audit')).toContainText('growaf-layout-1.1.0');
+  await expect(page.getByTestId('generation-audit')).toContainText('growup-layout-1.1.0');
   await expect(page.getByTestId('generation-audit')).toContainText('1');
   await expect.poll(async () => Number(await page.locator('.map-canvas').getAttribute('data-zoom'))).toBeGreaterThan(15);
   await page.getByTestId('generation-audit').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-partial-regeneration.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-partial-regeneration.png', fullPage: false });
 });

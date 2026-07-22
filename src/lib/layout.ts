@@ -38,7 +38,7 @@ type LockedPlacement = {
   species: DesignSpecies;
 };
 
-export const LAYOUT_ENGINE_VERSION = 'growaf-layout-1.1.0';
+export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.1.0';
 
 export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   system: 'syntropic',

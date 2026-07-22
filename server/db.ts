@@ -8,7 +8,7 @@ let pool: pg.Pool | null = null;
 export function databasePool(): pg.Pool {
   if (!pool) {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL ?? 'postgresql://growaf:growaf@127.0.0.1:55432/growaf',
+      connectionString: process.env.DATABASE_URL ?? 'postgresql://growup:growup@127.0.0.1:55432/growup',
       max: 8,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,

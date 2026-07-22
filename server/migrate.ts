@@ -3,4 +3,4 @@ import { databasePool, migrateDatabase } from './db.js';
 
 await migrateDatabase();
 await databasePool().end();
-console.log('Growaf PostGIS schema is ready');
+console.log('Growup PostGIS schema is ready');

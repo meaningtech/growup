@@ -13,8 +13,8 @@ import type {
   SpeciesRecommendation,
 } from '../src/types.js';
 
-const baseUrl = (process.argv[2] ?? process.env.GROWAF_BASE_URL ?? '').replace(/\/$/, '');
-if (!baseUrl) throw new Error('Pass the deployed Growaf base URL as the first argument or GROWAF_BASE_URL.');
+const baseUrl = (process.argv[2] ?? process.env.GROWUP_BASE_URL ?? '').replace(/\/$/, '');
+if (!baseUrl) throw new Error('Pass the deployed Growup base URL as the first argument or GROWUP_BASE_URL.');
 
 const site = { ...TEMPERATE_OPEN_FIELD_FIXTURE, name: 'Acceptance field near Ragusa Ibla' };
 const health = await get<{ ok: boolean; database: string }>('/api/health');

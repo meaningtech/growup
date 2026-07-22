@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { dictionaries } from './i18n';
 
-describe('Growaf translations', () => {
+describe('Growup translations', () => {
   it('keeps the English and Italian dictionaries in exact key parity', () => {
     expect(Object.keys(dictionaries.it).sort()).toEqual(Object.keys(dictionaries.en).sort());
   });

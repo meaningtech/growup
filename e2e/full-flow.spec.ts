@@ -22,12 +22,12 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByTestId('existing-vegetation-audit')).toContainText('0 protected woody areas');
   await expect(page.getByText('Sentinel-1:', { exact: false })).toBeVisible();
   await expect(page.getByTestId('evidence-traceability')).toContainText('Data read');
-  await expect(page.getByTestId('evidence-traceability')).toContainText('Growaf calculation');
+  await expect(page.getByTestId('evidence-traceability')).toContainText('Growup calculation');
   await expect(page.getByTestId('evidence-traceability')).toContainText('Decision affected');
   await expect(page.getByTestId('evidence-traceability').locator('a')).toHaveCount(0);
   await expect(page.locator('.satellite-image img')).toBeVisible();
   await page.waitForTimeout(2_000);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-evidence.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-evidence.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
   await expect(page.getByText('Evidence-ranked palette')).toBeVisible();
@@ -37,7 +37,7 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.locator('.variant-tabs button')).toHaveCount(3);
   await expect(page.getByText('Canopy Y20')).toBeVisible();
   await page.waitForTimeout(2_000);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-design.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-design.png', fullPage: false });
 
   const initialCostsPromise = page.waitForResponse((response) => response.url().endsWith('/api/costs/calculate') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Size water + calculate costs' }).click();
@@ -79,28 +79,28 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(treeLayer).toHaveAttribute('aria-pressed', 'false');
   await expect(machineryLayer).toHaveAttribute('aria-pressed', 'true');
   await expect(irrigationLayer).toHaveAttribute('aria-pressed', 'false');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-machinery-only.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-machinery-only.png', fullPage: false });
 
   await machineryLayer.click();
   await irrigationLayer.click();
   await expect(treeLayer).toHaveAttribute('aria-pressed', 'false');
   await expect(machineryLayer).toHaveAttribute('aria-pressed', 'false');
   await expect(irrigationLayer).toHaveAttribute('aria-pressed', 'true');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-irrigation-only.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-irrigation-only.png', fullPage: false });
 
   await treeLayer.click();
   await irrigationLayer.click();
   await expect(treeLayer).toHaveAttribute('aria-pressed', 'true');
   await expect(machineryLayer).toHaveAttribute('aria-pressed', 'false');
   await expect(irrigationLayer).toHaveAttribute('aria-pressed', 'false');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-trees-only.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-trees-only.png', fullPage: false });
 
   await boundaryLayer.click();
   await machineryLayer.click();
   await irrigationLayer.click();
   await page.getByRole('button', { name: 'Close map layers' }).click();
   await page.getByTestId('hydraulic-plan').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-water.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-water.png', fullPage: false });
 
   await page.getByRole('button', { name: 'Review complete cost plan' }).click();
   await expect(page.getByTestId('economic-configuration')).toContainText('Economic profile · IT');
@@ -110,7 +110,7 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByTestId('cost-timeline')).toContainText('Annual operating cost over time');
   await expect(page.getByText('Planting labour', { exact: false })).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-costs.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-costs.png', fullPage: false });
 
   await page.getByTestId('open-operational-schedule').click();
   const schedule = page.getByTestId('operational-schedule');
@@ -120,10 +120,10 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(schedule).toContainText('Irrigation procurement and monthly demand');
   await expect(schedule).toContainText('Pressure-compensating emitters');
   await expect(schedule).toContainText('Evidence register');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-operational-schedule.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-operational-schedule.png', fullPage: false });
   await schedule.getByText('Evidence register').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-operational-schedule-evidence.png', fullPage: false });
-  const schedulePdf = '/private/tmp/growaf-operational-schedule.pdf';
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-operational-schedule-evidence.png', fullPage: false });
+  const schedulePdf = '/private/tmp/growup-operational-schedule.pdf';
   await page.pdf({ path: schedulePdf, format: 'A4', printBackground: true });
   expect((await stat(schedulePdf)).size).toBeGreaterThan(30_000);
   await schedule.getByRole('button', { name: 'Close work plan' }).click();
@@ -142,12 +142,12 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   expect(matureCosts.establishment.totalCost).toBe(initialCosts.establishment.totalCost);
   await expect(page.getByText('Active system · year 29')).toBeVisible();
   await expect(page.getByText('Water + operation · year 29')).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-year-29-costs.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-year-29-costs.png', fullPage: false });
   await page.locator('.language-select select').selectOption('it');
   await page.getByTestId('cost-timeline').scrollIntoViewIfNeeded();
   await expect(page.getByTestId('economic-configuration').getByText(/Stima globale in USD convertita/).first()).toBeVisible();
   await expect(page.getByText(/Global USD planning estimate converted/)).toHaveCount(0);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-syntropic-cost-curve-it.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-syntropic-cost-curve-it.png', fullPage: false });
   await page.locator('.language-select select').selectOption('en');
 
   await page.getByRole('button', { name: 'Save' }).click();
@@ -163,7 +163,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   const temporaryCloudOrigin = new URL(page.url()).hostname.endsWith('.run.app');
   const unexpectedConsoleErrors = consoleErrors.filter((message) =>
     !message.includes('Google Maps JavaScript API has been loaded directly') &&
-    !(temporaryCloudOrigin && message === 'Failed to load resource: the server responded with a status of 403 ()'),
+    !(temporaryCloudOrigin && message === 'Failed to load resource: the server responded with a status of 403 ()') &&
+    !(temporaryCloudOrigin && message.includes('[GSI_LOGGER]: The given origin is not allowed for the given client ID.')),
   );
   expect(unexpectedConsoleErrors, consoleErrors.join('\n')).toEqual([]);
 });

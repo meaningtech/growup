@@ -5,7 +5,7 @@ import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid, typ
 import { siteContainsCoordinate } from './siteGeometry';
 import { managementLaborHours, supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
 
-export const IRRIGATION_MODEL_VERSION = 'growaf-irrigation-1.0.0';
+export const IRRIGATION_MODEL_VERSION = 'growup-irrigation-1.0.0';
 
 export const DEFAULT_IRRIGATION_CONFIGURATION: IrrigationConfiguration = {
   sourceType: 'network',
@@ -190,7 +190,7 @@ export function calculateIrrigation(
       { label: 'Irrigation materials', value: `USD reference × ${economics.irrigationReferenceMultiplier}`, source: economics.sourceSummary, sourceUrl: COST_SOURCES.agricultureReference.url },
       { label: 'Pump duty', value: `${network.requiredDynamicHeadM} m dynamic head at ${Math.round(REFERENCE_IRRIGATION_RATES.pumpEfficiency * 100)}% efficiency`, source: 'Hazen-Williams line loss, terrain elevation and emitter pressure calculation', sourceUrl: 'https://www.fao.org/4/x0490e/x0490e00.htm' },
       { label: 'Satellite scheduling', value: `${site.satellite.irrigationScheduling.adjustmentPercent}% next-pulse guidance; annual demand unchanged`, source: 'Sentinel-2 NDMI and same-orbit Sentinel-1 RTC anomaly', sourceUrl: 'https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a' },
-      { label: 'Planting-system autonomy', value: `${round(annualGrossM3 / Math.max(0.01, potentialAnnualGrossM3) * 100)}% of potential supplemental demand at year ${designYear}`, source: systemProfile.basis === 'measured-system-reference' ? 'Embrapa agroforestry reference: economic rows irrigated, adapted biomass rows not regularly irrigated' : 'Conservative Growaf planning default; replace with field records', sourceUrl: systemProfile.basis === 'measured-system-reference' ? 'https://www.embrapa.br/web/meio-ambiente/vitrine/sistema-agroflorestal-para-o-uso-mais-eficiente-de-manejo-da-agua-de-irrigacao' : 'https://www.fao.org/climate-smart-agriculture-sourcebook/production-resources/module-b5-integrated-production-systems/b5-overview/en/?type=111' },
+      { label: 'Planting-system autonomy', value: `${round(annualGrossM3 / Math.max(0.01, potentialAnnualGrossM3) * 100)}% of potential supplemental demand at year ${designYear}`, source: systemProfile.basis === 'measured-system-reference' ? 'Embrapa agroforestry reference: economic rows irrigated, adapted biomass rows not regularly irrigated' : 'Conservative Growup planning default; replace with field records', sourceUrl: systemProfile.basis === 'measured-system-reference' ? 'https://www.embrapa.br/web/meio-ambiente/vitrine/sistema-agroflorestal-para-o-uso-mais-eficiente-de-manejo-da-agua-de-irrigacao' : 'https://www.fao.org/climate-smart-agriculture-sourcebook/production-resources/module-b5-integrated-production-systems/b5-overview/en/?type=111' },
       { label: 'Localized wetted area', value: `maximum 2.5 m² per emitter; ${configuration.emittersPerPlant} emitters per irrigated plant`, source: 'Planning cap prevents canopy area being treated as fully wetted soil; calibrate from a field wetting-pattern test', sourceUrl: 'https://www.fao.org/4/x0490e/x0490e00.htm' },
     ],
     monthly: monthlyWithCosts.map(({ potentialGrossM3: _potentialGrossM3, ...month }) => month),

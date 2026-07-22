@@ -1,5 +1,5 @@
 {
-  "name": "growaf",
+  "name": "growup",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx server/migrate.ts",
     "db:migrate:mongo": "tsx server/migrateMongo.ts",
+    "db:migrate:brand": "tsx scripts/migrateBrandCollections.ts",
     "data:import": "tsx scripts/importCatalog.ts"
   },
   "dependencies": {

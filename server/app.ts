@@ -37,17 +37,17 @@ import {
   mongoHealth,
   saveProject,
   upsertUser,
-  type GrowafDatabase,
+  type GrowupDatabase,
 } from './mongo.js';
 import { buildSiteProfile, searchLocations, type SiteProviderConfig } from './site.js';
 
-export type GrowafAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & {
+export type GrowupAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & {
   skipDatabaseMigration?: boolean;
-  database?: GrowafDatabase;
+  database?: GrowupDatabase;
   staticRoot?: string | null;
 };
 
-export function createApp(config: GrowafAppConfig = {}) {
+export function createApp(config: GrowupAppConfig = {}) {
   const app = express();
   const database = config.database ?? {
     health: async () => (await databaseHealth()) && (await mongoHealth()),
@@ -78,7 +78,7 @@ export function createApp(config: GrowafAppConfig = {}) {
         zoom: 2,
       },
       climatePeriod: '2021–2025',
-      modelVersion: 'growaf-0.1.0',
+      modelVersion: 'growup-0.1.0',
       assistant: assistantStatus(config),
       auth: authStatus(config),
     });
@@ -374,7 +374,7 @@ export function createApp(config: GrowafAppConfig = {}) {
   return app;
 }
 
-export async function initializeApp(config: GrowafAppConfig = {}) {
+export async function initializeApp(config: GrowupAppConfig = {}) {
   if (!config.skipDatabaseMigration) {
     await migrateDatabase();
     await assertMongoIndexesReady();
@@ -433,7 +433,7 @@ function requireProject(value: unknown): ProjectState {
 
 function requireAssistantContext(value: unknown): AssistantProjectContext {
   if (!value || typeof value !== 'object' || !('selectedSpeciesIds' in value) || !Array.isArray(value.selectedSpeciesIds)) {
-    throw httpError(400, 'INVALID_ASSISTANT_CONTEXT', 'The current Growaf project context is required.');
+    throw httpError(400, 'INVALID_ASSISTANT_CONTEXT', 'The current Growup project context is required.');
   }
   return value as AssistantProjectContext;
 }

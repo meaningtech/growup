@@ -52,7 +52,7 @@ test('imports and validates complete site infrastructure before generating a des
   await expect(pathLayer).toHaveAttribute('aria-pressed', 'true');
   await expect(infrastructureLayer).toHaveAttribute('aria-pressed', 'false');
   await expect(observedTreeLayer).toHaveAttribute('aria-pressed', 'false');
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-management-path-only.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-management-path-only.png', fullPage: false });
   await boundaryLayer.click();
   await exclusionLayer.click();
   await infrastructureLayer.click();
@@ -79,7 +79,7 @@ test('imports and validates complete site infrastructure before generating a des
   await expect(page.getByRole('button', { name: 'Remove exclusion 2' })).toBeVisible();
   expectedSite.exclusions.push(keyboardExclusion);
   await page.waitForTimeout(2_500);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-site-authoring.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-site-authoring.png', fullPage: false });
 
   const profilePromise = page.waitForResponse((response) => response.url().endsWith('/api/site/profile') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Analyse this field' }).click();

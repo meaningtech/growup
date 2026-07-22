@@ -4,7 +4,7 @@ import { GROWTH_MODEL_VERSION } from '../src/lib/growth.js';
 import { IRRIGATION_MODEL_VERSION } from '../src/lib/irrigation.js';
 import type { CalculationSnapshot, Evidence, ProjectRevisionSummary, ProjectState } from '../src/types.js';
 
-export const APPLICATION_MODEL_VERSION = 'growaf-0.2.0';
+export const APPLICATION_MODEL_VERSION = 'growup-0.2.0';
 
 export type RevisionArtifacts = {
   state: ProjectState;

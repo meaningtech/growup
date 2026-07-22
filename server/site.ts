@@ -30,7 +30,7 @@ export async function searchLocations(query: string, config: SiteProviderConfig 
   const baseUrl = config.nominatimUrl ?? process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org';
   const url = new URL('/search', baseUrl);
   url.search = new URLSearchParams({ q: cleanQuery, format: 'jsonv2', addressdetails: '1', limit: '6' }).toString();
-  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growaf/0.1 site-planning application' } });
+  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
   if (!response.ok) throw new Error(`Nominatim search returned ${response.status}`);
   const payload = await response.json() as Array<{ place_id?: number; display_name?: string; lat?: string; lon?: string; boundingbox?: string[]; type?: string }>;
   return payload.flatMap((item) => {
@@ -137,7 +137,7 @@ async function fetchLocation(centroid: Coordinate, fetchImpl: typeof fetch, conf
   const baseUrl = config.nominatimUrl ?? process.env.NOMINATIM_URL ?? 'https://nominatim.openstreetmap.org';
   const url = new URL('/reverse', baseUrl);
   url.search = new URLSearchParams({ format: 'jsonv2', lat: String(centroid.lat), lon: String(centroid.lng), zoom: '14', addressdetails: '1' }).toString();
-  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growaf/0.1 site-planning application' } });
+  const response = await fetchWithTimeout(fetchImpl, url, { headers: { 'User-Agent': 'Growup/0.1 site-planning application' } });
   if (!response.ok) throw new Error(`Nominatim returned ${response.status}`);
   const data = await response.json() as { display_name?: string; address?: Record<string, string> };
   const address = data.address ?? {};
@@ -387,7 +387,7 @@ async function fetchLandCover(centroid: Coordinate, fetchImpl: typeof fetch, con
   const baseUrl = config.overpassUrl ?? process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter';
   const query = `[out:json][timeout:20];nwr(around:180,${centroid.lat},${centroid.lng})[landuse];out tags center 10;`;
   const response = await fetchWithTimeout(fetchImpl, baseUrl, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Growaf/0.1 site-planning application' },
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Growup/0.1 site-planning application' },
     body: new URLSearchParams({ data: query }),
   }, 30_000);
   if (!response.ok) throw new Error(`Overpass returned ${response.status}`);

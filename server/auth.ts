@@ -1,8 +1,8 @@
 import { createHmac, createPublicKey, timingSafeEqual, verify, type JsonWebKey as CryptoJsonWebKey } from 'node:crypto';
 import type { Request, Response } from 'express';
-import type { GoogleIdentity, GrowafUser } from './mongo.js';
+import type { GoogleIdentity, GrowupUser } from './mongo.js';
 
-const SESSION_COOKIE = 'growaf_session';
+const SESSION_COOKIE = 'growup_session';
 const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_CERTS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 type GoogleJwk = CryptoJsonWebKey & { kid?: string };
@@ -17,8 +17,8 @@ export type AuthConfig = {
 };
 
 export type AuthStore = {
-  getUser: (id: string) => Promise<GrowafUser | null>;
-  upsertUser: (identity: GoogleIdentity) => Promise<GrowafUser>;
+  getUser: (id: string) => Promise<GrowupUser | null>;
+  upsertUser: (identity: GoogleIdentity) => Promise<GrowupUser>;
 };
 
 type SessionPayload = { subject: string; issuedAt: number; expiresAt: number };
@@ -41,16 +41,16 @@ export function authStatus(config: AuthConfig = {}) {
   return { configured: Boolean(clientId && sessionSecret(config)), googleClientId: clientId };
 }
 
-export async function signInWithGoogle(credential: string, store: AuthStore, config: AuthConfig = {}): Promise<{ user: GrowafUser; cookie: string }> {
+export async function signInWithGoogle(credential: string, store: AuthStore, config: AuthConfig = {}): Promise<{ user: GrowupUser; cookie: string }> {
   const { configured, googleClientId } = authStatus(config);
-  if (!configured) throw authError(503, 'GOOGLE_AUTH_NOT_CONFIGURED', 'Google sign-in is not configured for Growaf yet.');
+  if (!configured) throw authError(503, 'GOOGLE_AUTH_NOT_CONFIGURED', 'Google sign-in is not configured for Growup yet.');
   if (!credential || credential.length > 16_000) throw authError(400, 'INVALID_GOOGLE_CREDENTIAL', 'A Google ID credential is required.');
   const identity = await (config.verifyGoogleToken ?? ((token, clientId) => verifyGoogleIdToken(token, clientId, config)))(credential, googleClientId);
   const user = await store.upsertUser(identity);
   return { user, cookie: sessionCookie(user.id, config) };
 }
 
-export async function authenticatedUser(request: Request, store: AuthStore, config: AuthConfig = {}): Promise<GrowafUser | null> {
+export async function authenticatedUser(request: Request, store: AuthStore, config: AuthConfig = {}): Promise<GrowupUser | null> {
   const token = cookies(request.headers.cookie ?? '')[SESSION_COOKIE];
   if (!token) return null;
   const payload = verifySession(token, config);
@@ -58,9 +58,9 @@ export async function authenticatedUser(request: Request, store: AuthStore, conf
   return store.getUser(payload.subject);
 }
 
-export async function requireAuthenticatedUser(request: Request, store: AuthStore, config: AuthConfig = {}): Promise<GrowafUser> {
+export async function requireAuthenticatedUser(request: Request, store: AuthStore, config: AuthConfig = {}): Promise<GrowupUser> {
   const user = await authenticatedUser(request, store, config);
-  if (!user) throw authError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with Google to save and open Growaf projects.');
+  if (!user) throw authError(401, 'AUTHENTICATION_REQUIRED', 'Sign in with Google to save and open Growup projects.');
   return user;
 }
 
@@ -86,7 +86,7 @@ async function verifyGoogleIdToken(credential: string, clientId: string, config:
   const now = Math.floor((config.now?.() ?? new Date()).getTime() / 1000);
   if (payload.aud !== clientId || !['accounts.google.com', 'https://accounts.google.com'].includes(payload.iss ?? '')) throw authError(401, 'INVALID_GOOGLE_CREDENTIAL', 'The Google ID token was issued for another application.');
   if (!payload.exp || payload.exp <= now || !payload.iat || payload.iat > now + 60) throw authError(401, 'EXPIRED_GOOGLE_CREDENTIAL', 'The Google ID token is expired or not active yet.');
-  if (!payload.email_verified || !payload.sub || !payload.email) throw authError(401, 'UNVERIFIED_GOOGLE_ACCOUNT', 'Growaf requires a verified Google account email.');
+  if (!payload.email_verified || !payload.sub || !payload.email) throw authError(401, 'UNVERIFIED_GOOGLE_ACCOUNT', 'Growup requires a verified Google account email.');
   return {
     subject: payload.sub,
     email: payload.email.toLowerCase(),

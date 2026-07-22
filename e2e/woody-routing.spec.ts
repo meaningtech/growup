@@ -15,7 +15,7 @@ test('renders canopy-scale woody ellipses and rejects or routes around them', as
   expect(profile.satellite.existingVegetation.patches.every((patch) => patch.polygon.length === 24)).toBe(true);
   await expect(page.getByText('Evidenze multi-sorgente', { exact: false })).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(1_500);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-elliptical-canopies.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-elliptical-canopies.png', fullPage: false });
 
   if (profile.satellite.existingVegetation.suitability === 'reject') return;
   await page.getByTestId('step-species').click();
@@ -34,7 +34,7 @@ test('renders canopy-scale woody ellipses and rejects or routes around them', as
   }
   await expect(page.getByTestId('hydraulic-plan')).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1_000);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-obstacle-routing.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-obstacle-routing.png', fullPage: false });
 });
 
 function segmentCrossesPolygon(start: Coordinate, end: Coordinate, polygon: Coordinate[]) {

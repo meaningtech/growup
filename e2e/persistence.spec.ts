@@ -6,7 +6,7 @@ test('offers explicit local recovery without silently preloading a field', async
   await page.goto('/');
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await expect(page.getByText(TEMPERATE_OPEN_FIELD_FIXTURE.name)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => Boolean(window.localStorage.getItem('growaf:draft:v2')))).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean(window.localStorage.getItem('growup:draft:v2')))).toBe(true);
 
   await page.reload();
   await expect(page.getByText('No active field')).toBeVisible();
@@ -22,11 +22,11 @@ test('offers explicit local recovery without silently preloading a field', async
 test('can discard a browser recovery draft permanently', async ({ page }) => {
   await page.goto('/');
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
-  await expect.poll(() => page.evaluate(() => Boolean(window.localStorage.getItem('growaf:draft:v2')))).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean(window.localStorage.getItem('growup:draft:v2')))).toBe(true);
   await page.reload();
 
   const recovery = page.getByRole('status').filter({ hasText: 'Unsaved local project found' });
   await recovery.getByRole('button', { name: 'Discard' }).click();
   await expect(recovery).toHaveCount(0);
-  expect(await page.evaluate(() => window.localStorage.getItem('growaf:draft:v2'))).toBeNull();
+  expect(await page.evaluate(() => window.localStorage.getItem('growup:draft:v2'))).toBeNull();
 });

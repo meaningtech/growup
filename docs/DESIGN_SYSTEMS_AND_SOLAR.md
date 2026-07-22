@@ -2,7 +2,7 @@
 
 ## Decision
 
-Growaf separates **planting extent**, **production system**, and **orientation objective**. These are independent decisions and must never be collapsed into a single visual preset.
+Growup separates **planting extent**, **production system**, and **orientation objective**. These are independent decisions and must never be collapsed into a single visual preset.
 
 ### Planting extent
 

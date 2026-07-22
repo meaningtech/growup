@@ -46,7 +46,7 @@ test('keeps the crop interior empty in perimeter mode and exposes measured solar
 
   await expect(page.getByText(/crop solar access/).first()).toBeVisible();
   await expect(page.getByText(/kept free of new trees/).first()).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-perimeter-solar.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-perimeter-solar.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
   await page.getByLabel('Design system').selectOption('monoculture');

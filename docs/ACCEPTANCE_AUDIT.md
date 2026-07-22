@@ -1,10 +1,10 @@
-# Growaf completion audit
+# Growup completion audit
 
-Audit date: 2026-07-21. The authoritative acceptance scope is the original user request plus `PROJECT_PLAN.md`, especially Sections 5, 17, 18 and 22. A row is complete only when current code and a repeatable runtime or test artifact prove it.
+Audit date: 2026-07-22. The authoritative acceptance scope is the original user request plus `PROJECT_PLAN.md`, especially Sections 5, 17, 18 and 22. A row is complete only when current code and a repeatable runtime or test artifact prove it. The rebranded runtime is Cloud Run revision `growup-rebrand-r2` in `europe-west1`.
 
 | Requirement | Current evidence | Status | Remaining acceptance evidence |
 | --- | --- | --- | --- |
-| Isolated Growaf runtime | Independent package, environment example, Docker PostGIS and application identity under `growaf/`; production container and health check verified on Cloud Run | Proven | None for software acceptance |
+| Isolated Growup runtime | Independent package, environment example, Docker PostGIS and application identity under `growup/`; production container and health check verified on Cloud Run | Proven | None for software acceptance |
 | Location-independent field | Empty global workspace with explicit temperate and equatorial runtime fixtures and a deployed acceptance field import | Proven | None for software acceptance |
 | Location, terrain, climate, soil and land cover | Live Nominatim, Open-Meteo and SoilGrids profile with evidence records plus audited editable overrides | Proven | Field sampling remains an execution input |
 | Sentinel water context | Sentinel-2 indices and same-orbit Sentinel-1 anomaly from Planetary Computer, preserved with calculation/model metadata | Proven | None for software acceptance |
@@ -18,6 +18,7 @@ Audit date: 2026-07-21. The authoritative acceptance scope is the original user 
 | Irrigation | Monthly demand, effective rain, editable distribution efficiency, localized wetted area, source placement, terrain head, zoning, obstacle-aware editable pipe geometry, exact measured/purchase lengths, component BOM, installation and annual operation | Proven for preliminary design | Hydrogeological, surveyed-pressure and field wetting tests remain mandatory execution inputs |
 | Plant and planting costs | Per-species unit purchase cost and person-hours, global USD basis, local-currency conversion and immutable calculation snapshot | Proven | Local quotes remain explicit user overrides |
 | Persistence | Owner-isolated users/current projects, immutable revisions and calculation runs in the exact existing Mongo-compatible database, READY unique/compound indexes, indexed query-plan checks, optimistic conflicts, restore, autosave/recovery and authenticated browser reload coverage | Proven | None for software acceptance |
+| Optional Google sign-in | Server configuration, ID-token verification, signed `growup_session` cookie and authentication contract are tested; the new Cloud Run origin is not yet registered on the existing Google OAuth client | Pending external origin registration | Add `https://growup-828110571677.europe-west1.run.app` to the client's authorized JavaScript origins and rerun `e2e/auth.spec.ts` |
 | Exports | Reproducible GeoJSON, deterministic per-tree CSV and printable planting/irrigation/procurement/management schedule with generated quantities, costs and evidence register | Proven | None for software acceptance |
 | Provider-agnostic AI assistant | Real provider-backed request through the current DeepSeek adapter, server-only key, validated proposal and confirmation-gated apply | Proven | Keep live opt-in verification in final suite |
 | Integration tests | API tests cover validation, global recommendations/layout, partial regeneration, irrigation overrides, economics, revisions, optimistic conflicts, restoration, owner isolation, exports and assistant contracts; live browser covers the continuous workflow and persistence reload | Proven for current API surface | None for software acceptance |
@@ -26,4 +27,4 @@ Audit date: 2026-07-21. The authoritative acceptance scope is the original user 
 | Performance | Explicit gates cover 100k tree-year states, 107k catalogue load/search and three-variant layout generation | Proven for calculation path | Add map-render frame budgets and retain PostGIS/Mongo query-plan checks as data volume grows |
 | Visual checkpoints | Evidence, perimeter/solar, optional sign-in, objective/species, design, independently isolated machinery/water layers, cost curve, operational schedule and AI screenshots captured from the deployed workflow | Proven | None for software acceptance |
 
-All software acceptance rows are proven. Hydrogeological, surveyed-pressure, wetting and soil checks remain explicit field-execution inputs rather than fabricated application data.
+All application logic and infrastructure rows are proven. The only external console action still open is the OAuth JavaScript-origin registration above. Hydrogeological, surveyed-pressure, wetting and soil checks remain explicit field-execution inputs rather than fabricated application data.

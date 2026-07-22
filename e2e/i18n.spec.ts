@@ -54,7 +54,7 @@ test('renders live field evidence, Sentinel notices and source traceability enti
   await expect(page.getByText(/Evidenze pronte:/)).toBeVisible();
   const traceability = page.getByTestId('evidence-traceability');
   await expect(traceability).toContainText('Dato letto');
-  await expect(traceability).toContainText('Calcolo Growaf');
+  await expect(traceability).toContainText('Calcolo Growup');
   await expect(traceability).toContainText('Decisione influenzata');
   await expect(traceability.locator('a')).toHaveCount(0);
 });

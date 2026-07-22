@@ -6,5 +6,5 @@ const host = process.env.HOST || '127.0.0.1';
 const app = await initializeApp();
 
 app.listen(port, host, () => {
-  console.log(`Growaf listening on http://${host}:${port}`);
+  console.log(`Growup listening on http://${host}:${port}`);
 });

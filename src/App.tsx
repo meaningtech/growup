@@ -196,7 +196,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [clearSiteOpen, setClearSiteOpen] = useState(false);
   const [projectName, setProjectName] = useState(() => t('project.newTitle'));
-  const [projectId, setProjectId] = useState(() => `growaf-${crypto.randomUUID().slice(0, 8)}`);
+  const [projectId, setProjectId] = useState(() => `growup-${crypto.randomUUID().slice(0, 8)}`);
   const [projectRevision, setProjectRevision] = useState(0);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [revisions, setRevisions] = useState<ProjectRevisionSummary[]>([]);
@@ -257,12 +257,12 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('growaf:draft:v2');
+      const stored = window.localStorage.getItem('growup:draft:v2');
       if (!stored) return;
       const parsed = JSON.parse(stored) as ProjectState;
       if (parsed?.site?.polygon?.length >= 3) setRecoveryDraft(parsed);
     } catch {
-      window.localStorage.removeItem('growaf:draft:v2');
+      window.localStorage.removeItem('growup:draft:v2');
     }
   }, []);
 
@@ -278,7 +278,7 @@ export default function App() {
       const snapshot = currentProjectState(new Date().toISOString());
       if (!snapshot) return;
       try {
-        window.localStorage.setItem('growaf:draft:v2', JSON.stringify(snapshot));
+        window.localStorage.setItem('growup:draft:v2', JSON.stringify(snapshot));
       } catch {
         setError(t('errors.localDraftStorage'));
       }
@@ -865,12 +865,12 @@ export default function App() {
     setDraftPoints([]);
     setShowNdmi(false);
     setShowWaterSamples(false);
-    setProjectId(`growaf-${crypto.randomUUID().slice(0, 8)}`);
+    setProjectId(`growup-${crypto.randomUUID().slice(0, 8)}`);
     setProjectRevision(0);
     projectRevisionRef.current = 0;
     setRevisions([]);
     setSaveStatus('idle');
-    window.localStorage.removeItem('growaf:draft:v2');
+    window.localStorage.removeItem('growup:draft:v2');
     projectNameEditedRef.current = false;
     setProjectName(t('project.newTitle'));
     createdAtRef.current = new Date().toISOString();
@@ -1220,14 +1220,14 @@ export default function App() {
         setProjectRevision(revision);
         if (serial === dirtySerialRef.current) {
           setSaveStatus('saved');
-          window.localStorage.removeItem('growaf:draft:v2');
+          window.localStorage.removeItem('growup:draft:v2');
         } else {
           setSaveStatus('unsaved');
         }
         void refreshProjects(saved.id).catch((refreshError) => setError(messageOf(refreshError)));
         if (announce) setNotice(t('auth.savedRevision', { revision }));
       } catch (saveError) {
-        const conflict = saveError instanceof GrowafApiError && saveError.status === 'PROJECT_REVISION_CONFLICT';
+        const conflict = saveError instanceof GrowupApiError && saveError.status === 'PROJECT_REVISION_CONFLICT';
         setSaveStatus(conflict ? 'conflict' : 'unsaved');
         setError(conflict ? t('auth.conflict') : messageOf(saveError));
       }
@@ -1317,7 +1317,7 @@ export default function App() {
   }
 
   function discardLocalDraft() {
-    window.localStorage.removeItem('growaf:draft:v2');
+    window.localStorage.removeItem('growup:draft:v2');
     setRecoveryDraft(null);
   }
 
@@ -1493,7 +1493,7 @@ export default function App() {
       <header className="topbar">
         <button className="brand" onClick={() => setSection('site')} aria-label={t('nav.home')}>
           <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
-          <span><strong>growaf</strong><small>{t('brand.tagline')}</small></span>
+          <span><strong>growup</strong><small>{t('brand.tagline')}</small></span>
         </button>
         <div className="project-title">
           <span className="eyebrow">{site ? t('project.activeField') : t('project.noField')}</span>
@@ -2032,7 +2032,7 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       })}</div>
     </ScheduleSection>
     {schedule.warnings.length > 0 && <section className="schedule-warnings"><strong>{t('schedule.warnings')}</strong>{schedule.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</section>}
-    <footer className="schedule-footer"><span>growaf · {t('schedule.footer')}</span><span>{t('schedule.generatedFrom', { version: variant.generation.engineVersion })}</span></footer>
+    <footer className="schedule-footer"><span>growup · {t('schedule.footer')}</span><span>{t('schedule.generatedFrom', { version: variant.generation.engineVersion })}</span></footer>
   </article></div>;
 }
 
@@ -2504,12 +2504,12 @@ function StatusPill({ status }: { status: string }) { const { t } = useI18n(); r
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
 function post(value: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
-class GrowafApiError extends Error {
+class GrowupApiError extends Error {
   readonly statusCode: number;
   readonly status: string;
   constructor(message: string, statusCode: number, status: string) {
     super(message);
-    this.name = 'GrowafApiError';
+    this.name = 'GrowupApiError';
     this.statusCode = statusCode;
     this.status = status;
   }
@@ -2517,10 +2517,10 @@ class GrowafApiError extends Error {
 async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new GrowafApiError(body?.error?.message ?? `Growaf API returned ${response.status}`, response.status, body?.error?.status ?? 'API_ERROR');
+  if (!response.ok) throw new GrowupApiError(body?.error?.message ?? `Growup API returned ${response.status}`, response.status, body?.error?.status ?? 'API_ERROR');
   return body as T;
 }
-function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Unexpected Growaf error'; }
+function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Unexpected Growup error'; }
 function plantingRestriction(coordinate: Coordinate, site: SiteBoundary | null, profile: SiteProfile | null, t: (key: string, values?: Record<string, string | number>) => string) {
   if (!site) return t('errors.selectSite');
   if (!siteContainsCoordinate(site, coordinate)) return t('errors.plantOutside');
@@ -2648,7 +2648,7 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
     'Wind direction is based on reanalysis; confirm damaging seasonal winds and barrier porosity in the field.': 'layout.warning.wind',
     'Year-20 projected crown cover is dense; scheduled pruning or thinning is required.': 'layout.warning.canopy',
     'A critical climate or water mismatch prevents recommendation for this site.': 'species.warning.criticalMismatch',
-    'Set AI_PROVIDER_API_KEY on the Growaf server to enable the internal assistant.': 'assistant.unavailable',
+    'Set AI_PROVIDER_API_KEY on the Growup server to enable the internal assistant.': 'assistant.unavailable',
     'Well position is provisional at the highest sampled terrain point; hydrogeological survey and permitting are required before drilling.': 'water.warning.wellPosition',
     'The tank is provisionally placed at the highest sampled terrain point for gravity assistance; confirm access, bearing capacity and surveyed elevation.': 'water.warning.tankPosition',
     'Reservoir position requires a user-defined water point and geotechnical review.': 'water.warning.reservoirPosition',

@@ -1,10 +1,10 @@
-# Growaf Product and Implementation Plan
+# Growup Product and Implementation Plan
 
 ## 1. Executive decision
 
-Growaf will be a new, isolated application under `growaf/`. Solaraf remains untouched and is used only as the UX, map-interaction, and project-structure reference.
+Growup will be a new, isolated application under `growup/`. Solaraf remains untouched and is used only as the UX, map-interaction, and project-structure reference.
 
-Growaf will preserve Solaraf's strongest interaction pattern: a compact operations sidebar next to a dominant map, direct polygon editing, immediate recalculation, stable metrics, and visible system status. It will replace the solar domain with an agroforestry design engine that:
+Growup will preserve Solaraf's strongest interaction pattern: a compact operations sidebar next to a dominant map, direct polygon editing, immediate recalculation, stable metrics, and visible system status. It will replace the solar domain with an agroforestry design engine that:
 
 1. Lets the user locate or import a site and draw an editable planting perimeter.
 2. Lets the user select tree and perennial species from a broad, evidence-backed catalogue.
@@ -30,7 +30,7 @@ The supplied LinkedIn video was reviewed as a 39.5-second screen recording. The 
 - The generated result remains editable rather than becoming a static export.
 - Alternative arrangements can be evaluated visually on the map.
 
-Growaf will reproduce this behavior for planting design: boundary changes, exclusion areas, paths, water infrastructure, locked trees, and changed species mixes must cause a quick, explainable regeneration of only the affected design.
+Growup will reproduce this behavior for planting design: boundary changes, exclusion areas, paths, water infrastructure, locked trees, and changed species mixes must cause a quick, explainable regeneration of only the affected design.
 
 Reference: [LinkedIn post and video](https://www.linkedin.com/posts/andrea-innocenti-ita_mi-colpisce-la-velocit%C3%A0-con-cui-stiamo-trasformando-ugcPost-7484842159725002752-XVaj/).
 
@@ -38,17 +38,17 @@ Reference: [LinkedIn post and video](https://www.linkedin.com/posts/andrea-innoc
 
 The following Solaraf concepts are reusable:
 
-| Solaraf asset | Growaf use | Treatment |
+| Solaraf asset | Growup use | Treatment |
 | --- | --- | --- |
-| Vite, React, TypeScript, Express structure | Application foundation | Copy into `growaf/`, rename, then evolve independently |
+| Vite, React, TypeScript, Express structure | Application foundation | Copy into `growup/`, rename, then evolve independently |
 | `src/googleMaps.ts` | Google Maps loading and typed browser boundary | Reuse and update for current Maps APIs |
-| Address search and server-side geocoding | Site discovery | Reuse with Growaf endpoint names |
+| Address search and server-side geocoding | Site discovery | Reuse with Growup endpoint names |
 | Click-to-coordinate behavior | Site inspection and water/access-point placement | Reuse |
 | Manual polygon drawing and draggable vertices | Planting perimeter and exclusion zones | Reuse concept; replace local area math with robust projected geometry |
 | Two-column `app-shell` and compact panels | Primary workspace | Reuse layout proportions and density |
 | Loading, empty, error, and status states | Long-running generation and data-source feedback | Reuse state conventions |
 | Integration-test pattern in `server/app.test.ts` | API verification | Reuse test organization |
-| Playwright polygon tests | Site-drawing and generation flows | Adapt into Growaf end-to-end tests |
+| Playwright polygon tests | Site-drawing and generation flows | Adapt into Growup end-to-end tests |
 
 The following Solaraf code must not be copied into the production domain layer:
 
@@ -112,7 +112,7 @@ These are not removed from the product vision; they are kept out of the first pr
 7. **No false precision.** Growth and water results are ranges or scenarios when source data do not support a precise value.
 8. **Deterministic results.** The same inputs and generation seed produce the same layout.
 9. **Local safety wins.** Invasive, prohibited, threatened, or clearly unsuitable species trigger hard stops or explicit expert overrides.
-10. **Product isolation.** Growaf has independent code, domain models, collections, deployment configuration and credentials. The current deployment reuses an existing Mongo-compatible database instance only as infrastructure, with dedicated `growaf_*` collections; it does not import Solaraf runtime files or domain data.
+10. **Product isolation.** Growup has independent code, domain models, collections, deployment configuration and credentials. The current deployment reuses an existing Mongo-compatible database instance only as infrastructure, with dedicated `growup_*` collections; it does not import Solaraf runtime files or domain data.
 
 ## 5. End-to-end user workflow
 
@@ -133,7 +133,7 @@ The user can:
 - Add access gates, water-source points, and optional existing trees.
 - Set boundary setbacks and management-path widths.
 
-Growaf validates self-intersections, ring orientation, minimum area, overlapping exclusions, and unsupported geometry before generation.
+Growup validates self-intersections, ring orientation, minimum area, overlapping exclusions, and unsupported geometry before generation.
 
 ### Step 3: Describe site conditions
 
@@ -199,7 +199,7 @@ The user sets:
 
 ### Step 7: Generate variants
 
-Growaf generates at least three named variants:
+Growup generates at least three named variants:
 
 - **Regenerative:** stronger native, diversity, soil-cover, and support-species weighting.
 - **Balanced:** balanced production, access, diversity, and water use.
@@ -277,7 +277,7 @@ Each step has a completion state and visible blockers. Navigation is allowed eve
 
 ### 6.3 Visual direction
 
-Growaf inherits Solaraf's restrained operational character but shifts from solar yellow to a botanical system:
+Growup inherits Solaraf's restrained operational character but shifts from solar yellow to a botanical system:
 
 - Canvas: warm mineral off-white `#F4F2EA`.
 - Primary ink: near-black `#1B211C`.
@@ -310,7 +310,7 @@ Desktop is the design surface. Tablet supports review and light editing through 
 
 ### 7.1 Core decision
 
-No single available database contains the taxonomy, agroforestry use, native range, environmental niche, crown geometry, growth over age, syntropic role, and crop coefficient required by Growaf. Growaf will therefore use a versioned source stack with one canonical identity and several evidence layers.
+No single available database contains the taxonomy, agroforestry use, native range, environmental niche, crown geometry, growth over age, syntropic role, and crop coefficient required by Growup. Growup will therefore use a versioned source stack with one canonical identity and several evidence layers.
 
 The catalogue exposes four readiness levels:
 
@@ -323,7 +323,7 @@ Only design-ready species enter automatic generation by default. Users may add l
 
 ### 7.2 Selected source stack
 
-| Source | Coverage and role | Growaf use | License/access posture |
+| Source | Coverage and role | Growup use | License/access posture |
 | --- | --- | --- | --- |
 | [Agroforestry Species Switchboard 4.0](https://doi.org/10.1038/s41597-025-05492-w) | 107,269 accepted plant names, 54,812 tree-like species, and presence in 59 specialist databases | Canonical discovery backbone, WFO identifiers, synonyms, tree-like flag, source links | Downloadable archive is CC BY 4.0; contributing source content is not automatically reusable |
 | [GlobalUsefulNativeTrees](https://doi.org/10.1038/s41598-023-39552-1) | 14,014 useful tree species with native distribution across 242 countries/territories and ten use categories | Default broad agroforestry candidate set and native/use filters | [Zenodo species list](https://zenodo.org/records/7994433) is CC BY 4.0 |
@@ -339,7 +339,7 @@ Only design-ready species enter automatic generation by default. Users may add l
 | [NASA POWER Daily API](https://power.larc.nasa.gov/docs/services/api/temporal/daily/) | Analysis-ready global daily meteorology and solar data | Weather inputs and climate fallback for water calculations | Use official API with server cache and request de-duplication |
 | [FAO Irrigation and Drainage Paper 56, revised edition](https://agris.fao.org/search/en/providers/124943/records/6a32b9d6b9a0a56f302a5e20) | Reference evapotranspiration, crop coefficients, water balance, and updated data practices | Irrigation calculation standard | Cite methodology; do not redistribute copyrighted tables without permission |
 
-Additional link-only checks include World Flora Online, Kew Plants of the World Online, GBIF, EUFORGEN, the IUCN Red List, the EU invasive alien species list, EPPO, and national/regional sources. Licensing and geographic authority are reviewed before any data is copied into Growaf.
+Additional link-only checks include World Flora Online, Kew Plants of the World Online, GBIF, EUFORGEN, the IUCN Red List, the EU invasive alien species list, EPPO, and national/regional sources. Licensing and geographic authority are reviewed before any data is copied into Growup.
 
 ### 7.3 Why this is the most complete practical approach
 
@@ -349,7 +349,7 @@ Additional link-only checks include World Flora Online, Kew Plants of the World 
 - TreeGOER supplies environmental ranges at a scale the above catalogues do not.
 - Tallo supplies measured crown geometry needed by the map and timeline.
 - TRY and ECOCROP fill trait and cultivated-species gaps.
-- Growaf adds the missing design layer: syntropic roles, time behavior, irrigation parameters, confidence, and local review.
+- Growup adds the missing design layer: syntropic roles, time behavior, irrigation parameters, confidence, and local review.
 
 ### 7.4 Canonical species model
 
@@ -359,7 +359,7 @@ Required model groups:
 
 **Identity**
 
-- Growaf UUID.
+- Growup UUID.
 - WFO taxon ID and accepted scientific name.
 - Authorship, synonyms, family, genus.
 - Localized common names with region and source.
@@ -445,7 +445,7 @@ Acceptance gate for the pilot pack:
 
 ### 8.1 Automatic site resolution
 
-Once a user draws or imports the perimeter, Growaf can understand where the land is and build a first environmental profile without asking the user to transcribe coordinates.
+Once a user draws or imports the perimeter, Growup can understand where the land is and build a first environmental profile without asking the user to transcribe coordinates.
 
 The backend will:
 
@@ -516,7 +516,7 @@ Each component returns `good`, `conditional`, `poor`, or `unknown`, the source v
 
 ### 9.1 Principles translated into software
 
-Growaf treats syntropic agriculture as a process-based design framework, not a fixed recipe. The rule system is derived from the official [Agenda Götsch](https://agendagotsch.com/en/) material and current scientific literature, including the review [Syntropic farming systems for reconciling productivity, ecosystem functions, and restoration](https://doi.org/10.1016/S2542-5196(25)00047-6).
+Growup treats syntropic agriculture as a process-based design framework, not a fixed recipe. The rule system is derived from the official [Agenda Götsch](https://agendagotsch.com/en/) material and current scientific literature, including the review [Syntropic farming systems for reconciling productivity, ecosystem functions, and restoration](https://doi.org/10.1016/S2542-5196(25)00047-6).
 
 The engine models:
 
@@ -722,7 +722,7 @@ Only one thematic fill layer is active at a time; outlines and warnings remain l
 
 ### 12.1 Scientific posture
 
-Tallo provides strong allometric relationships between size dimensions, but not a universal age-growth curve. Growaf must not infer that static crown measurements alone provide exact growth over time. Age curves combine measured data, regional equations, curated values, and explicit fallbacks.
+Tallo provides strong allometric relationships between size dimensions, but not a universal age-growth curve. Growup must not infer that static crown measurements alone provide exact growth over time. Age curves combine measured data, regional equations, curated values, and explicit fallbacks.
 
 ### 12.2 Model hierarchy
 
@@ -884,7 +884,7 @@ Do not introduce dynamic production imports. Audit every added npm dependency be
 ### 14.2 Proposed folder structure
 
 ```text
-growaf/
+growup/
 ├── AGENTS.md
 ├── README.md
 ├── package.json
@@ -1141,23 +1141,23 @@ Capture screenshots for the main workflow, error states, and selected timeline y
 
 Tasks:
 
-- Create `growaf/` with its own package, environment example, documentation, and ignore rules.
+- Create `growup/` with its own package, environment example, documentation, and ignore rules.
 - Copy only the approved Solaraf foundation and rename all user-facing/domain identifiers.
-- Add Growaf-specific `AGENTS.md` and source-provenance rules.
+- Add Growup-specific `AGENTS.md` and source-provenance rules.
 - Establish shared units, IDs, schemas, error envelope, and calculation-run versioning.
 
 Exit gate:
 
-- Growaf starts independently.
+- Growup starts independently.
 - Solaraf files and behavior are unchanged.
 - Typecheck, tests, and production build pass.
-- No Solar API code or secrets exist in Growaf.
+- No Solar API code or secrets exist in Growup.
 
 ### Phase 1: Map workspace and site editor
 
 Tasks:
 
-- Rebuild the Solaraf shell as the Growaf six-step workspace.
+- Rebuild the Solaraf shell as the Growup six-step workspace.
 - Add address search, satellite map, coordinate selection, and status handling.
 - Implement boundary, hole, exclusion, path, access point, water point, and existing-tree tools.
 - Add projected backend geometry validation and accurate metrics.
@@ -1305,7 +1305,7 @@ Exit gate:
 
 ### Foundation
 
-- `GROW-001` Create isolated Growaf application shell.
+- `GROW-001` Create isolated Growup application shell.
 - `GROW-002` Define shared schemas, units, errors, and IDs.
 - `GROW-003` Add PostGIS development environment and migrations.
 - `GROW-004` Add project/calculation version model.
@@ -1413,9 +1413,9 @@ These assumptions are feature/configuration decisions, not reasons to pause the 
 
 ## 22. Definition of done
 
-Growaf is ready only when all of the following have direct evidence:
+Growup is ready only when all of the following have direct evidence:
 
-- The application lives entirely under `growaf/` and Solaraf remains unchanged.
+- The application lives entirely under `growup/` and Solaraf remains unchanged.
 - A user can define and edit a perimeter and exclusions on the map.
 - The perimeter automatically resolves a sourced environmental profile and jurisdiction used for recommendations.
 - The system uses a versioned broad agroforestry catalogue and exposes source provenance.
@@ -1440,7 +1440,7 @@ Growaf is ready only when all of the following have direct evidence:
 
 | Requested outcome | Planned evidence |
 | --- | --- |
-| New project named Growaf | Isolated `growaf/` folder and application identity |
+| New project named Growup | Isolated `growup/` folder and application identity |
 | Reuse Solaraf UX/UI | Section 2 reuse matrix and Phase 0/1 implementation gates |
 | Match the parking configurator behavior | Editable perimeter, constraints, rapid reflow, variants, locks, partial regeneration |
 | Select agroforestry species | Full catalogue, filters, palette, suitability, and design-readiness |
@@ -1456,4 +1456,4 @@ Growaf is ready only when all of the following have direct evidence:
 
 ## 24. First implementation action
 
-Start with Phase 0 and Phase 1 together: create the independent Growaf runtime by copying only Solaraf's approved foundation, then replace the roof/solar workflow with the site editor and accurate projected geometry. Do not begin species recommendation or generation until the source-provenance schema, stable IDs, units, and calculation versioning exist, because those decisions affect every later result.
+Start with Phase 0 and Phase 1 together: create the independent Growup runtime by copying only Solaraf's approved foundation, then replace the roof/solar workflow with the site editor and accurate projected geometry. Do not begin species recommendation or generation until the source-provenance schema, stable IDs, units, and calculation versioning exist, because those decisions affect every later result.

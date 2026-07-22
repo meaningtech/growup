@@ -3,7 +3,7 @@ import type { Coordinate } from './types';
 declare global {
   interface Window {
     google?: any;
-    __growafGoogleMapsReady?: () => void;
+    __growupGoogleMapsReady?: () => void;
   }
 }
 
@@ -15,13 +15,13 @@ export function loadGoogleMaps(apiKey: string): Promise<any> {
   if (mapsPromise) return mapsPromise;
 
   mapsPromise = new Promise((resolve, reject) => {
-    window.__growafGoogleMapsReady = () => {
+    window.__growupGoogleMapsReady = () => {
       if (window.google?.maps) resolve(window.google.maps);
       else reject(new Error('Google Maps loaded without the Maps JavaScript API'));
-      delete window.__growafGoogleMapsReady;
+      delete window.__growupGoogleMapsReady;
     };
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=geometry&loading=async&callback=__growafGoogleMapsReady`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=geometry&loading=async&callback=__growupGoogleMapsReady`;
     script.async = true;
     script.onerror = () => reject(new Error('Google Maps JavaScript API failed to load'));
     document.head.appendChild(script);

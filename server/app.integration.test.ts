@@ -9,8 +9,8 @@ import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/l
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
 import { distanceToSiteBoundaryM, siteContainsCoordinate } from '../src/lib/siteGeometry.js';
 import type { Evidence, ProjectState, SiteProfile } from '../src/types.js';
-import { createApp, type GrowafAppConfig } from './app.js';
-import type { GrowafUser } from './mongo.js';
+import { createApp, type GrowupAppConfig } from './app.js';
+import type { GrowupUser } from './mongo.js';
 import { buildRevisionArtifacts } from './revisions.js';
 import { unavailableSatelliteProfile } from './sentinel.js';
 
@@ -32,7 +32,7 @@ const evidence = (source: string): Evidence => ({
   confidence: 'high',
   resolution: 'integration fixture',
 });
-const testUser: GrowafUser = {
+const testUser: GrowupUser = {
   id: 'google-subject-1',
   email: 'planner@example.test',
   name: 'Test Planner',
@@ -43,8 +43,8 @@ const testUser: GrowafUser = {
   lastLoginAt: observedAt,
 };
 const testAuth = {
-  googleOAuthClientId: 'growaf-test.apps.googleusercontent.com',
-  authSessionSecret: 'growaf-integration-session-secret-32-bytes',
+  googleOAuthClientId: 'growup-test.apps.googleusercontent.com',
+  authSessionSecret: 'growup-integration-session-secret-32-bytes',
   verifyGoogleToken: async () => ({
     subject: testUser.id,
     email: testUser.email,
@@ -222,7 +222,7 @@ function equatorialSiteProfile(): SiteProfile {
   };
 }
 
-describe('Growaf API integration', () => {
+describe('Growup API integration', () => {
   it('generates a location-independent design for an equatorial field', async () => {
     const app = createApp({ skipDatabaseMigration: true });
     const profile = equatorialSiteProfile();
@@ -349,7 +349,7 @@ describe('Growaf API integration', () => {
     let stored: ProjectState | null = null;
     const revisionStates: ProjectState[] = [];
     const calculationRuns = new Map<string, ReturnType<typeof buildRevisionArtifacts>['calculation']>();
-    const database: NonNullable<GrowafAppConfig['database']> = {
+    const database: NonNullable<GrowupAppConfig['database']> = {
       health: async () => true,
       geometryMetrics: async () => geometryValidation,
       getUser: async (id) => id === testUser.id ? testUser : null,
@@ -441,7 +441,7 @@ describe('Growaf API integration', () => {
     expect(regeneratedVariant.generation).toEqual(expect.objectContaining({
       mode: 'partial',
       lockedTreeCount: 1,
-      engineVersion: expect.stringMatching(/^growaf-layout-/),
+      engineVersion: expect.stringMatching(/^growup-layout-/),
     }));
     expect(regeneratedVariant.trees.find((tree: { id: string }) => tree.id === lockedTree.id)).toEqual(lockedTree);
     expect(regeneratedVariant.trees.filter((tree: { locked: boolean }) => tree.locked)).toHaveLength(1);
@@ -525,7 +525,7 @@ describe('Growaf API integration', () => {
       revision: 1,
       inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       geometryHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      modelVersions: expect.objectContaining({ growth: 'growaf-growth-1.0.0', irrigation: 'growaf-irrigation-1.0.0' }),
+      modelVersions: expect.objectContaining({ growth: 'growup-growth-1.0.0', irrigation: 'growup-irrigation-1.0.0' }),
       outputSummary: expect.objectContaining({ treeCount: variant.trees.length }),
     }));
     const second = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send({ ...saved.body, name: 'Revised API project', updatedAt: '2026-07-21T01:00:00.000Z' }).expect(200);
@@ -545,7 +545,7 @@ describe('Growaf API integration', () => {
       heightLowM: expect.any(Number),
       heightM: expect.any(Number),
       heightHighM: expect.any(Number),
-      growthModel: expect.stringMatching(/^growaf-growth-/),
+      growthModel: expect.stringMatching(/^growup-growth-/),
     }));
     const repeatedGeoJson = await request(app).get(`/api/projects/${project.id}/export.geojson`).set('Cookie', sessionCookie).expect(200);
     expect(repeatedGeoJson.body).toEqual(exportResponse.body);
@@ -715,7 +715,7 @@ describe('Growaf API integration', () => {
         const url = new URL(String(input));
         expect(url.hostname).toBe('nominatim.openstreetmap.org');
         expect(url.searchParams.get('q')).toBe('Sample field');
-        expect(new Headers(init?.headers).get('User-Agent')).toContain('Growaf');
+        expect(new Headers(init?.headers).get('User-Agent')).toContain('Growup');
         return new Response(JSON.stringify([{
           place_id: 42,
           display_name: 'Sample field result',
@@ -770,19 +770,19 @@ describe('Growaf API integration', () => {
   });
 
   it('serves the production client and keeps unknown API routes out of the SPA fallback', async () => {
-    const staticRoot = mkdtempSync(join(tmpdir(), 'growaf-static-'));
-    writeFileSync(join(staticRoot, 'index.html'), '<!doctype html><title>Growaf production shell</title>');
+    const staticRoot = mkdtempSync(join(tmpdir(), 'growup-static-'));
+    writeFileSync(join(staticRoot, 'index.html'), '<!doctype html><title>Growup production shell</title>');
     writeFileSync(join(staticRoot, 'asset.txt'), 'production asset');
     const app = createApp({ staticRoot, skipDatabaseMigration: true });
 
     try {
       const home = await request(app).get('/').expect(200);
-      expect(home.text).toContain('Growaf production shell');
+      expect(home.text).toContain('Growup production shell');
       await request(app).get('/asset.txt').expect(200, 'production asset');
       const clientRoute = await request(app).get('/projects/demo').expect(200);
-      expect(clientRoute.text).toContain('Growaf production shell');
+      expect(clientRoute.text).toContain('Growup production shell');
       const unknownApi = await request(app).get('/api/not-a-route').expect(404);
-      expect(unknownApi.text).not.toContain('Growaf production shell');
+      expect(unknownApi.text).not.toContain('Growup production shell');
     } finally {
       rmSync(staticRoot, { recursive: true, force: true });
     }

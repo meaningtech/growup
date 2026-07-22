@@ -1,6 +1,6 @@
-# Growaf development instructions
+# Growup development instructions
 
-- Growaf is isolated from Solaraf. Do not import runtime files or domain code from `../solaraf`.
+- Growup is isolated from Solaraf. Do not import runtime files or domain code from `../solaraf`.
 - Keep code, tests, documentation, comments, and commits in English.
 - Never expose credentials in source, logs, test fixtures, screenshots, or exports.
 - All environmental, botanical, price, and cost values shown to users require a source, observation date or version, and confidence level.
@@ -14,8 +14,9 @@
 - `src/` is the React/Vite map-first client. `server/` is the Express API. Shared domain contracts live in `src/types.ts`; deterministic calculation code lives in `src/lib/`.
 - PostGIS is authoritative only for boundary, exclusion, path and protected-tree geometry validation/measurement. Do not store project documents in PostGIS.
 - Project persistence reuses the explicitly configured Firestore Enterprise Mongo-compatible database path `/solaraf` as infrastructure only. Runtime code must pass the host/database guard in `server/mongo.ts`; do not create another database or Mongo user.
-- Growaf owns only `growaf_users`, `growaf_projects`, `growaf_project_revisions` and `growaf_calculation_runs`. Preserve owner isolation and every READY index: unique document `_id` indexes, sparse unique user email, `{ ownerUserId: 1, updatedAt: -1 }` for projects, `{ ownerUserId: 1, projectId: 1, revision: -1 }` for revisions and `{ ownerUserId: 1, projectId: 1, createdAt: -1 }` for calculation runs.
-- Google sign-in is optional. Anonymous users can analyse and design. Saving, reopening and exporting stored projects require a verified Google ID token and the signed HttpOnly `growaf_session` cookie.
+- `scripts/migrateBrandCollections.ts` is the one-way, idempotent Growaf-to-Growup collection migration. It must validate READY `_id` indexes before scanning and must never delete or rewrite the immutable legacy source collections.
+- Growup owns only `growup_users`, `growup_projects`, `growup_project_revisions` and `growup_calculation_runs`. Preserve owner isolation and every READY index: unique document `_id` indexes, sparse unique user email, `{ ownerUserId: 1, updatedAt: -1 }` for projects, `{ ownerUserId: 1, projectId: 1, revision: -1 }` for revisions and `{ ownerUserId: 1, projectId: 1, createdAt: -1 }` for calculation runs.
+- Google sign-in is optional. Anonymous users can analyse and design. Saving, reopening and exporting stored projects require a verified Google ID token and the signed HttpOnly `growup_session` cookie.
 - The AI assistant is provider-agnostic through an OpenAI-compatible server adapter. Keep provider keys server-only, resolve proposed species against the curated catalogue, validate every action, and require user confirmation before mutation.
 - `server/economics.ts` resolves one global USD planning basket through a live country-to-currency mapping and USD exchange table. Never add country-specific pricing branches; local rates are explicit user overrides.
 - `server/export.ts` is the only project export composer. GeoJSON and CSV output must remain deterministic for the same stored project and include calculation/model metadata without credentials or private identity data.
@@ -51,7 +52,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 ## Verification
 
 - Baseline: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`.
-- The deployed acceptance workflow is `GROWAF_BASE_URL=<cloud-run-url> npm run test:acceptance`; it must exercise live evidence, layout, hydraulics, economics and perimeter planting against one explicit imported field.
+- The deployed acceptance workflow is `GROWUP_BASE_URL=<cloud-run-url> npm run test:acceptance`; it must exercise live evidence, layout, hydraulics, economics and perimeter planting against one explicit imported field.
 - Property and performance gates live in `src/lib/layout.property.test.ts` and `server/performance.test.ts`; do not weaken plantability, determinism, catalogue, growth or layout thresholds to hide regressions.
-- Live Mongo: set `GROWAF_LIVE_MONGO_TEST=1` with the guarded existing `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
+- Live Mongo: set `GROWUP_LIVE_MONGO_TEST=1` with the guarded existing `MONGODB_URI` and `AUTH_SESSION_SECRET`, then run `npx vitest run server/mongo.live.integration.test.ts`.
 - Browser behavior must be verified with explicit imported field fixtures; production must never bundle or auto-load a localized default field. Keep screenshots and generated test artifacts out of Git.

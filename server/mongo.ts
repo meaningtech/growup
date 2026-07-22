@@ -7,10 +7,10 @@ import { buildRevisionArtifacts, projectContentHash } from './revisions.js';
 
 const EXISTING_MONGO_HOST = 'b062e978-4d93-4760-9d00-907071c84bbe.europe-west1.firestore.goog';
 const EXISTING_MONGO_DATABASE = 'solaraf';
-const USERS_COLLECTION = 'growaf_users';
-const PROJECTS_COLLECTION = 'growaf_projects';
-const REVISIONS_COLLECTION = 'growaf_project_revisions';
-const CALCULATION_RUNS_COLLECTION = 'growaf_calculation_runs';
+const USERS_COLLECTION = 'growup_users';
+const PROJECTS_COLLECTION = 'growup_projects';
+const REVISIONS_COLLECTION = 'growup_project_revisions';
+const CALCULATION_RUNS_COLLECTION = 'growup_calculation_runs';
 
 export type GoogleIdentity = {
   subject: string;
@@ -20,7 +20,7 @@ export type GoogleIdentity = {
   locale: string | null;
 };
 
-export type GrowafUser = {
+export type GrowupUser = {
   id: string;
   email: string;
   name: string;
@@ -33,11 +33,11 @@ export type GrowafUser = {
 
 export type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
 
-export type GrowafDatabase = {
+export type GrowupDatabase = {
   health: () => Promise<boolean>;
   geometryMetrics: (site: SiteBoundary) => Promise<SiteValidation>;
-  getUser: (id: string) => Promise<GrowafUser | null>;
-  upsertUser: (identity: GoogleIdentity) => Promise<GrowafUser>;
+  getUser: (id: string) => Promise<GrowupUser | null>;
+  upsertUser: (identity: GoogleIdentity) => Promise<GrowupUser>;
   getProject: (ownerUserId: string, id: string) => Promise<ProjectState | null>;
   listProjects: (ownerUserId: string) => Promise<ProjectSummary[]>;
   listProjectRevisions: (ownerUserId: string, projectId: string) => Promise<ProjectRevisionSummary[]>;
@@ -46,7 +46,7 @@ export type GrowafDatabase = {
   saveProject: (ownerUserId: string, project: ProjectState) => Promise<ProjectState>;
 };
 
-type UserDocument = Omit<GrowafUser, 'id'> & { _id: string };
+type UserDocument = Omit<GrowupUser, 'id'> & { _id: string };
 type ProjectDocument = {
   _id: string;
   ownerUserId: string;
@@ -136,22 +136,22 @@ export async function assertMongoIndexesReady(): Promise<void> {
 
 export async function ensureMongoIndexes(): Promise<void> {
   const db = await mongoDatabase();
-  await ensureIndex(db.collection<UserDocument>(USERS_COLLECTION), { _id: 1 }, { unique: true, name: 'growaf_users_id_unique' });
-  await ensureIndex(db.collection<UserDocument>(USERS_COLLECTION), { email: 1 }, { unique: true, sparse: true, name: 'growaf_users_email_unique' });
-  await ensureIndex(db.collection<ProjectDocument>(PROJECTS_COLLECTION), { _id: 1 }, { unique: true, name: 'growaf_projects_id_unique' });
-  await ensureIndex(db.collection<ProjectDocument>(PROJECTS_COLLECTION), { ownerUserId: 1, updatedAt: -1 }, { name: 'growaf_projects_owner_updated' });
-  await ensureIndex(db.collection<ProjectRevisionDocument>(REVISIONS_COLLECTION), { _id: 1 }, { unique: true, name: 'growaf_revisions_id_unique' });
-  await ensureIndex(db.collection<ProjectRevisionDocument>(REVISIONS_COLLECTION), { ownerUserId: 1, projectId: 1, revision: -1 }, { name: 'growaf_revisions_owner_project_revision' });
-  await ensureIndex(db.collection<CalculationRunDocument>(CALCULATION_RUNS_COLLECTION), { _id: 1 }, { unique: true, name: 'growaf_calculations_id_unique' });
-  await ensureIndex(db.collection<CalculationRunDocument>(CALCULATION_RUNS_COLLECTION), { ownerUserId: 1, projectId: 1, createdAt: -1 }, { name: 'growaf_calculations_owner_project_created' });
+  await ensureIndex(db.collection<UserDocument>(USERS_COLLECTION), { _id: 1 }, { unique: true, name: 'growup_users_id_unique' });
+  await ensureIndex(db.collection<UserDocument>(USERS_COLLECTION), { email: 1 }, { unique: true, sparse: true, name: 'growup_users_email_unique' });
+  await ensureIndex(db.collection<ProjectDocument>(PROJECTS_COLLECTION), { _id: 1 }, { unique: true, name: 'growup_projects_id_unique' });
+  await ensureIndex(db.collection<ProjectDocument>(PROJECTS_COLLECTION), { ownerUserId: 1, updatedAt: -1 }, { name: 'growup_projects_owner_updated' });
+  await ensureIndex(db.collection<ProjectRevisionDocument>(REVISIONS_COLLECTION), { _id: 1 }, { unique: true, name: 'growup_revisions_id_unique' });
+  await ensureIndex(db.collection<ProjectRevisionDocument>(REVISIONS_COLLECTION), { ownerUserId: 1, projectId: 1, revision: -1 }, { name: 'growup_revisions_owner_project_revision' });
+  await ensureIndex(db.collection<CalculationRunDocument>(CALCULATION_RUNS_COLLECTION), { _id: 1 }, { unique: true, name: 'growup_calculations_id_unique' });
+  await ensureIndex(db.collection<CalculationRunDocument>(CALCULATION_RUNS_COLLECTION), { ownerUserId: 1, projectId: 1, createdAt: -1 }, { name: 'growup_calculations_owner_project_created' });
 }
 
-export async function getUser(id: string): Promise<GrowafUser | null> {
+export async function getUser(id: string): Promise<GrowupUser | null> {
   const document = await users().then((collection) => collection.findOne({ _id: id }));
   return document ? userFromDocument(document) : null;
 }
 
-export async function upsertUser(identity: GoogleIdentity): Promise<GrowafUser> {
+export async function upsertUser(identity: GoogleIdentity): Promise<GrowupUser> {
   const now = new Date().toISOString();
   const document = await users().then((collection) => collection.findOneAndUpdate(
     { _id: identity.subject },
@@ -168,7 +168,7 @@ export async function upsertUser(identity: GoogleIdentity): Promise<GrowafUser> 
     },
     { upsert: true, returnDocument: 'after' },
   ));
-  if (!document) throw new Error('The Growaf user profile could not be stored.');
+  if (!document) throw new Error('The Growup user profile could not be stored.');
   return userFromDocument(document);
 }
 
@@ -223,7 +223,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
   const normalized = normalizeProject(project);
   const collection = await projects();
   const existing = await collection.findOne({ _id: normalized.id });
-  if (existing && existing.ownerUserId !== ownerUserId) throw databaseError(403, 'PROJECT_OWNERSHIP_MISMATCH', 'This project belongs to another Growaf user.');
+  if (existing && existing.ownerUserId !== ownerUserId) throw databaseError(403, 'PROJECT_OWNERSHIP_MISMATCH', 'This project belongs to another Growup user.');
   const currentRevision = existing?.revision ?? existing?.state.revision ?? 0;
   const expectedRevision = normalized.revision ?? 0;
   if (existing?.contentHash && existing.contentHash === projectContentHash(normalized)) return normalizeProject(existing.state);
@@ -329,7 +329,7 @@ function sameKey(actual: Record<string, unknown>, expected: Record<string, 1 | -
   ));
 }
 
-function userFromDocument(document: UserDocument): GrowafUser {
+function userFromDocument(document: UserDocument): GrowupUser {
   return { id: document._id, email: document.email, name: document.name, pictureUrl: document.pictureUrl, locale: document.locale, createdAt: document.createdAt, updatedAt: document.updatedAt, lastLoginAt: document.lastLoginAt };
 }
 

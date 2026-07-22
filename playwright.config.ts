@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const externalBaseUrl = process.env.GROWAF_BASE_URL;
+const externalBaseUrl = process.env.GROWUP_BASE_URL;
 const baseURL = externalBaseUrl ?? 'http://127.0.0.1:52174';
 
 export default defineConfig({

@@ -32,13 +32,13 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await expect(page.locator('.catalogue-results')).toContainText('Olea europaea');
   await page.getByTestId('design-objectives').scrollIntoViewIfNeeded();
   await page.locator('.panel-body').evaluate((element) => { element.scrollTop = 140; });
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-objectives-species.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-objectives-species.png', fullPage: false });
 
   const generateButton = page.getByRole('button', { name: /Generate three evidence-scored designs/ });
   expect(await generateButton.evaluate((element) => window.getComputedStyle(element).position)).toBe('static');
   await generateButton.scrollIntoViewIfNeeded();
   await expect(generateButton).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-species-no-overlap.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-species-no-overlap.png', fullPage: false });
   const layoutResponse = page.waitForResponse((item) => item.url().endsWith('/api/layout/generate') && item.request().method() === 'POST');
   await generateButton.click();
   const generated = await layoutResponse;

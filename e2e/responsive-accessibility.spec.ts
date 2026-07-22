@@ -34,7 +34,7 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
 
   const overflow = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-mobile-layers.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-layers.png', fullPage: false });
 });
 
 test('keeps map, inspector and workflow navigation usable on a tablet viewport', async ({ page }) => {

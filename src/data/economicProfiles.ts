@@ -4,7 +4,7 @@ export const COST_SOURCES = {
   agricultureReference: {
     label: 'Published agricultural installation price reference',
     url: 'https://www.regione.sicilia.it/sites/default/files/2023-08/PREZZARIO%20REGIONALE%20AGRICOLTURA%202023.pdf',
-    version: '2023 published reference, normalized to the Growaf USD planning basket',
+    version: '2023 published reference, normalized to the Growup USD planning basket',
   },
   nurseryRetail: {
     label: 'Published nursery retail comparison',
@@ -65,7 +65,7 @@ export function defaultEconomicConfiguration(countryCode: string): EconomicConfi
   return convertedEconomicConfiguration(countryCode, 'USD', 1, {
     pricingStatus: 'usd-estimate',
     sourceSummary: 'Global USD planning estimate. A current exchange rate is applied after field analysis; replace rates with local quotes before procurement.',
-    sourceVersion: 'Growaf USD planning basket v1',
+    sourceVersion: 'Growup USD planning basket v1',
     sourceObservedAt: '2026-07-21T00:00:00.000Z',
     confidence: 'low',
   });

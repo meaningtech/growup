@@ -1,7 +1,7 @@
 import type { DesignSpecies, GrowthState, TreeInstance } from '../types';
 import { stableHash } from './geometry';
 
-export const GROWTH_MODEL_VERSION = 'growaf-growth-1.0.0';
+export const GROWTH_MODEL_VERSION = 'growup-growth-1.0.0';
 
 export function growthState(species: DesignSpecies, tree: TreeInstance, year: number): GrowthState {
   const age = Math.max(0, year - tree.plantedYear);

@@ -17,7 +17,7 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await expect(page.getByText('3 reproducible layouts generated.')).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole('button', { name: 'Ask AF' }).click();
-  await expect(page.getByRole('complementary', { name: 'Growaf AI assistant' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Growup AI assistant' })).toBeVisible();
   await page.getByRole('textbox', { name: 'Ask AF' }).fill(
     'Aggiungi Olea europaea alla selezione, rigenera i tre layout e ricalcola acqua e costi. Non rimuovere specie.',
   );
@@ -25,10 +25,10 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await expect(page.getByTestId('assistant-proposal')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText('Changes awaiting confirmation')).toBeVisible();
   await expect(page.getByText('Add Olive')).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-assistant.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-assistant.png', fullPage: false });
 
   await page.getByRole('button', { name: 'Apply validated changes' }).click();
-  await expect(page.getByText('AI proposal validated and applied to the Growaf project.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('AI proposal validated and applied to the Growup project.')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('assistant-proposal')).toHaveCount(0);
   await page.getByTestId('step-species').click();
   await expect(page.getByText('10 species selected across strata and succession phases.')).toBeVisible();

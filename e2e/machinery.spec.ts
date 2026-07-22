@@ -34,5 +34,5 @@ test('reserves editable machinery corridors and turning headlands in the generat
   expect(variants[0].machinery.turningAreas.length).toBeGreaterThan(0);
   await expect(page.getByTestId('machinery-plan')).toContainText('Machinery clearances reserved');
   await page.getByTestId('machinery-plan').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '/private/tmp/growaf-checkpoint-machinery.png', fullPage: false });
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-machinery.png', fullPage: false });
 });
