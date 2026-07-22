@@ -921,12 +921,17 @@ describe('Growup API integration', () => {
     const staticRoot = mkdtempSync(join(tmpdir(), 'growup-static-'));
     writeFileSync(join(staticRoot, 'index.html'), '<!doctype html><title>Growup production shell</title>');
     writeFileSync(join(staticRoot, 'asset.txt'), 'production asset');
+    writeFileSync(join(staticRoot, 'growup-social-card-v2.jpg'), 'social card');
     const app = createApp({ staticRoot, skipDatabaseMigration: true });
 
     try {
       const home = await request(app).get('/').expect(200);
       expect(home.text).toContain('Growup production shell');
-      await request(app).get('/asset.txt').expect(200, 'production asset');
+      const asset = await request(app).get('/asset.txt').expect(200, 'production asset');
+      expect(asset.headers['cross-origin-resource-policy']).toBe('same-origin');
+      const socialCard = await request(app).get('/growup-social-card-v2.jpg').expect(200);
+      expect(socialCard.body.toString()).toBe('social card');
+      expect(socialCard.headers['cross-origin-resource-policy']).toBe('cross-origin');
       const clientRoute = await request(app).get('/projects/demo').expect(200);
       expect(clientRoute.text).toContain('Growup production shell');
       const unknownApi = await request(app).get('/api/not-a-route').expect(404);

@@ -28,7 +28,7 @@ export function securityHeaders(request: Request, response: Response, next: Next
   response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.setHeader('X-Frame-Options', 'SAMEORIGIN');
   response.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-  response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  response.setHeader('Cross-Origin-Resource-Policy', isPublicSocialCard(request.path) ? 'cross-origin' : 'same-origin');
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), payment=(), usb=(), geolocation=(self)');
   response.setHeader('Content-Security-Policy', [
     "default-src 'self'",
@@ -49,6 +49,10 @@ export function securityHeaders(request: Request, response: Response, next: Next
     response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
+}
+
+function isPublicSocialCard(path: string): boolean {
+  return /^\/growup-social-card(?:-[a-z0-9]+)?\.(?:jpe?g|png|webp)$/i.test(path);
 }
 
 export function rateLimit(label: string, maximum: number, config: SecurityConfig = {}) {

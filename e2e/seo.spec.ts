@@ -32,6 +32,7 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   const image = await request.get('/growup-social-card-v2.jpg');
   expect(image.ok()).toBe(true);
   expect(image.headers()['content-type']).toContain('image/jpeg');
+  if (process.env.GROWUP_BASE_URL) expect(image.headers()['cross-origin-resource-policy']).toBe('cross-origin');
   const imageSize = (await image.body()).byteLength;
   expect(imageSize).toBeGreaterThan(50_000);
   expect(imageSize).toBeLessThan(500_000);
