@@ -12,6 +12,7 @@ import {
   Download,
   Droplets,
   FlaskConical,
+  Info,
   Layers3,
   Leaf,
   LoaderCircle,
@@ -207,6 +208,7 @@ export default function App() {
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [clearSiteOpen, setClearSiteOpen] = useState(false);
   const [projectName, setProjectName] = useState(() => readOnboardingPreference(window.localStorage)?.projectName ?? t('project.newTitle'));
   const [projectId, setProjectId] = useState(() => `growup-${crypto.randomUUID().slice(0, 8)}`);
@@ -1655,6 +1657,7 @@ export default function App() {
           {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
           <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
           <button className="button ghost tour-trigger" onClick={() => updateOnboarding('active', 'welcome')} title={t('onboarding.restart')}><MapIcon size={16} /> {t('onboarding.tour')}</button>
+          <button className="button ghost info-trigger" onClick={() => setInfoOpen(true)} title={t('info.open')}><Info size={16} /> {t('info.open')}</button>
           <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
           <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
           <button className="button ghost history-trigger" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
@@ -1825,6 +1828,8 @@ export default function App() {
         onClose={() => setAuthOpen(false)}
       />}
 
+      {infoOpen && <InfoPanel onClose={() => setInfoOpen(false)} />}
+
       {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
 
       {historyOpen && <ProjectHistoryPanel revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
@@ -1986,6 +1991,30 @@ function AuthPanel({ configured, clientId, locale, onCredential, onClose }: {
         )}
         {identityError && <div className="assistant-error"><strong>{t('auth.failed')}</strong><span>{identityError}</span></div>}
         <div className="auth-trust"><ShieldCheck size={15} /> {t('auth.trust')}</div>
+      </section>
+    </div>
+  );
+}
+
+function InfoPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+  const features = [
+    { icon: Satellite, title: t('info.readTitle'), body: t('info.readBody') },
+    { icon: TreePine, title: t('info.designTitle'), body: t('info.designBody') },
+    { icon: Droplets, title: t('info.buildTitle'), body: t('info.buildBody') },
+  ];
+  return (
+    <div className="info-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="info-panel" role="dialog" aria-modal="true" aria-labelledby="info-title" data-testid="info-panel">
+        <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>
+        <header><span className="info-mark"><Sprout size={24} /></span><small>{t('info.eyebrow')}</small><h2 id="info-title">{t('info.title')}</h2><p>{t('info.body')}</p></header>
+        <div className="info-features">{features.map(({ icon: Icon, title, body }, index) => <article key={title}><span><Icon size={17} /></span><small>0{index + 1}</small><h3>{title}</h3><p>{body}</p></article>)}</div>
+        <footer><ShieldCheck size={15} /><p>{t('info.disclaimer')}</p></footer>
       </section>
     </div>
   );

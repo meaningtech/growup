@@ -9,7 +9,19 @@ export type Locale = typeof SUPPORTED_LOCALES[number]['code'];
 type Dictionary = Record<string, string>;
 
 const en: Dictionary = {
-  'brand.tagline': 'evidence-led agroforestry',
+  'brand.tagline': 'data-driven agroforestry',
+  'info.open': 'Info',
+  'info.close': 'Close information',
+  'info.eyebrow': 'About GrowUp',
+  'info.title': 'Data driven agroforestry planning.',
+  'info.body': 'GrowUp turns a real field boundary into an evidence-backed plan that can be inspected, edited and costed before implementation.',
+  'info.readTitle': 'Read the land',
+  'info.readBody': 'Terrain, historical climate, soil, solar exposure and Sentinel observations are clipped to the selected field.',
+  'info.designTitle': 'Design the system',
+  'info.designBody': 'Suitable species, succession, planting geometry, existing vegetation and optional machinery access are planned together.',
+  'info.buildTitle': 'Prepare implementation',
+  'info.buildBody': 'Editable irrigation lines, hydraulic requirements, procurement quantities, labour and long-term costs form one project.',
+  'info.disclaimer': 'GrowUp supports planning decisions. Field surveys, soil tests, water-source verification and local professional review remain required before execution.',
   'project.title': 'Contrada field system',
   'project.noField': 'New planning workspace',
   'project.activeField': 'Active field project',
@@ -1074,7 +1086,19 @@ const en: Dictionary = {
 };
 
 const it: Dictionary = {
-  'brand.tagline': 'agroforestazione basata su evidenze',
+  'brand.tagline': 'agroforestazione data-driven',
+  'info.open': 'Info',
+  'info.close': 'Chiudi informazioni',
+  'info.eyebrow': 'Cos’è GrowUp',
+  'info.title': 'Progettazione agroforestale guidata dai dati.',
+  'info.body': 'GrowUp trasforma il confine reale di un terreno in un progetto basato su evidenze, controllabile, modificabile e stimabile prima dell’esecuzione.',
+  'info.readTitle': 'Leggi il terreno',
+  'info.readBody': 'Altimetria, clima storico, suolo, irraggiamento e osservazioni Sentinel vengono ritagliati sul terreno selezionato.',
+  'info.designTitle': 'Progetta il sistema',
+  'info.designBody': 'Specie adatte, successione, geometria d’impianto, vegetazione esistente e accesso opzionale dei mezzi vengono pianificati insieme.',
+  'info.buildTitle': 'Prepara la realizzazione',
+  'info.buildBody': 'Linee irrigue modificabili, requisiti idraulici, quantità di acquisto, manodopera e costi nel tempo formano un unico progetto.',
+  'info.disclaimer': 'GrowUp supporta le decisioni di progetto. Prima dell’esecuzione restano necessari rilievi sul campo, analisi del suolo, verifica della fonte idrica e controllo di professionisti locali.',
   'project.title': 'Sistema agricolo di Contrada',
   'project.noField': 'Nuova area di progettazione',
   'project.activeField': 'Progetto terreno attivo',

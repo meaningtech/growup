@@ -1,12 +1,12 @@
-# Growup
+# GrowUp
 
-> Growup turns field evidence into practical agroforestry, irrigation and long-term cost plans.
+> GrowUp provides data driven agroforestry planning from field evidence to practical planting, irrigation and long-term cost plans.
 
-Growup analyses a user-defined field boundary with terrain, historical climate, soil and Sentinel evidence. It ranks suitable species, generates reproducible planting systems, protects existing vegetation, designs editable irrigation networks and estimates establishment and operating costs. Plans remain preliminary until field surveys, soil tests, water-source verification and local professional review are complete.
+GrowUp analyses a user-defined field boundary with terrain, historical climate, soil and Sentinel evidence. It ranks suitable species, generates reproducible planting systems, protects existing vegetation, designs editable irrigation networks and estimates establishment and operating costs. Plans remain preliminary until field surveys, soil tests, water-source verification and local professional review are complete.
 
 ## Product
 
-- [Growup planning workspace](https://growup.earth/)
+- [GrowUp planning workspace](https://growup.earth/)
 - [Machine-readable sitemap](https://growup.earth/sitemap.xml)
 - [Service health](https://growup.earth/api/health)
 

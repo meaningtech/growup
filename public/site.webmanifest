@@ -1,7 +1,7 @@
 {
-  "name": "Growup — Evidence-led agroforestry planning",
-  "short_name": "Growup",
-  "description": "Turn field evidence into species, planting, irrigation and long-term cost plans.",
+  "name": "GrowUp- Data driven agroforestry planning",
+  "short_name": "GrowUp",
+  "description": "Turn terrain, climate, soil and satellite evidence into species, planting, irrigation and long-term cost plans.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

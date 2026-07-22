@@ -4,13 +4,14 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   const page = await request.get('/');
   expect(page.ok()).toBe(true);
   const html = await page.text();
-  expect(html).toContain('<title>Growup — Evidence-led agroforestry planning</title>');
+  expect(html).toContain('<title>GrowUp- Data driven agroforestry planning</title>');
   expect(html).toContain('<link rel="canonical" href="https://growup.earth/"');
   expect(html).toContain('property="og:image" content="https://growup.earth/growup-social-card.jpg"');
   expect(html).toContain('property="og:image:type" content="image/jpeg"');
   expect(html).toContain('name="twitter:card" content="summary_large_image"');
   expect(html).toContain('name="twitter:site" content="@turinglabsorg"');
-  expect(html).toContain('<h1>Evidence-led agroforestry planning</h1>');
+  expect(html).toContain('<h1>Data driven agroforestry planning</h1>');
+  expect(html).toContain('<h2 id="seo-about-title">From field boundary to buildable plan</h2>');
   expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180"');
   expect(html).toContain('<link rel="manifest" href="/site.webmanifest"');
   expect(html).toContain('type="application/ld+json"');
@@ -26,7 +27,7 @@ test('serves indexable metadata, crawler files and the social sharing image', as
 
   const llms = await request.get('/llms.txt');
   expect(llms.ok()).toBe(true);
-  expect(await llms.text()).toContain('# Growup');
+  expect(await llms.text()).toContain('# GrowUp');
 
   const image = await request.get('/growup-social-card.jpg');
   expect(image.ok()).toBe(true);
@@ -46,5 +47,25 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   const manifest = await request.get('/site.webmanifest');
   expect(manifest.ok()).toBe(true);
   expect(manifest.headers()['content-type']).toMatch(/manifest\+json|application\/json/);
-  expect(await manifest.json()).toMatchObject({ short_name: 'Growup', start_url: '/' });
+  expect(await manifest.json()).toMatchObject({ name: 'GrowUp- Data driven agroforestry planning', short_name: 'GrowUp', start_url: '/' });
+});
+
+test('keeps product information behind an explicit control', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await expect(page.getByTestId('info-panel')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Info' }).click();
+  const panel = page.getByTestId('info-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Data driven agroforestry planning.' })).toBeVisible();
+  await expect(panel).toContainText('Read the land');
+  await expect(panel).toContainText('Design the system');
+  await expect(panel).toContainText('Prepare implementation');
+  const bounds = await panel.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: testInfo.outputPath('growup-info-mobile.png'), fullPage: false });
+  await panel.getByRole('button', { name: 'Close information' }).click();
+  await expect(panel).toHaveCount(0);
 });
