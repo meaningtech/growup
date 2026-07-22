@@ -21,6 +21,7 @@
 - `server/economics.ts` resolves one global USD planning basket through a live country-to-currency mapping and USD exchange table. Never add country-specific pricing branches; local rates are explicit user overrides.
 - `server/export.ts` is the only project export composer. GeoJSON and CSV output must remain deterministic for the same stored project and include calculation/model metadata without credentials or private identity data.
 - The production container is a two-stage Node 20 image. Cloud Run injects PostGIS, Mongo, Maps, OAuth, AI and session credentials through environment variables or Secret Manager; no deployment secret belongs in the image.
+- Production runs as Cloud Run service `growup` in `europe-west1` with the dedicated `growup-runtime` service account and `growup-*` secrets. It intentionally mounts the existing Cloud SQL instance whose immutable technical resource name is `growaf-postgis`; do not duplicate or rename that data service during brand changes.
 
 ## API surface
 
