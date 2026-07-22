@@ -41,6 +41,7 @@ const testUser: GrowupUser = {
   createdAt: observedAt,
   updatedAt: observedAt,
   lastLoginAt: observedAt,
+  preferences: {},
 };
 const testAuth = {
   googleOAuthClientId: 'growup-test.apps.googleusercontent.com',
@@ -347,13 +348,19 @@ describe('Growup API integration', () => {
 
   it('generates a protected layout, calculates costs, persists it and exports evidence geometry', async () => {
     let stored: ProjectState | null = null;
+    let storedUser = testUser;
     const revisionStates: ProjectState[] = [];
     const calculationRuns = new Map<string, ReturnType<typeof buildRevisionArtifacts>['calculation']>();
     const database: NonNullable<GrowupAppConfig['database']> = {
       health: async () => true,
       geometryMetrics: async () => geometryValidation,
-      getUser: async (id) => id === testUser.id ? testUser : null,
-      upsertUser: async () => testUser,
+      getUser: async (id) => id === testUser.id ? storedUser : null,
+      upsertUser: async () => storedUser,
+      updateUserOnboarding: async (id, preference) => {
+        expect(id).toBe(testUser.id);
+        storedUser = { ...storedUser, preferences: { ...storedUser.preferences, onboarding: preference } };
+        return storedUser;
+      },
       getProject: async (ownerUserId, id) => ownerUserId === testUser.id && stored?.id === id ? stored : null,
       listProjects: async (ownerUserId) => ownerUserId === testUser.id && stored ? [{ id: stored.id, name: stored.name, updatedAt: stored.updatedAt }] : [],
       listProjectRevisions: async (ownerUserId, projectId) => ownerUserId === testUser.id && projectId === stored?.id
@@ -394,6 +401,13 @@ describe('Growup API integration', () => {
     expect(login.body.user.email).toBe(testUser.email);
     const session = await request(app).get('/api/auth/session').set('Cookie', sessionCookie).expect(200);
     expect(session.body).toEqual(expect.objectContaining({ authenticated: true, user: expect.objectContaining({ id: testUser.id }) }));
+    const onboardingPreference = { status: 'active', step: 'boundary', updatedAt: '2026-07-22T09:00:00.000Z' };
+    const onboarding = await request(app).put('/api/user/preferences/onboarding').set('Cookie', sessionCookie).send(onboardingPreference).expect(200);
+    expect(onboarding.body.preferences.onboarding).toEqual(onboardingPreference);
+    const persistedOnboarding = await request(app).get('/api/auth/session').set('Cookie', sessionCookie).expect(200);
+    expect(persistedOnboarding.body.user.preferences.onboarding).toEqual(onboardingPreference);
+    await request(app).put('/api/user/preferences/onboarding').set('Cookie', sessionCookie).send({ status: 'active', step: 'unknown', updatedAt: observedAt }).expect(400);
+    await request(app).put('/api/user/preferences/onboarding').send(onboardingPreference).expect(401);
 
     const profile = siteProfile();
     const recommendationResponse = await request(app)
@@ -626,6 +640,7 @@ describe('Growup API integration', () => {
         geometryMetrics: async () => geometryValidation,
         getUser: async (id) => id === testUser.id ? testUser : null,
         upsertUser: async () => testUser,
+        updateUserOnboarding: async (_id, preference) => ({ ...testUser, preferences: { onboarding: preference } }),
         getProject: async () => null,
         listProjects: async () => [],
         listProjectRevisions: async () => [],

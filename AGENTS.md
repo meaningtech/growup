@@ -26,7 +26,7 @@
 
 ## API surface
 
-- Runtime/auth: `GET /api/health`, `GET /api/config`, `GET /api/auth/session`, `POST /api/auth/google`, `POST /api/auth/logout`.
+- Runtime/auth: `GET /api/health`, `GET /api/config`, `GET /api/auth/session`, `POST /api/auth/google`, `POST /api/auth/logout`, `PUT /api/user/preferences/onboarding`.
 - Site/data: `GET /api/locations/search`, `POST /api/site/validate`, `POST /api/site/profile`, `POST /api/site/profile/override`, `POST /api/geometry/metrics`.
 - Species/design: `GET /api/catalog/stats`, `GET /api/catalog/search`, `GET /api/design-species`, `POST /api/recommendations`, `POST /api/layout/generate`, `POST /api/layout/regenerate`.
 - Water/cost: `POST /api/irrigation/calculate`, `POST /api/costs/calculate`.
@@ -45,12 +45,15 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - `LayoutVariant.machinery` records exact corridor centre lines, required widths, turning areas and clearance results. Planned trees, machinery, irrigation, boundary, constraints, infrastructure and evidence overlays are independently switchable map layers.
 - Machinery-space reservation is opt-in. `DEFAULT_MACHINERY_CONFIGURATION.enabled` and normalization of omitted machinery input must remain `false`; only an explicit user action may reserve corridors and turning headlands.
 - Every authenticated save appends an immutable project revision and, when calculated results exist, an immutable calculation run. Use optimistic revision checks; never overwrite revision history or embed an unbounded history array in the current project document.
+- First-run onboarding is skippable and resumable. Keep its latest checkpoint and project name in `growup:onboarding:v1`; authenticated users also sync the same bounded preference into their existing `growup_users` document. The tour must guide the real site, evidence, species, layout, water and cost actions rather than simulating a separate workflow.
 - Site-profile overrides require a value, reason, source label, observation date and immutable audit entry; recalculated suitability must consume the overridden profile rather than mutating provider evidence.
 - `GrowthState` exposes deterministic low/base/high height and crown estimates plus model version, hierarchy and confidence. Zero values outside the active planting/removal interval are intentional.
 - `IrrigationConfiguration` includes source, flow, pressure, emitter, distribution-efficiency, operating-window and manual line-override inputs. `IrrigationNetworkPlan` must preserve source placement, editable geometry, obstacle routing, head/flow checks, measured versus purchase pipe quantities and the component bill of materials.
 - Economic values use `EconomicConfiguration.baseCurrencyCode = USD`; displayed currency is a conversion estimate unless the user supplies local rates. Syntropic operating curves may decline with succession, while establishment CAPEX remains a historical total.
 - Printable operational schedules must derive plant counts, labour, irrigation procurement, monthly demand, machinery reserves and evidence records from the selected generated design; never introduce placeholder quantities.
 - Sentinel-1 output is a same-orbit backscatter anomaly, not volumetric soil moisture. Keep this distinction in UI, API and exports.
+- Mobile map controls must remain below Google map-type controls, coach panels and toasts must remain above the safe-area bottom navigation, and the desktop map/inspector split must collapse without horizontal overflow at 820 px and below.
+- Public metadata uses `https://growup.earth/` as the canonical URL. Keep Open Graph/Twitter metadata, `public/growup-social-card.png` at 1200×630, `robots.txt`, `sitemap.xml`, and `llms.txt` aligned whenever the public product description changes.
 
 ## Verification
 

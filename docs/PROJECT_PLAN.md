@@ -860,11 +860,11 @@ Store:
 - Water sources, available flow, pressure, capacity, and quality notes.
 - Irrigation zones and included tree IDs.
 - Emitter scenario per zone.
-- Main/submain/lateral placeholder geometries.
+- Measured and user-editable main, submain, lateral and protected-crossing geometries.
 - Daily schedule results and annual summary.
 - Calculation version and all input assumptions.
 
-The layout engine reserves service paths and can prefer shorter zone runs, but hydraulic network optimization is a later engine behind a separate contract.
+The hydraulic engine routes visible pipe classes around mapped obstacles, recalculates edited vertices and the movable source, checks flow and head, and separates measured from purchase quantities. Field pressure tests, source yield and supplier validation remain execution requirements.
 
 ## 14. Technical architecture
 
@@ -1115,6 +1115,7 @@ Use Playwright or Chrome DevTools MCP:
 9. Configure irrigation inputs and verify the visible audit trail.
 10. Export and re-import GeoJSON.
 11. Verify tablet review and mobile field-inspection modes.
+12. Complete, skip, resume and restart the guided first-project onboarding on anonymous and authenticated sessions.
 
 Capture screenshots for the main workflow, error states, and selected timeline years.
 

@@ -20,6 +20,17 @@ export type GoogleIdentity = {
   locale: string | null;
 };
 
+export type OnboardingPreference = {
+  status: 'active' | 'skipped' | 'completed';
+  step: 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'complete';
+  updatedAt: string;
+  projectName?: string;
+};
+
+export type GrowupUserPreferences = {
+  onboarding?: OnboardingPreference;
+};
+
 export type GrowupUser = {
   id: string;
   email: string;
@@ -29,6 +40,7 @@ export type GrowupUser = {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string;
+  preferences: GrowupUserPreferences;
 };
 
 export type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
@@ -38,6 +50,7 @@ export type GrowupDatabase = {
   geometryMetrics: (site: SiteBoundary) => Promise<SiteValidation>;
   getUser: (id: string) => Promise<GrowupUser | null>;
   upsertUser: (identity: GoogleIdentity) => Promise<GrowupUser>;
+  updateUserOnboarding: (id: string, preference: OnboardingPreference) => Promise<GrowupUser>;
   getProject: (ownerUserId: string, id: string) => Promise<ProjectState | null>;
   listProjects: (ownerUserId: string) => Promise<ProjectSummary[]>;
   listProjectRevisions: (ownerUserId: string, projectId: string) => Promise<ProjectRevisionSummary[]>;
@@ -169,6 +182,17 @@ export async function upsertUser(identity: GoogleIdentity): Promise<GrowupUser> 
     { upsert: true, returnDocument: 'after' },
   ));
   if (!document) throw new Error('The Growup user profile could not be stored.');
+  return userFromDocument(document);
+}
+
+export async function updateUserOnboarding(id: string, preference: OnboardingPreference): Promise<GrowupUser> {
+  const now = new Date().toISOString();
+  const document = await users().then((collection) => collection.findOneAndUpdate(
+    { _id: id },
+    { $set: { 'preferences.onboarding': preference, updatedAt: now } },
+    { returnDocument: 'after' },
+  ));
+  if (!document) throw databaseError(404, 'USER_NOT_FOUND', 'The Growup user profile was not found.');
   return userFromDocument(document);
 }
 
@@ -330,7 +354,7 @@ function sameKey(actual: Record<string, unknown>, expected: Record<string, 1 | -
 }
 
 function userFromDocument(document: UserDocument): GrowupUser {
-  return { id: document._id, email: document.email, name: document.name, pictureUrl: document.pictureUrl, locale: document.locale, createdAt: document.createdAt, updatedAt: document.updatedAt, lastLoginAt: document.lastLoginAt };
+  return { id: document._id, email: document.email, name: document.name, pictureUrl: document.pictureUrl, locale: document.locale, createdAt: document.createdAt, updatedAt: document.updatedAt, lastLoginAt: document.lastLoginAt, preferences: document.preferences ?? {} };
 }
 
 function normalizeProject(project: ProjectState): ProjectState {

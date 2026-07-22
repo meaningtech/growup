@@ -31,8 +31,10 @@ test('loads the real optional Google sign-in client without exposing server cred
   await expect(dialog.getByText('Only your verified Google identity and Growup projects are stored.')).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-google-login.png', fullPage: false });
 
+  const frameBounds = await googleFrame.boundingBox();
+  expect(frameBounds).not.toBeNull();
   const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('button', { name: /Continue with Google/ }).click();
+  await page.mouse.click(frameBounds!.x + frameBounds!.width / 2, frameBounds!.y + frameBounds!.height / 2);
   const popup = await popupPromise;
   await expect(popup).toHaveURL(/accounts\.google\.com/);
   await popup.close();

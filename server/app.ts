@@ -36,7 +36,9 @@ import {
   listProjects,
   mongoHealth,
   saveProject,
+  updateUserOnboarding,
   upsertUser,
+  type OnboardingPreference,
   type GrowupDatabase,
 } from './mongo.js';
 import { buildSiteProfile, searchLocations, type SiteProviderConfig } from './site.js';
@@ -54,6 +56,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     geometryMetrics,
     getUser,
     upsertUser,
+    updateUserOnboarding,
     getProject,
     listProjects,
     listProjectRevisions,
@@ -104,6 +107,13 @@ export function createApp(config: GrowupAppConfig = {}) {
   app.post('/api/auth/logout', (_req: Request, res: Response) => {
     setSessionResponseCookie(res, clearSessionCookie());
     res.json({ authenticated: false, user: null });
+  });
+
+  app.put('/api/user/preferences/onboarding', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      return database.updateUserOnboarding(user.id, requireOnboardingPreference(req.body));
+    });
   });
 
   app.get('/api/assistant/status', (_req: Request, res: Response) => res.json(assistantStatus(config)));
@@ -429,6 +439,20 @@ function requireSpecies(value: unknown) {
 function requireProject(value: unknown): ProjectState {
   if (!value || typeof value !== 'object' || !('id' in value) || !('site' in value)) throw httpError(400, 'INVALID_PROJECT', 'A complete project is required');
   return value as ProjectState;
+}
+
+function requireOnboardingPreference(value: unknown): OnboardingPreference {
+  if (!value || typeof value !== 'object') throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'An onboarding preference is required.');
+  const preference = value as Partial<OnboardingPreference>;
+  const statuses = ['active', 'skipped', 'completed'];
+  const steps = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'complete'];
+  if (!statuses.includes(String(preference.status)) || !steps.includes(String(preference.step)) || Number.isNaN(Date.parse(String(preference.updatedAt)))) {
+    throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'The onboarding preference is invalid.');
+  }
+  if (preference.projectName !== undefined && (typeof preference.projectName !== 'string' || preference.projectName.length > 120)) {
+    throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'The onboarding project name is invalid.');
+  }
+  return { status: preference.status!, step: preference.step!, updatedAt: preference.updatedAt!, ...(preference.projectName ? { projectName: preference.projectName } : {}) };
 }
 
 function requireAssistantContext(value: unknown): AssistantProjectContext {

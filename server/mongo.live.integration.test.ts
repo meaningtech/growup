@@ -20,6 +20,7 @@ import {
   mongoDatabase,
   mongoHealth,
   saveProject,
+  updateUserOnboarding,
   upsertUser,
 } from './mongo.js';
 
@@ -49,7 +50,7 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, getProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
+    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, updateUserOnboarding, getProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
     const app = createApp({
       database,
       skipDatabaseMigration: true,

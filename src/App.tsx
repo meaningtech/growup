@@ -61,6 +61,15 @@ import {
 import { coordinateFromLatLng, coordinatesFromPath, loadGoogleMaps, sitePreviewBounds } from './googleMaps';
 import { renderGoogleSignIn } from './googleIdentity';
 import { SUPPORTED_LOCALES, useI18n, type Locale } from './i18n';
+import {
+  latestOnboardingPreference,
+  newOnboardingPreference,
+  normalizeOnboardingPreference,
+  readOnboardingPreference,
+  writeOnboardingPreference,
+  type OnboardingPreference,
+  type OnboardingStep,
+} from './onboarding';
 import type {
   AssistantAction,
   AssistantProjectContext,
@@ -108,6 +117,7 @@ type AuthUser = {
   name: string;
   pictureUrl: string | null;
   locale: string | null;
+  preferences: { onboarding?: OnboardingPreference };
 };
 
 type AuthSession = { authenticated: boolean; configured: boolean; user: AuthUser | null };
@@ -195,7 +205,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [clearSiteOpen, setClearSiteOpen] = useState(false);
-  const [projectName, setProjectName] = useState(() => t('project.newTitle'));
+  const [projectName, setProjectName] = useState(() => readOnboardingPreference(window.localStorage)?.projectName ?? t('project.newTitle'));
   const [projectId, setProjectId] = useState(() => `growup-${crypto.randomUUID().slice(0, 8)}`);
   const [projectRevision, setProjectRevision] = useState(0);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -204,6 +214,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<ProjectState | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingPreference | null>(() => readOnboardingPreference(window.localStorage) ?? newOnboardingPreference());
   const createdAtRef = useRef(new Date().toISOString());
   const projectRevisionRef = useRef(0);
   const dirtySerialRef = useRef(0);
@@ -228,7 +239,7 @@ export default function App() {
   const siteUndoRef = useRef<Array<SiteBoundary | null>>([]);
   const siteRedoRef = useRef<Array<SiteBoundary | null>>([]);
   const recommendationObjectiveRef = useRef(JSON.stringify(DEFAULT_DESIGN_CONFIGURATION.objectives));
-  const projectNameEditedRef = useRef(false);
+  const projectNameEditedRef = useRef(Boolean(readOnboardingPreference(window.localStorage)?.projectName));
 
   const selectedVariant = useMemo(
     () => variants.find((variant) => variant.id === selectedVariantId) ?? variants[0] ?? null,
@@ -245,7 +256,21 @@ export default function App() {
       .then(([appConfig, stats, session]) => {
         setConfig(appConfig);
         setCatalogueStats(stats);
+        const localOnboarding = readOnboardingPreference(window.localStorage);
+        const remoteOnboarding = normalizeOnboardingPreference(session.user?.preferences?.onboarding);
+        const resolvedOnboarding = latestOnboardingPreference(localOnboarding, remoteOnboarding) ?? newOnboardingPreference();
         setAuthUser(session.user);
+        setOnboarding(resolvedOnboarding);
+        if (resolvedOnboarding.projectName) {
+          projectNameEditedRef.current = true;
+          setProjectName(resolvedOnboarding.projectName);
+        }
+        writeOnboardingPreference(window.localStorage, resolvedOnboarding);
+        if (session.user && resolvedOnboarding.updatedAt !== remoteOnboarding?.updatedAt) {
+          void api<AuthUser>('/api/user/preferences/onboarding', put(resolvedOnboarding))
+            .then(setAuthUser)
+            .catch((syncError) => setError(messageOf(syncError)));
+        }
         if (session.user) void refreshProjects();
         setBusy(null);
       })
@@ -265,6 +290,15 @@ export default function App() {
       window.localStorage.removeItem('growup:draft:v2');
     }
   }, []);
+
+  useEffect(() => {
+    if (!onboarding) return;
+    try {
+      writeOnboardingPreference(window.localStorage, onboarding);
+    } catch {
+      setError(t('onboarding.storageError'));
+    }
+  }, [onboarding, t]);
 
   useEffect(() => {
     if (!site) return;
@@ -290,6 +324,23 @@ export default function App() {
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
   }, [locale, t]);
+
+  useEffect(() => {
+    if (onboarding?.status !== 'active') return;
+    if (onboarding.step === 'boundary' && site) {
+      updateOnboarding('active', 'analysis');
+      setSection('site');
+    } else if (onboarding.step === 'analysis' && siteProfile) {
+      updateOnboarding('active', 'species');
+      setSection('species');
+    } else if (onboarding.step === 'species' && selectedVariant) {
+      updateOnboarding('active', 'design');
+      setSection('layout');
+    } else if (onboarding.step === 'design' && irrigation && costs) {
+      updateOnboarding('active', 'complete');
+      setSection('costs');
+    }
+  }, [onboarding?.status, onboarding?.step, site, siteProfile, selectedVariant, irrigation, costs]);
 
   useEffect(() => {
     if (!irrigation || irrigation.designYear === timelineYear || !site || !siteProfile || !selectedVariant) return;
@@ -1185,6 +1236,44 @@ export default function App() {
     }
   }
 
+  function updateOnboarding(status: OnboardingPreference['status'], step: OnboardingStep, syncUser = authUser, projectNameOverride = projectName) {
+    const preference: OnboardingPreference = { status, step, updatedAt: new Date().toISOString(), ...(projectNameOverride.trim() ? { projectName: projectNameOverride.trim() } : {}) };
+    setOnboarding(preference);
+    try {
+      writeOnboardingPreference(window.localStorage, preference);
+    } catch {
+      setError(t('onboarding.storageError'));
+    }
+    if (syncUser) {
+      void api<AuthUser>('/api/user/preferences/onboarding', put(preference))
+        .then((user) => setAuthUser((current) => current?.id === user.id ? user : current))
+        .catch((syncError) => setError(messageOf(syncError)));
+    }
+  }
+
+  function startOnboarding(name: string) {
+    const nextName = name.trim() || t('project.newTitle');
+    projectNameEditedRef.current = true;
+    setProjectName(nextName);
+    const nextStep: OnboardingStep = !site
+      ? 'location'
+      : !siteProfile
+        ? 'analysis'
+        : !selectedVariant
+          ? 'species'
+          : !irrigation || !costs
+            ? 'design'
+            : 'complete';
+    updateOnboarding('active', nextStep, authUser, nextName);
+    setSection(nextStep === 'species' ? 'species' : nextStep === 'design' ? 'layout' : nextStep === 'complete' ? 'costs' : 'site');
+  }
+
+  function beginOnboardingBoundary() {
+    setSection('site');
+    activateDrawMode('site');
+    updateOnboarding('active', 'boundary');
+  }
+
   function currentProjectState(updatedAt: string): ProjectState | null {
     if (!site) return null;
     return {
@@ -1324,10 +1413,23 @@ export default function App() {
   async function authenticateGoogle(credential: string) {
     await runBusy(t('auth.signingIn'), async () => {
       const session = await api<{ authenticated: true; user: AuthUser }>('/api/auth/google', post({ credential }));
-      setAuthUser(session.user);
+      const localOnboarding = readOnboardingPreference(window.localStorage);
+      const remoteOnboarding = normalizeOnboardingPreference(session.user.preferences?.onboarding);
+      const resolvedOnboarding = latestOnboardingPreference(localOnboarding, remoteOnboarding) ?? newOnboardingPreference();
+      let user = session.user;
+      if (resolvedOnboarding.updatedAt !== remoteOnboarding?.updatedAt) {
+        user = await api<AuthUser>('/api/user/preferences/onboarding', put(resolvedOnboarding));
+      }
+      setAuthUser(user);
+      setOnboarding(resolvedOnboarding);
+      if (resolvedOnboarding.projectName && !site) {
+        projectNameEditedRef.current = true;
+        setProjectName(resolvedOnboarding.projectName);
+      }
+      writeOnboardingPreference(window.localStorage, resolvedOnboarding);
       setAuthOpen(false);
       await refreshProjects();
-      setNotice(t('auth.signedIn', { name: session.user.name }));
+      setNotice(t('auth.signedIn', { name: user.name }));
     });
   }
 
@@ -1489,9 +1591,9 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
       <header className="topbar">
-        <button className="brand" onClick={() => setSection('site')} aria-label={t('nav.home')}>
+        <button className="brand" onClick={() => setSection('site')} aria-label={`${t('nav.home')} · growup · ${t('brand.tagline')}`}>
           <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
           <span><strong>growup</strong><small>{t('brand.tagline')}</small></span>
         </button>
@@ -1517,11 +1619,12 @@ export default function App() {
           {authUser && projects.length > 0 && <label className="project-select"><span className="visually-hidden">{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => void openProject(event.target.value)}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
           {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
           <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
+          <button className="button ghost tour-trigger" onClick={() => updateOnboarding('active', 'welcome')} title={t('onboarding.restart')}><MapIcon size={16} /> {t('onboarding.tour')}</button>
           <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
           <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
-          <button className="button ghost" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
-          <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
-          <a className={`button ghost ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
+          <button className="button ghost history-trigger" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
+          <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
+          <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
           {authUser ? (
             <button className="user-chip" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
               {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
@@ -1645,6 +1748,25 @@ export default function App() {
         </section>
       </main>
 
+      {onboarding?.status === 'active' && <OnboardingTour
+        preference={onboarding}
+        projectName={projectName}
+        onProjectName={setProjectName}
+        draftPointCount={draftPoints.length}
+        siteReady={Boolean(site)}
+        analysisReady={Boolean(site && siteValidation?.valid)}
+        designReady={selectedSpeciesIds.length >= (designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2)}
+        onStart={startOnboarding}
+        onBoundary={beginOnboardingBoundary}
+        onFinishBoundary={finishDraft}
+        onAnalyse={analyzeSite}
+        onGenerate={generateDesign}
+        onCalculate={calculateWaterAndCosts}
+        onViewCosts={() => setSection('costs')}
+        onSkip={() => updateOnboarding('skipped', onboarding.step)}
+        onComplete={() => updateOnboarding('completed', 'complete')}
+      />}
+
       {assistantOpen && config && <AssistantPanel
         configured={config.assistant.configured}
         input={assistantInput}
@@ -1692,6 +1814,84 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function OnboardingTour({
+  preference,
+  projectName,
+  onProjectName,
+  draftPointCount,
+  siteReady,
+  analysisReady,
+  designReady,
+  onStart,
+  onBoundary,
+  onFinishBoundary,
+  onAnalyse,
+  onGenerate,
+  onCalculate,
+  onViewCosts,
+  onSkip,
+  onComplete,
+}: {
+  preference: OnboardingPreference;
+  projectName: string;
+  onProjectName: (value: string) => void;
+  draftPointCount: number;
+  siteReady: boolean;
+  analysisReady: boolean;
+  designReady: boolean;
+  onStart: (name: string) => void;
+  onBoundary: () => void;
+  onFinishBoundary: () => void;
+  onAnalyse: () => void;
+  onGenerate: () => void;
+  onCalculate: () => void;
+  onViewCosts: () => void;
+  onSkip: () => void;
+  onComplete: () => void;
+}) {
+  const { t } = useI18n();
+  const order: OnboardingStep[] = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'complete'];
+  const stepIndex = Math.max(0, order.indexOf(preference.step));
+  const content = {
+    welcome: { title: t('onboarding.welcomeTitle'), body: t('onboarding.welcomeBody') },
+    location: { title: t('onboarding.locationTitle'), body: t('onboarding.locationBody') },
+    boundary: { title: t('onboarding.boundaryTitle'), body: t('onboarding.boundaryBody') },
+    analysis: { title: t('onboarding.analysisTitle'), body: t('onboarding.analysisBody') },
+    species: { title: t('onboarding.speciesTitle'), body: t('onboarding.speciesBody') },
+    design: { title: t('onboarding.designTitle'), body: t('onboarding.designBody') },
+    complete: { title: t('onboarding.completeTitle'), body: t('onboarding.completeBody') },
+  }[preference.step];
+
+  if (preference.step === 'welcome') {
+    return <div className="onboarding-backdrop" data-testid="onboarding-tour" onMouseDown={(event) => event.target === event.currentTarget && onSkip()}>
+      <section className="onboarding-welcome" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <button className="onboarding-close" aria-label={t('onboarding.skip')} onClick={onSkip}><X size={18} /></button>
+        <span className="onboarding-mark"><Sprout size={26} /></span>
+        <small>{t('onboarding.eyebrow')}</small>
+        <h2 id="onboarding-title">{content.title}</h2>
+        <p>{content.body}</p>
+        <label><span>{t('project.nameLabel')}</span><input value={projectName} maxLength={120} onChange={(event) => onProjectName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && projectName.trim() && onStart(projectName)} /></label>
+        <div className="onboarding-actions"><button onClick={onSkip}>{t('onboarding.skip')}</button><button className="primary" disabled={!projectName.trim()} onClick={() => onStart(projectName)}>{t('onboarding.start')}<ChevronRight size={17} /></button></div>
+        <span className="onboarding-promise"><ShieldCheck size={14} />{t('onboarding.persistence')}</span>
+      </section>
+    </div>;
+  }
+
+  return <aside className={`onboarding-coach step-${preference.step}`} data-testid="onboarding-tour" role="dialog" aria-labelledby="onboarding-coach-title">
+    <header><span>{t('onboarding.progress', { current: stepIndex + 1, total: order.length })}</span><button aria-label={t('onboarding.skip')} onClick={onSkip}><X size={16} /></button></header>
+    <div className="onboarding-progress" aria-hidden="true"><i style={{ width: `${((stepIndex + 1) / order.length) * 100}%` }} /></div>
+    <h2 id="onboarding-coach-title">{content.title}</h2>
+    <p>{content.body}</p>
+    {preference.step === 'location' && <button className="onboarding-primary" onClick={onBoundary}>{t('onboarding.drawBoundary')}<ChevronRight size={16} /></button>}
+    {preference.step === 'boundary' && <button className="onboarding-primary" disabled={draftPointCount < 3 && !siteReady} onClick={onFinishBoundary}>{siteReady ? t('onboarding.boundaryReady') : t('onboarding.finishBoundary', { count: draftPointCount })}<Check size={16} /></button>}
+    {preference.step === 'analysis' && <button className="onboarding-primary" disabled={!analysisReady} onClick={onAnalyse}>{analysisReady ? t('onboarding.runAnalysis') : t('onboarding.validationPending')}<FlaskConical size={16} /></button>}
+    {preference.step === 'species' && <button className="onboarding-primary" disabled={!designReady} onClick={onGenerate}>{t('onboarding.generateDesign')}<TreePine size={16} /></button>}
+    {preference.step === 'design' && <button className="onboarding-primary" onClick={onCalculate}>{t('onboarding.calculatePlan')}<Droplets size={16} /></button>}
+    {preference.step === 'complete' && <div className="onboarding-complete-actions"><button onClick={onViewCosts}>{t('onboarding.viewCosts')}</button><button className="onboarding-primary" onClick={onComplete}>{t('onboarding.finish')}<Check size={16} /></button></div>}
+    <button className="onboarding-skip" onClick={onSkip}>{t('onboarding.skip')}</button>
+  </aside>;
 }
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
@@ -1813,7 +2013,7 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
   );
 }
 
-function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
+  function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
   if (action.type === 'add_species') return t('assistant.actionAdd', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
   if (action.type === 'remove_species') return t('assistant.actionRemove', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
   if (action.type === 'select_variant') return t('assistant.actionSelect', { id: humanize(action.variantId) });
@@ -1943,7 +2143,7 @@ function SitePanel({
         {site.existingTrees.map((point) => <span key={point.id}><i>T</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, existingTrees: site.existingTrees.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
       </div>}
       <div className="callout"><CloudSun size={18} /><div><strong>{t('site.climateTitle')}</strong><span>{t('site.climateBody')}</span></div></div>
-      <button className="button primary wide" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
+      <button className="button primary wide analyse-site-action" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
       <p className="fine-print">{t('site.executionNote')}</p>
     </div>
   );
@@ -2269,7 +2469,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
         <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
       </div>}
-      <button className="button primary wide sticky-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
+      <button className="button primary wide sticky-action generate-design-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
     </div>
   );
 }
@@ -2323,7 +2523,7 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, onTree
       <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{selectedVariant.trees.map((tree) => <option key={tree.id} value={tree.id}>{tree.id}</option>)}</select></label>
       {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span>{t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
       {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
-      <button className="button primary wide" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
+      <button className="button primary wide calculate-design-action" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
     </div>
   );
 }
@@ -2504,6 +2704,7 @@ function StatusPill({ status }: { status: string }) { const { t } = useI18n(); r
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
 function post(value: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
+function put(value: unknown): RequestInit { return { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
 class GrowupApiError extends Error {
   readonly statusCode: number;
   readonly status: string;

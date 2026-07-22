@@ -10,6 +10,16 @@ export default defineConfig({
   use: {
     baseURL,
     viewport: { width: 1440, height: 900 },
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: baseURL,
+        localStorage: [{
+          name: 'growup:onboarding:v1',
+          value: JSON.stringify({ status: 'skipped', step: 'welcome', updatedAt: '2026-07-22T00:00:00.000Z' }),
+        }],
+      }],
+    },
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
