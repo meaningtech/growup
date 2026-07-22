@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ONBOARDING_STORAGE_KEY,
+  isOnboardingLocationReady,
   latestOnboardingPreference,
   newOnboardingPreference,
   normalizeOnboardingPreference,
@@ -23,6 +24,13 @@ describe('onboarding persistence', () => {
     const preference = { ...newOnboardingPreference(new Date('2026-07-22T09:00:00.000Z')), step: 'location' as const, projectName: 'Food forest north field' };
     writeOnboardingPreference(storage, preference);
     expect(readOnboardingPreference(storage)).toEqual(preference);
+  });
+
+  it('requires an explicit local place and parcel-scale zoom before boundary drawing', () => {
+    expect(isOnboardingLocationReady(false, 18)).toBe(false);
+    expect(isOnboardingLocationReady(true, null)).toBe(false);
+    expect(isOnboardingLocationReady(true, 11.9)).toBe(false);
+    expect(isOnboardingLocationReady(true, 12)).toBe(true);
   });
 
   it('uses the newest authenticated or browser checkpoint', () => {

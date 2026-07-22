@@ -7,6 +7,15 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  const toolbar = page.locator('.map-toolbar');
+  const mapStage = page.locator('.map-stage');
+  const [toolbarBox, mapBox] = await Promise.all([toolbar.boundingBox(), mapStage.boundingBox()]);
+  expect(toolbarBox).not.toBeNull();
+  expect(mapBox).not.toBeNull();
+  expect((mapBox!.y + mapBox!.height) - (toolbarBox!.y + toolbarBox!.height)).toBeLessThanOrEqual(14);
+  const toolbarButtonTops = await toolbar.locator('button').evaluateAll((buttons) => buttons.map((button) => Math.round(button.getBoundingClientRect().top)));
+  expect(new Set(toolbarButtonTops).size).toBe(1);
+  await expect(page.getByLabel('Search place or address')).toHaveCSS('font-size', '16px');
   await page.getByRole('button', { name: 'Map layers' }).focus();
   await page.keyboard.press('Enter');
 

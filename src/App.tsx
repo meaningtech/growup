@@ -62,6 +62,7 @@ import { coordinateFromLatLng, coordinatesFromPath, loadGoogleMaps, sitePreviewB
 import { renderGoogleSignIn } from './googleIdentity';
 import { SUPPORTED_LOCALES, useI18n, type Locale } from './i18n';
 import {
+  isOnboardingLocationReady,
   latestOnboardingPreference,
   newOnboardingPreference,
   normalizeOnboardingPreference,
@@ -161,6 +162,8 @@ export default function App() {
   const [siteValidation, setSiteValidation] = useState<SiteValidation | null>(null);
   const [locationQuery, setLocationQuery] = useState('');
   const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
+  const [locationSelected, setLocationSelected] = useState(false);
+  const [mapZoom, setMapZoom] = useState<number | null>(null);
   const [siteProfile, setSiteProfile] = useState<SiteProfile | null>(null);
   const [recommendations, setRecommendations] = useState<SpeciesRecommendation[]>([]);
   const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([]);
@@ -343,6 +346,15 @@ export default function App() {
   }, [onboarding?.status, onboarding?.step, site, siteProfile, selectedVariant, irrigation, costs]);
 
   useEffect(() => {
+    if (onboarding?.status !== 'active' || onboarding.step !== 'location') return;
+    setSection('site');
+    const timer = window.setTimeout(() => {
+      document.querySelector('.location-search')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [onboarding?.status, onboarding?.step]);
+
+  useEffect(() => {
     if (!irrigation || irrigation.designYear === timelineYear || !site || !siteProfile || !selectedVariant) return;
     const timer = window.setTimeout(() => {
       void recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.timelineRecalculated', { year: timelineYear }));
@@ -384,7 +396,9 @@ export default function App() {
           if (event.latLng) mapClickRef.current(coordinateFromLatLng(event.latLng));
         });
         map.addListener('idle', () => {
-          if (mapElementRef.current) mapElementRef.current.dataset.zoom = String(map.getZoom() ?? '');
+          const zoom = map.getZoom();
+          if (mapElementRef.current) mapElementRef.current.dataset.zoom = String(zoom ?? '');
+          setMapZoom(typeof zoom === 'number' ? zoom : null);
         });
         mapRef.current = map;
         setMapReady(true);
@@ -1269,6 +1283,10 @@ export default function App() {
   }
 
   function beginOnboardingBoundary() {
+    if (!isOnboardingLocationReady(locationSelected, mapZoom)) {
+      setError(t(locationSelected ? 'onboarding.locationZoomRequired' : 'onboarding.locationSelectionRequired'));
+      return;
+    }
     setSection('site');
     activateDrawMode('site');
     updateOnboarding('active', 'boundary');
@@ -1495,7 +1513,16 @@ export default function App() {
     }
     setLocationResults([]);
     setLocationQuery(result.displayName);
+    setLocationSelected(true);
     setNotice(t('notices.mapCentredPlace'));
+    if (window.matchMedia('(max-width: 820px)').matches) {
+      window.setTimeout(() => mapElementRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    }
+  }
+
+  function updateLocationQuery(value: string) {
+    setLocationQuery(value);
+    setLocationSelected(false);
   }
 
   function useEnteredCoordinate(coordinate: Coordinate) {
@@ -1509,7 +1536,12 @@ export default function App() {
     }
     mapRef.current?.panTo(coordinate);
     mapRef.current?.setZoom(19);
+    setLocationQuery(`${coordinate.lat.toFixed(6)}, ${coordinate.lng.toFixed(6)}`);
+    setLocationSelected(true);
     setNotice(t('notices.mapCentredCoordinate'));
+    if (window.matchMedia('(max-width: 820px)').matches) {
+      window.setTimeout(() => mapElementRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    }
   }
 
   function toggleSpecies(id: string) {
@@ -1589,6 +1621,7 @@ export default function App() {
     water: Boolean(irrigation),
     costs: Boolean(costs),
   };
+  const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
 
   return (
     <div className={`app-shell ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
@@ -1655,7 +1688,7 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <section className={`map-stage ${isGeometryDrawMode(drawMode) ? 'drawing' : ''}`} aria-label={t('map.interactive')}>
+        <section className={`map-stage ${isGeometryDrawMode(drawMode) ? 'drawing' : ''} ${selectedVariant ? 'has-timeline' : ''}`} aria-label={t('map.interactive')}>
           <div ref={mapElementRef} className="map-canvas" />
           {mapError && <div className="map-error"><Satellite size={22} /><strong>{t('map.unavailable')}</strong><span>{mapError}</span></div>}
           {isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
@@ -1730,7 +1763,7 @@ export default function App() {
             onImport={importGeoJsonFile}
             locationQuery={locationQuery}
             locationResults={locationResults}
-            onLocationQuery={setLocationQuery}
+            onLocationQuery={updateLocationQuery}
             onLocationSearch={searchLocation}
             onLocationSelect={focusLocation}
             onCoordinate={useEnteredCoordinate}
@@ -1756,6 +1789,8 @@ export default function App() {
         siteReady={Boolean(site)}
         analysisReady={Boolean(site && siteValidation?.valid)}
         designReady={selectedSpeciesIds.length >= (designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2)}
+        locationSelected={locationSelected}
+        locationReady={onboardingLocationReady}
         onStart={startOnboarding}
         onBoundary={beginOnboardingBoundary}
         onFinishBoundary={finishDraft}
@@ -1824,6 +1859,8 @@ function OnboardingTour({
   siteReady,
   analysisReady,
   designReady,
+  locationSelected,
+  locationReady,
   onStart,
   onBoundary,
   onFinishBoundary,
@@ -1841,6 +1878,8 @@ function OnboardingTour({
   siteReady: boolean;
   analysisReady: boolean;
   designReady: boolean;
+  locationSelected: boolean;
+  locationReady: boolean;
   onStart: (name: string) => void;
   onBoundary: () => void;
   onFinishBoundary: () => void;
@@ -1884,7 +1923,13 @@ function OnboardingTour({
     <div className="onboarding-progress" aria-hidden="true"><i style={{ width: `${((stepIndex + 1) / order.length) * 100}%` }} /></div>
     <h2 id="onboarding-coach-title">{content.title}</h2>
     <p>{content.body}</p>
-    {preference.step === 'location' && <button className="onboarding-primary" onClick={onBoundary}>{t('onboarding.drawBoundary')}<ChevronRight size={16} /></button>}
+    {preference.step === 'location' && <>
+      <span className={`onboarding-location-state ${locationReady ? 'ready' : ''}`} role="status">
+        {locationReady ? <Check size={14} /> : <LocateFixed size={14} />}
+        {t(locationReady ? 'onboarding.locationReady' : locationSelected ? 'onboarding.locationZoomRequired' : 'onboarding.locationSelectionRequired')}
+      </span>
+      <button className="onboarding-primary" disabled={!locationReady} onClick={onBoundary}>{t(locationReady ? 'onboarding.drawBoundary' : locationSelected ? 'onboarding.zoomCloser' : 'onboarding.selectSpecificPlace')}<ChevronRight size={16} /></button>
+    </>}
     {preference.step === 'boundary' && <button className="onboarding-primary" disabled={draftPointCount < 3 && !siteReady} onClick={onFinishBoundary}>{siteReady ? t('onboarding.boundaryReady') : t('onboarding.finishBoundary', { count: draftPointCount })}<Check size={16} /></button>}
     {preference.step === 'analysis' && <button className="onboarding-primary" disabled={!analysisReady} onClick={onAnalyse}>{analysisReady ? t('onboarding.runAnalysis') : t('onboarding.validationPending')}<FlaskConical size={16} /></button>}
     {preference.step === 'species' && <button className="onboarding-primary" disabled={!designReady} onClick={onGenerate}>{t('onboarding.generateDesign')}<TreePine size={16} /></button>}

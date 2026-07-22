@@ -8,6 +8,11 @@ export type OnboardingPreference = {
 };
 
 export const ONBOARDING_STORAGE_KEY = 'growup:onboarding:v1';
+export const MIN_ONBOARDING_LOCATION_ZOOM = 12;
+
+export function isOnboardingLocationReady(locationSelected: boolean, mapZoom: number | null): boolean {
+  return locationSelected && mapZoom !== null && Number.isFinite(mapZoom) && mapZoom >= MIN_ONBOARDING_LOCATION_ZOOM;
+}
 
 export function newOnboardingPreference(now = new Date()): OnboardingPreference {
   return { status: 'active', step: 'welcome', updatedAt: now.toISOString() };

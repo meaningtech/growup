@@ -14,6 +14,8 @@ test('guides a first-time visitor into a resumable project setup', async ({ page
   await tour.getByLabel('Project name').fill('North field transition');
   await tour.getByRole('button', { name: 'Create my project' }).click();
   await expect(tour).toContainText('Start from the right place.');
+  await expect(tour.getByRole('button', { name: 'Select a specific place first' })).toBeDisabled();
+  await expect(tour).toContainText('Select a specific search result or enter exact coordinates.');
   await page.reload();
   await expect(tour).toContainText('Start from the right place.');
   await expect(page.getByLabel('Project name')).toHaveValue('North field transition');
@@ -33,5 +35,14 @@ test('keeps the tour usable on a narrow mobile viewport', async ({ page }) => {
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(360);
-  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-onboarding.png', fullPage: false });
+  await tour.getByLabel('Project name').fill('Mobile field');
+  await tour.getByRole('button', { name: 'Create my project' }).click();
+  await expect(tour.getByRole('button', { name: 'Select a specific place first' })).toBeDisabled();
+  const searchBox = await page.getByLabel('Search place or address').boundingBox();
+  expect(searchBox).not.toBeNull();
+  expect(searchBox!.y).toBeGreaterThanOrEqual(0);
+  expect(searchBox!.y + searchBox!.height).toBeLessThanOrEqual(800);
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count() === 1 && await toastClose.isVisible()) await toastClose.click();
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-location.png', fullPage: false });
 });
