@@ -27,7 +27,7 @@ test('guides a first-time visitor into a resumable project setup', async ({ page
   await expect(tour).toContainText('Turn a field into a buildable plan.');
 });
 
-test('keeps the tour usable on a narrow mobile viewport', async ({ page }) => {
+test('keeps the tour usable on a narrow mobile viewport', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 360, height: 800 });
   const tour = page.getByTestId('onboarding-tour');
   await expect(tour).toBeVisible();
@@ -44,5 +44,5 @@ test('keeps the tour usable on a narrow mobile viewport', async ({ page }) => {
   expect(searchBox!.y + searchBox!.height).toBeLessThanOrEqual(800);
   const toastClose = page.locator('.toast button');
   if (await toastClose.count() === 1 && await toastClose.isVisible()) await toastClose.click();
-  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-location.png', fullPage: false });
+  await page.screenshot({ path: testInfo.outputPath('growup-checkpoint-mobile-location.png'), fullPage: false });
 });

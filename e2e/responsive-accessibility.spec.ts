@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
-test('keeps the complete map-layer control keyboard-accessible on a mobile viewport', async ({ page }) => {
+test('keeps the complete map-layer control keyboard-accessible on a mobile viewport', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
@@ -43,7 +43,7 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
 
   const overflow = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
-  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-layers.png', fullPage: false });
+  await page.screenshot({ path: testInfo.outputPath('growup-checkpoint-mobile-layers.png'), fullPage: false });
 });
 
 test('keeps map, inspector and workflow navigation usable on a tablet viewport', async ({ page }) => {
