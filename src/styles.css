@@ -468,6 +468,11 @@ button { color: inherit; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.seo-fallback { min-height: 100svh; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; color: #f8f7ef; background: #10281e; text-align: center; }
+.seo-fallback > span { display: grid; place-items: center; width: 56px; height: 56px; color: #10281e; background: #c7e36f; border-radius: 18px 18px 18px 6px; font: 500 28px/1 'Manrope', sans-serif; }
+.seo-fallback h1 { max-width: 760px; margin: 4px 0 0; font: 500 clamp(42px, 7vw, 76px)/.95 'Newsreader', Georgia, serif; }
+.seo-fallback p { max-width: 620px; margin: 0; color: rgba(248,247,239,.68); font: 500 16px/1.55 'Manrope', sans-serif; }
+
 :where(button, a, input, select, textarea):focus-visible { outline: 3px solid #b9dd55; outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {

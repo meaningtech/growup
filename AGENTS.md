@@ -53,7 +53,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - Printable operational schedules must derive plant counts, labour, irrigation procurement, monthly demand, machinery reserves and evidence records from the selected generated design; never introduce placeholder quantities.
 - Sentinel-1 output is a same-orbit backscatter anomaly, not volumetric soil moisture. Keep this distinction in UI, API and exports.
 - Mobile map controls must remain below Google map-type controls, coach panels and toasts must remain above the safe-area bottom navigation, and the desktop map/inspector split must collapse without horizontal overflow at 820 px and below.
-- Public metadata uses `https://growup.earth/` as the canonical URL. Keep Open Graph/Twitter metadata, `public/growup-social-card.png` at 1200×630, `robots.txt`, `sitemap.xml`, and `llms.txt` aligned whenever the public product description changes.
+- Public metadata uses `https://growup.earth/` as the canonical URL. Keep Open Graph/Twitter metadata, `public/growup-social-card.jpg` at 1200×630 and below 500 KB, PNG browser/touch icons, `site.webmanifest`, `robots.txt`, `sitemap.xml`, and `llms.txt` aligned whenever the public product description changes.
 
 ## Verification
 

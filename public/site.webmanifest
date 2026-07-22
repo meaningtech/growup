@@ -1,0 +1,22 @@
+{
+  "name": "Growup — Evidence-led agroforestry planning",
+  "short_name": "Growup",
+  "description": "Turn field evidence into species, planting, irrigation and long-term cost plans.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f3e9",
+  "theme_color": "#10281e",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
