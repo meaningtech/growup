@@ -4,9 +4,9 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   const page = await request.get('/');
   expect(page.ok()).toBe(true);
   const html = await page.text();
-  expect(html).toContain('<title>GrowUp- Data driven agroforestry planning</title>');
+  expect(html).toContain('<title>GrowUp - Data driven agroforestry planning</title>');
   expect(html).toContain('<link rel="canonical" href="https://growup.earth/"');
-  expect(html).toContain('property="og:image" content="https://growup.earth/growup-social-card.jpg"');
+  expect(html).toContain('property="og:image" content="https://growup.earth/growup-social-card-v2.jpg"');
   expect(html).toContain('property="og:image:type" content="image/jpeg"');
   expect(html).toContain('name="twitter:card" content="summary_large_image"');
   expect(html).toContain('name="twitter:site" content="@turinglabsorg"');
@@ -29,7 +29,7 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   expect(llms.ok()).toBe(true);
   expect(await llms.text()).toContain('# GrowUp');
 
-  const image = await request.get('/growup-social-card.jpg');
+  const image = await request.get('/growup-social-card-v2.jpg');
   expect(image.ok()).toBe(true);
   expect(image.headers()['content-type']).toContain('image/jpeg');
   const imageSize = (await image.body()).byteLength;
@@ -47,7 +47,7 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   const manifest = await request.get('/site.webmanifest');
   expect(manifest.ok()).toBe(true);
   expect(manifest.headers()['content-type']).toMatch(/manifest\+json|application\/json/);
-  expect(await manifest.json()).toMatchObject({ name: 'GrowUp- Data driven agroforestry planning', short_name: 'GrowUp', start_url: '/' });
+  expect(await manifest.json()).toMatchObject({ name: 'GrowUp - Data driven agroforestry planning', short_name: 'GrowUp', start_url: '/' });
 });
 
 test('keeps product information behind an explicit control', async ({ page }, testInfo) => {
