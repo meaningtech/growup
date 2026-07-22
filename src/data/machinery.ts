@@ -67,7 +67,7 @@ export const MACHINERY_PRESETS: MachineryPreset[] = [
 export const MACHINERY_PRESET_BY_ID = new Map(MACHINERY_PRESETS.map((preset) => [preset.id, preset]));
 
 export const DEFAULT_MACHINERY_CONFIGURATION: MachineryConfiguration = {
-  enabled: true,
+  enabled: false,
   presetId: 'bcs-740',
   widthM: 0.79,
   lengthM: 2,
@@ -97,7 +97,7 @@ export function normalizeMachineryConfiguration(value?: Partial<MachineryConfigu
     ? value!.presetId as AgriculturalMachinePresetId
     : fallback.presetId;
   return {
-    enabled: value?.enabled !== false,
+    enabled: value?.enabled === true,
     presetId,
     widthM: clamp(Number(value?.widthM ?? fallback.widthM), 0.35, 4),
     lengthM: clamp(Number(value?.lengthM ?? fallback.lengthM), 0.8, 8),

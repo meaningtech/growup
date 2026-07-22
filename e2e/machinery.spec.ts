@@ -12,6 +12,9 @@ test('reserves editable machinery corridors and turning headlands in the generat
 
   const machinery = page.getByTestId('machinery-config');
   await expect(machinery).toBeVisible();
+  await expect(page.getByLabel('Reserve space')).not.toBeChecked();
+  await expect(page.getByLabel('Reference machine')).toBeDisabled();
+  await page.getByLabel('Reserve space').check();
   await page.getByLabel('Reference machine').selectOption('new-holland-t4f');
   await page.getByLabel('Machine width').fill('2.40');
   await page.getByLabel('Turning radius').fill('4.00');

@@ -4,6 +4,8 @@ Growup is a map-first agroforestry design configurator. It turns an editable sit
 
 The implementation specification is in [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md).
 
+The canonical production origin is `https://growup.earth`. Cloud Run hostnames are deployment endpoints, not user-facing product URLs.
+
 ## Current status
 
 The workflow is location-independent and starts with an empty workspace. Runtime tests import explicit temperate and equatorial field fixtures, and cover:
@@ -14,7 +16,7 @@ The workflow is location-independent and starts with an empty workspace. Runtime
 - existing woody-vegetation protection using seasonally separated Sentinel-2 observations, 2021–2023 annual tree classes, ESA WorldCover and the Copernicus 5 m Woody Vegetation Layer;
 - objective-weighted, evidence-ranked species selection with explainable components, invasive-species safety gates and linked sources;
 - six planting systems, full-field and perimeter planting, three deterministic layouts, locked partial regeneration, species-parameterized growth uncertainty, solar/shade assessment and composition targets;
-- independently switchable boundary, constraint, infrastructure, existing-vegetation, planned-tree, machinery, irrigation and satellite map layers;
+- independently switchable boundary, constraint, infrastructure, existing-vegetation, planned-tree, machinery, irrigation and satellite map layers, with machinery-space reservation opt-in by default;
 - editable irrigation sizing, pipe routing and bill of materials, annual water/energy cost, plant purchase cost and planting person-hours;
 - printable planting, irrigation, procurement and management schedules backed by exact generated quantities and evidence records;
 - PostGIS geometry validation plus owner-isolated current projects, immutable revisions and calculation runs in Growup-specific collections on the existing Mongo-compatible database instance;

@@ -32,6 +32,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await page.getByTestId('step-species').click();
   await expect(page.getByText('Evidence-ranked palette')).toBeVisible();
   await expect(page.getByText('species selected across strata', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('Reserve space')).not.toBeChecked();
+  await page.getByLabel('Reserve space').check();
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
   await expect(page.getByText('3 reproducible layouts generated.')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.variant-tabs button')).toHaveCount(3);

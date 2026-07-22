@@ -42,11 +42,22 @@ const selectedSpeciesIds = recommendationResult.palette.map((item) => item.id);
 assert(selectedSpeciesIds.length >= 3, 'The evidence-ranked palette is too small for a syntropic design.');
 assert(recommendationResult.recommendations.every((item) => item.species.invasiveStatus !== 'blocked' || item.status === 'blocked'), 'A blocked invasive species passed the safety gate.');
 
-const layoutResult = await post<{ variants: LayoutVariant[] }>('/api/layout/generate', {
+const defaultLayoutResult = await post<{ variants: LayoutVariant[] }>('/api/layout/generate', {
   site,
   siteProfile: profile,
   selectedSpeciesIds,
   designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+});
+assert(defaultLayoutResult.variants.every((item) => !item.machinery.enabled && item.machinery.corridors.length === 0), 'Machinery space was reserved without explicit activation.');
+
+const layoutResult = await post<{ variants: LayoutVariant[] }>('/api/layout/generate', {
+  site,
+  siteProfile: profile,
+  selectedSpeciesIds,
+  designConfiguration: {
+    ...DEFAULT_DESIGN_CONFIGURATION,
+    machinery: { ...DEFAULT_DESIGN_CONFIGURATION.machinery, enabled: true },
+  },
 });
 assert(layoutResult.variants.length === 3, 'The layout engine did not produce three reproducible alternatives.');
 const variant = layoutResult.variants[0];

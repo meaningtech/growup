@@ -238,8 +238,8 @@ describe('Growup API integration', () => {
     for (const variant of response.body.variants) {
       expect(variant.trees.length).toBeGreaterThan(10);
       expect(variant.trees.every((tree: { coordinate: { lat: number; lng: number } }) => siteContainsCoordinate(EQUATORIAL_OPEN_FIELD_FIXTURE, tree.coordinate))).toBe(true);
-      expect(variant.machinery).toEqual(expect.objectContaining({ enabled: true, clearanceSatisfied: true }));
-      expect(variant.design).toEqual(expect.objectContaining({ machinery: expect.objectContaining({ enabled: true }) }));
+      expect(variant.machinery).toEqual(expect.objectContaining({ enabled: false, clearanceSatisfied: true, corridors: [], turningAreas: [] }));
+      expect(variant.design).toEqual(expect.objectContaining({ machinery: expect.objectContaining({ enabled: false }) }));
     }
     const irrigation = await request(app)
       .post('/api/irrigation/calculate')
@@ -405,7 +405,15 @@ describe('Growup API integration', () => {
 
     const layoutResponse = await request(app)
       .post('/api/layout/generate')
-      .send({ site: TEMPERATE_OPEN_FIELD_FIXTURE, siteProfile: profile, selectedSpeciesIds })
+      .send({
+        site: TEMPERATE_OPEN_FIELD_FIXTURE,
+        siteProfile: profile,
+        selectedSpeciesIds,
+        designConfiguration: {
+          ...DEFAULT_DESIGN_CONFIGURATION,
+          machinery: { ...DEFAULT_DESIGN_CONFIGURATION.machinery, enabled: true },
+        },
+      })
       .expect(200);
     expect(layoutResponse.body.variants).toHaveLength(3);
     const variant = layoutResponse.body.variants[0];
@@ -499,7 +507,7 @@ describe('Growup API integration', () => {
       site: TEMPERATE_OPEN_FIELD_FIXTURE,
       siteProfile: profile,
       selectedSpeciesIds,
-      designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      designConfiguration: variant.design,
       irrigationConfiguration: costsResponse.body.irrigation.configuration,
       economicConfiguration: costsResponse.body.establishment.economics,
       variants: layoutResponse.body.variants,

@@ -22,6 +22,7 @@
 - `server/export.ts` is the only project export composer. GeoJSON and CSV output must remain deterministic for the same stored project and include calculation/model metadata without credentials or private identity data.
 - The production container is a two-stage Node 20 image. Cloud Run injects PostGIS, Mongo, Maps, OAuth, AI and session credentials through environment variables or Secret Manager; no deployment secret belongs in the image.
 - Production runs as Cloud Run service `growup` in `europe-west1` with the dedicated `growup-runtime` service account and `growup-*` secrets. It intentionally mounts the existing Cloud SQL instance whose immutable technical resource name is `growaf-postgis`; do not duplicate or rename that data service during brand changes.
+- The canonical public origin is `https://growup.earth`. Keep browser-key referrers and the Google OAuth authorized JavaScript origin aligned with it; Cloud Run-generated hostnames are operational endpoints only.
 
 ## API surface
 
@@ -42,6 +43,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - Every layout is deterministic for the same normalized site, species, configuration and seed. Existing woody Sentinel polygons, field-observed trees, exclusions, paths and setbacks are hard placement constraints.
 - `LayoutVariant.generation` records the layout engine version, seed, full/partial mode, locked-tree count, assumptions and conflicts. Partial regeneration must preserve every valid locked tree byte-for-byte and reflow only unlocked candidates.
 - `LayoutVariant.machinery` records exact corridor centre lines, required widths, turning areas and clearance results. Planned trees, machinery, irrigation, boundary, constraints, infrastructure and evidence overlays are independently switchable map layers.
+- Machinery-space reservation is opt-in. `DEFAULT_MACHINERY_CONFIGURATION.enabled` and normalization of omitted machinery input must remain `false`; only an explicit user action may reserve corridors and turning headlands.
 - Every authenticated save appends an immutable project revision and, when calculated results exist, an immutable calculation run. Use optimistic revision checks; never overwrite revision history or embed an unbounded history array in the current project document.
 - Site-profile overrides require a value, reason, source label, observation date and immutable audit entry; recalculated suitability must consume the overridden profile rather than mutating provider evidence.
 - `GrowthState` exposes deterministic low/base/high height and crown estimates plus model version, hierarchy and confidence. Zero values outside the active planting/removal interval are intentional.
