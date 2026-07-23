@@ -23,6 +23,10 @@ describe('operational schedule', () => {
     expect(schedule.infrastructure).toEqual(irrigation.network.components);
     expect(schedule.summary.purchasePipeM).toBe(irrigation.network.totalPurchasePipeM);
     expect(schedule.irrigationMonths.reduce((sum, month) => sum + month.grossM3, 0)).toBeCloseTo(irrigation.annualWaterM3, 1);
+    expect(schedule.summary.maintenanceLaborHours).toBe(irrigation.systemMaintenance.totalHours);
+    expect(schedule.summary.maintenanceLaborCost).toBe(irrigation.systemMaintenance.totalCost);
+    expect(schedule.maintenance.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'vegetation-control' })]));
+    expect(schedule.evidence.some((item) => item.source.includes('Embrapa'))).toBe(true);
     expect(schedule.evidence.length).toBeGreaterThan(8);
   });
 });

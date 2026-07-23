@@ -84,6 +84,7 @@ export function exportProjectGeoJson(project: ProjectState) {
     timelineYear: year,
     generatedAt: project.updatedAt,
     generation: variant?.generation ?? null,
+    maintenance: project.irrigation?.systemMaintenance ?? null,
     features,
   };
 }
@@ -96,10 +97,14 @@ export function exportProjectCsv(project: ProjectState): string {
     'position_index', 'planted_year', 'removed_year', 'locked', 'active', 'height_low_m', 'height_base_m',
     'height_high_m', 'crown_low_m', 'crown_base_m', 'crown_high_m', 'growth_model', 'growth_confidence',
     'currency_code', 'unit_purchase_cost', 'planting_labor_hours', 'planting_labor_cost',
+    'maintenance_year', 'maintenance_model', 'maintenance_phase', 'maintenance_hours', 'maintenance_labor_cost',
+    'vegetation_control_hours', 'training_pruning_hours', 'biomass_succession_hours', 'inspection_replanting_hours',
   ];
   if (!variant) return `${headers.join(',')}\n`;
   const year = project.timelineYear;
   const economics = project.economicConfiguration;
+  const maintenance = project.irrigation?.systemMaintenance ?? null;
+  const maintenanceHours = new Map(maintenance?.tasks.map((task) => [task.id, task.hours]) ?? []);
   const speciesCosts = new Map((project.costs?.bySpecies ?? []).map((item) => [item.speciesId, item]));
   const rows = [...variant.trees]
     .sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id))
@@ -140,6 +145,15 @@ export function exportProjectCsv(project: ProjectState): string {
         fixed(unitPurchaseCost, 2),
         fixed(laborHours, 2),
         fixed(laborHours * economics.laborCostPerHour, 2),
+        maintenance?.year ?? '',
+        maintenance?.modelVersion ?? '',
+        maintenance?.phase ?? '',
+        fixed(maintenance?.totalHours ?? 0, 2),
+        fixed(maintenance?.totalCost ?? 0, 2),
+        fixed(maintenanceHours.get('vegetation-control') ?? 0, 2),
+        fixed(maintenanceHours.get('training-pruning') ?? 0, 2),
+        fixed(maintenanceHours.get('biomass-succession') ?? 0, 2),
+        fixed(maintenanceHours.get('inspection-replanting') ?? 0, 2),
       ].map(csvCell).join(',');
     });
   return `${headers.join(',')}\n${rows.join('\n')}\n`;

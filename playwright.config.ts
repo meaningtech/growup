@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 const externalBaseUrl = process.env.GROWUP_BASE_URL;
 const baseURL = externalBaseUrl ?? 'http://127.0.0.1:52174';
+const browserChannel = process.env.GROWUP_BROWSER_CHANNEL === 'chrome' ? 'chrome' : undefined;
 
 export default defineConfig({
   testDir: './e2e',
@@ -9,6 +10,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     baseURL,
+    ...(browserChannel ? { channel: browserChannel } : {}),
     viewport: { width: 1440, height: 900 },
     storageState: {
       cookies: [],

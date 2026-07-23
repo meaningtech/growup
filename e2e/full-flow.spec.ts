@@ -38,6 +38,25 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByText('3 reproducible layouts generated.')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.variant-tabs button')).toHaveCount(3);
   await expect(page.getByText('Canopy Y20')).toBeVisible();
+  const successionTimeline = page.getByTestId('succession-timeline');
+  await expect(successionTimeline).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#root').evaluate((element) => { element.scrollTop = 900; });
+  const [mobileTimelineBox, mobileRailBox] = await Promise.all([
+    successionTimeline.boundingBox(),
+    page.locator('.step-rail').boundingBox(),
+  ]);
+  expect(mobileTimelineBox).not.toBeNull();
+  expect(mobileRailBox).not.toBeNull();
+  expect(mobileTimelineBox!.y).toBeGreaterThanOrEqual(0);
+  expect(mobileTimelineBox!.y + mobileTimelineBox!.height).toBeLessThan(mobileRailBox!.y);
+  await expect(page.locator('.app-shell.has-succession-timeline .panel-body')).toHaveCSS('padding-bottom', '172px');
+  const mobileToastBox = await page.locator('.toast').boundingBox();
+  expect(mobileToastBox).not.toBeNull();
+  expect(mobileToastBox!.y + mobileToastBox!.height).toBeLessThan(mobileTimelineBox!.y);
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-succession.png', fullPage: false });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('#root').evaluate((element) => { element.scrollTop = 0; });
   await page.waitForTimeout(2_000);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-design.png', fullPage: false });
 
@@ -110,6 +129,9 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByText('Establishment total')).toBeVisible();
   await expect(page.getByText('Active system · year 5')).toBeVisible();
   await expect(page.getByTestId('cost-timeline')).toContainText('Annual operating cost over time');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Maintenance hours and labour cost');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Biomass and succession management');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Measured agroforestry workload curve');
   await expect(page.getByText('Planting labour', { exact: false })).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-costs.png', fullPage: false });
@@ -121,6 +143,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(schedule).toContainText('Plant order and labour sheet');
   await expect(schedule).toContainText('Irrigation procurement and monthly demand');
   await expect(schedule).toContainText('Pressure-compensating emitters');
+  await expect(schedule).toContainText('Estimated routine workload');
+  await expect(schedule).toContainText('Selective vegetation control');
   await expect(schedule).toContainText('Evidence register');
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-operational-schedule.png', fullPage: false });
   await schedule.getByText('Evidence register').scrollIntoViewIfNeeded();
@@ -139,6 +163,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   const matureCosts = await matureCostsResponse.json() as { irrigation: IrrigationEstimate; establishment: EstablishmentCost };
   expect(matureCosts.irrigation.activePlantCount).toBeLessThanOrEqual(initialCosts.irrigation.activePlantCount);
   expect(matureCosts.irrigation.annualWaterM3).toBeLessThan(initialCosts.irrigation.annualWaterM3);
+  expect(matureCosts.irrigation.systemMaintenance.totalHours).toBeLessThan(initialCosts.irrigation.systemMaintenance.totalHours);
+  expect(matureCosts.irrigation.systemMaintenance.totalCost).toBeLessThan(initialCosts.irrigation.systemMaintenance.totalCost);
   expect(matureCosts.irrigation.annualOperation.totalCost).toBeLessThan(initialCosts.irrigation.annualOperation.totalCost);
   expect(matureCosts.establishment.activeSystem.totalReplacementCost).toBeLessThanOrEqual(initialCosts.establishment.activeSystem.totalReplacementCost);
   expect(matureCosts.establishment.totalCost).toBe(initialCosts.establishment.totalCost);
@@ -146,8 +172,10 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByText('Water + operation · year 29')).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-year-29-costs.png', fullPage: false });
   await page.locator('.language-select select').selectOption('it');
-  await page.getByTestId('cost-timeline').scrollIntoViewIfNeeded();
+  await page.getByTestId('maintenance-timeline').scrollIntoViewIfNeeded();
   await expect(page.getByTestId('economic-configuration').getByText(/Stima globale in USD convertita/).first()).toBeVisible();
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Ore di manutenzione e costo del lavoro');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Gestione di biomassa e successione');
   await expect(page.getByText(/Global USD planning estimate converted/)).toHaveCount(0);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-syntropic-cost-curve-it.png', fullPage: false });
   await page.locator('.language-select select').selectOption('en');

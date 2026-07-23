@@ -5,8 +5,6 @@ export type SystemEconomicsProfile = {
   matureSupplementalFraction: number;
   supportSpeciesFraction: number;
   transitionYears: number;
-  managementHoursPerPlantInitial: number;
-  managementHoursPerPlantMature: number;
   basis: 'measured-system-reference' | 'conservative-planning-default';
 };
 
@@ -16,8 +14,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 0.5,
     supportSpeciesFraction: 0.08,
     transitionYears: 12,
-    managementHoursPerPlantInitial: 0.22,
-    managementHoursPerPlantMature: 0.1,
     basis: 'measured-system-reference',
   },
   monoculture: {
@@ -25,8 +21,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 1,
     supportSpeciesFraction: 1,
     transitionYears: 1,
-    managementHoursPerPlantInitial: 0.08,
-    managementHoursPerPlantMature: 0.08,
     basis: 'conservative-planning-default',
   },
   'mixed-orchard': {
@@ -34,8 +28,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 0.9,
     supportSpeciesFraction: 0.75,
     transitionYears: 10,
-    managementHoursPerPlantInitial: 0.11,
-    managementHoursPerPlantMature: 0.09,
     basis: 'conservative-planning-default',
   },
   'alley-cropping': {
@@ -43,8 +35,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 0.85,
     supportSpeciesFraction: 0.55,
     transitionYears: 10,
-    managementHoursPerPlantInitial: 0.12,
-    managementHoursPerPlantMature: 0.09,
     basis: 'conservative-planning-default',
   },
   windbreak: {
@@ -52,8 +42,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 0.75,
     supportSpeciesFraction: 0.4,
     transitionYears: 8,
-    managementHoursPerPlantInitial: 0.08,
-    managementHoursPerPlantMature: 0.05,
     basis: 'conservative-planning-default',
   },
   'boundary-buffer': {
@@ -61,8 +49,6 @@ const PROFILES: Record<DesignSystemId, SystemEconomicsProfile> = {
     matureSupplementalFraction: 0.75,
     supportSpeciesFraction: 0.4,
     transitionYears: 8,
-    managementHoursPerPlantInitial: 0.08,
-    managementHoursPerPlantMature: 0.05,
     basis: 'conservative-planning-default',
   },
 };
@@ -83,12 +69,6 @@ export function supplementalIrrigationFactor(system: DesignSystemId, species: De
   const systemFraction = interpolate(1, profile.matureSupplementalFraction, progress);
   if (!isSupportSpecies(species)) return systemFraction;
   return systemFraction * interpolate(1, profile.supportSpeciesFraction, progress);
-}
-
-export function managementLaborHours(system: DesignSystemId, activePlantCount: number, year: number): number {
-  const profile = systemEconomicsProfile(system);
-  const hoursPerPlant = interpolate(profile.managementHoursPerPlantInitial, profile.managementHoursPerPlantMature, systemMaturityProgress(system, year));
-  return activePlantCount * hoursPerPlant;
 }
 
 export function isSupportSpecies(species: DesignSpecies): boolean {

@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   ClipboardCheck,
+  Clock3,
   CircleDollarSign,
   CircleOff,
   CloudSun,
@@ -20,6 +21,7 @@ import {
   LogOut,
   LocateFixed,
   Map as MapIcon,
+  Menu,
   MousePointer2,
   PencilRuler,
   Plus,
@@ -209,6 +211,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [clearSiteOpen, setClearSiteOpen] = useState(false);
   const [projectName, setProjectName] = useState(() => readOnboardingPreference(window.localStorage)?.projectName ?? t('project.newTitle'));
   const [projectId, setProjectId] = useState(() => `growup-${crypto.randomUUID().slice(0, 8)}`);
@@ -329,6 +332,15 @@ export default function App() {
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
   }, [locale, t]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     if (onboarding?.status !== 'active') return;
@@ -1628,7 +1640,7 @@ export default function App() {
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
 
   return (
-    <div className={`app-shell ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
+    <div className={`app-shell ${selectedVariant ? 'has-succession-timeline' : ''} ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
       <header className="topbar">
         <button className="brand" onClick={() => setSection('site')} aria-label={`${t('nav.home')} · growup · ${t('brand.tagline')}`}>
           <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
@@ -1653,24 +1665,52 @@ export default function App() {
           />
         </div>
         <div className="top-actions">
-          {authUser && projects.length > 0 && <label className="project-select"><span className="visually-hidden">{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => void openProject(event.target.value)}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
-          {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
-          <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
-          <button className="button ghost tour-trigger" onClick={() => updateOnboarding('active', 'welcome')} title={t('onboarding.restart')}><MapIcon size={16} /> {t('onboarding.tour')}</button>
-          <button className="button ghost info-trigger" onClick={() => setInfoOpen(true)} title={t('info.open')}><Info size={16} /> {t('info.open')}</button>
-          <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
-          <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
-          <button className="button ghost history-trigger" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
-          <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
-          <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
-          {authUser ? (
-            <button className="user-chip" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
-              {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
-              <strong>{authUser.name}</strong><LogOut size={14} />
-            </button>
-          ) : <button className="button auth-trigger" onClick={() => setAuthOpen(true)}><LogIn size={15} /> {t('auth.signIn')}</button>}
+          <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
+          <button className="button ai-trigger mobile-top-action mobile-ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
+          <div className="desktop-top-actions">
+            {authUser && projects.length > 0 && <label className="project-select"><span className="visually-hidden">{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => void openProject(event.target.value)}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+            {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
+            <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
+            <button className="button ghost tour-trigger" onClick={() => updateOnboarding('active', 'welcome')} title={t('onboarding.restart')}><MapIcon size={16} /> {t('onboarding.tour')}</button>
+            <button className="button ghost info-trigger" onClick={() => setInfoOpen(true)} title={t('info.open')}><Info size={16} /> {t('info.open')}</button>
+            <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
+            <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
+            <button className="button ghost history-trigger" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
+            <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
+            <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
+            {authUser ? (
+              <button className="user-chip" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
+                {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
+                <strong>{authUser.name}</strong><LogOut size={14} />
+              </button>
+            ) : <button className="button auth-trigger" onClick={() => setAuthOpen(true)}><LogIn size={15} /> {t('auth.signIn')}</button>}
+          </div>
         </div>
       </header>
+
+      {mobileMenuOpen && <div className="mobile-menu-layer">
+        <button className="mobile-menu-backdrop" aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)} />
+        <aside id="mobile-product-menu" className="mobile-product-menu" role="dialog" aria-modal="true" aria-label={t('mobile.menu')}>
+          <header><span><strong>{t('mobile.menu')}</strong><small>{projectName}</small></span><button aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)}><X size={18} /></button></header>
+          {site && <div className={`mobile-save-status ${saveStatus}`}><i /><span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
+          {authUser && projects.length > 0 && <label className="mobile-project-select"><span>{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => { setMobileMenuOpen(false); void openProject(event.target.value); }}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+          <label className="mobile-language-select"><span><MapIcon size={17} />{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
+          <nav>
+            <button onClick={() => { setMobileMenuOpen(false); updateOnboarding('active', 'welcome'); }}><span><MapIcon size={17} />{t('onboarding.tour')}</span><ChevronRight size={16} /></button>
+            <button onClick={() => { setMobileMenuOpen(false); setInfoOpen(true); }}><span><Info size={17} />{t('info.open')}</span><ChevronRight size={16} /></button>
+            <button onClick={() => { setMobileMenuOpen(false); void saveProject(); }} disabled={!site || Boolean(busy)}><span><Save size={17} />{t('actions.save')}</span><ChevronRight size={16} /></button>
+            <button onClick={() => { setMobileMenuOpen(false); setHistoryOpen(true); }} disabled={!authUser || projectRevision < 1}><span><Database size={17} />{t('auth.history')}</span><ChevronRight size={16} /></button>
+          </nav>
+          <div className="mobile-export-actions">
+            <a className={!selectedVariant || !authUser ? 'disabled' : ''} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined} onClick={() => setMobileMenuOpen(false)}><Download size={15} />GeoJSON</a>
+            <a className={!selectedVariant || !authUser ? 'disabled' : ''} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined} onClick={() => setMobileMenuOpen(false)}><Download size={15} />CSV</a>
+          </div>
+          {authUser ? <button className="mobile-account-action" onClick={() => { setMobileMenuOpen(false); void logout(); }}>
+            {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
+            <strong>{authUser.name}</strong><small>{t('auth.signOut')}</small><LogOut size={17} />
+          </button> : <button className="mobile-account-action signed-out" onClick={() => { setMobileMenuOpen(false); setAuthOpen(true); }}><span><LogIn size={17} /></span><strong>{t('auth.signIn')}</strong><small>{t('auth.workspace')}</small><ChevronRight size={17} /></button>}
+        </aside>
+      </div>}
 
       {recoveryDraft && !site && <div className="recovery-banner" role="status"><span><Save size={16} /><strong>{t('auth.recoveryTitle')}</strong><small>{t('auth.recoveryBody', { name: recoveryDraft.name })}</small></span><button onClick={recoverLocalDraft}>{t('auth.recover')}</button><button onClick={discardLocalDraft}>{t('auth.discard')}</button></div>}
 
@@ -1732,7 +1772,7 @@ export default function App() {
           </div>}
           {editingIrrigation && irrigation && <div className="irrigation-edit-status"><Route size={15} /><span><strong>{t('map.editIrrigation')}</strong><small>{t('map.editIrrigationHint')}</small></span></div>}
           {selectedVariant && (
-            <div className="timeline-control">
+            <div className="timeline-control" data-testid="succession-timeline">
               <div><span>{t('timeline.year')}</span><strong>{timelineYear}</strong></div>
               <input aria-label={t('timeline.year')} type="range" min="0" max="30" value={timelineYear} onChange={(event) => setTimelineYear(Number(event.target.value))} />
               <div className="timeline-marks"><span>{t('timeline.planting')}</span><span>{t('timeline.establishment')}</span><span>{t('timeline.maturity')}</span></div>
@@ -2282,6 +2322,7 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       <ScheduleMetric label={t('schedule.hydraulicDuty')} value={`${formatNumber(schedule.summary.requiredFlowM3Hour, 2)} m³/h`} detail={`${formatNumber(schedule.summary.requiredDynamicHeadM, 1)} m · ${schedule.summary.pumpRequired ? t('schedule.pump') : t('schedule.gravityPressure')}`} />
       <ScheduleMetric label={t('schedule.annualWater')} value={`${formatNumber(schedule.summary.annualWaterM3, 0)} m³`} detail={t('schedule.designYear', { year: irrigation.designYear })} />
       <ScheduleMetric label={t('schedule.annualOperation')} value={currency(schedule.summary.annualOperatingCost, costs.economics)} detail={t('schedule.designYear', { year: irrigation.designYear })} />
+      <ScheduleMetric label={t('schedule.maintenanceLabour')} value={`${formatNumber(schedule.summary.maintenanceLaborHours, 1)} h`} detail={currency(schedule.summary.maintenanceLaborCost, costs.economics)} />
     </section>
     <ScheduleSection number="01" title={t('schedule.executionTitle')} subtitle={t('schedule.executionBody')}>
       <div className="schedule-task-list">{schedule.tasks.map((task, index) => <article key={task}><i>{index + 1}</i><span><small>{t(`schedule.task.${task}.timing`)}</small><strong>{t(`schedule.task.${task}.title`)}</strong><p>{t(`schedule.task.${task}.body`, scheduleTaskValues(schedule, site, profile, irrigation, costs))}</p></span><b>□</b></article>)}</div>
@@ -2298,6 +2339,10 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       <p className="schedule-note">{t('schedule.satelliteAdjustment', { adjustment: signed(irrigation.satelliteScheduling.adjustmentPercent), confidence: translatedStatus(irrigation.satelliteScheduling.confidence, t) })}</p>
     </ScheduleSection>
     <ScheduleSection number="04" title={t('schedule.managementTitle')} subtitle={t('schedule.managementBody')}>
+      <div className="schedule-maintenance-detail">
+        <header><span><small>{t('costs.selectedYear', { year: schedule.maintenance.year })}</small><strong>{t('costs.maintenanceWorkload')}</strong></span><b>{formatNumber(schedule.maintenance.totalHours, 1)} h · {currency(schedule.maintenance.totalCost, costs.economics)}</b></header>
+        <div>{schedule.maintenance.tasks.map((task) => <span key={task.id}><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h</small><b>{currency(task.cost, costs.economics)}</b></span>)}</div>
+      </div>
       <div className="schedule-management">{schedule.managementPhases.map((phase) => <article key={phase}><small>{t(`schedule.phase.${phase}.years`)}</small><strong>{t(`schedule.phase.${phase}.title`)}</strong><p>{t(`schedule.phase.${phase}.body`)}</p><em>{t(`schedule.management.system.${variant.design.system}`)}</em><span>□ {t('schedule.recordActuals')}</span></article>)}</div>
       {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1) })}</small></span></div>}
     </ScheduleSection>
@@ -2716,6 +2761,7 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
         <div className="total-cost active"><small>{t('costs.activeSystem', { year: costs.activeSystem.designYear })}</small><strong>{currency(costs.activeSystem.totalReplacementCost, costs.economics)}</strong><span>{t('costs.activeSystemDetail', { active: costs.activeSystem.activePlantCount, inactive: costs.activeSystem.inactivePlantCount })}</span></div>
       </div>
       <CostTimelineChart costs={costs} irrigation={irrigation} />
+      <MaintenanceTimelineChart costs={costs} irrigation={irrigation} />
       <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseCost, costs.economics)} /><Row label={t('costs.labourHours', { label: t('costs.labour'), hours: formatNumber(costs.plantingLaborHours, 1) })} value={currency(costs.plantingLaborCost, costs.economics)} /><Row label={t('costs.protection')} value={currency(costs.protectionAndStakesCost, costs.economics)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationCost, costs.economics)} strong /><Row label={t('costs.annualWaterYear', { year: irrigation.designYear })} value={t('costs.perYear', { value: currency(irrigation.annualOperation.totalCost, costs.economics) })} strong /></div>
       <div className="cost-table"><div className="cost-table-head"><span>{t('costs.species')}</span><span>{t('costs.quantity')}</span><span>{t('costs.plant')}</span><span>{t('costs.labourShort')}</span><span>{t('costs.total')}</span></div>{costs.bySpecies.map((item) => {
         const entry = speciesMap.get(item.speciesId);
@@ -2772,6 +2818,60 @@ function CostTimelineChart({ costs, irrigation }: { costs: EstablishmentCost; ir
         <span><i className="maintenance" />{t('costs.maintenance')}<strong>{currency(current.maintenanceCost, costs.economics)}</strong></span>
       </div>
       <small className="cost-timeline-note">{t('costs.timelineNote')}</small>
+    </section>
+  );
+}
+
+function MaintenanceTimelineChart({ costs, irrigation }: { costs: EstablishmentCost; irrigation: IrrigationEstimate }) {
+  const { t } = useI18n();
+  const timeline = costs.timeline ?? [];
+  if (!irrigation.systemMaintenance || timeline.length < 2 || timeline.some((point) => !Number.isFinite(point.maintenanceLaborHours) || !Array.isArray(point.maintenanceTasks))) return null;
+  const width = 640;
+  const height = 205;
+  const padding = { top: 17, right: 18, bottom: 30, left: 50 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maximum = Math.max(1, ...timeline.map((point) => point.maintenanceLaborHours));
+  const x = (index: number) => padding.left + index / (timeline.length - 1) * plotWidth;
+  const y = (value: number) => padding.top + plotHeight - value / maximum * plotHeight;
+  const line = timeline.map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(index).toFixed(1)} ${y(point.maintenanceLaborHours).toFixed(1)}`).join(' ');
+  const area = `${line} L ${x(timeline.length - 1).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} L ${x(0).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} Z`;
+  const currentIndex = Math.max(0, Math.min(timeline.length - 1, irrigation.designYear - 1));
+  const current = timeline[currentIndex];
+  const first = timeline[0];
+  const last = timeline[timeline.length - 1];
+  const change = first.maintenanceLaborHours > 0 ? (last.maintenanceLaborHours - first.maintenanceLaborHours) / first.maintenanceLaborHours * 100 : 0;
+  const largestTask = Math.max(1, ...current.maintenanceTasks.map((task) => task.hours));
+  const markerYears = new Set([1, 5, 10, 15, 20, 25, timeline.length]);
+  const descriptionKey = irrigation.waterModel.system === 'syntropic'
+    ? 'costs.maintenanceSyntropic'
+    : irrigation.waterModel.system === 'monoculture'
+      ? 'costs.maintenanceMonoculture'
+      : irrigation.waterModel.system === 'windbreak' || irrigation.waterModel.system === 'boundary-buffer'
+        ? 'costs.maintenancePerimeter'
+        : 'costs.maintenanceOther';
+
+  return (
+    <section className="maintenance-timeline" data-testid="maintenance-timeline">
+      <div className="card-heading"><div><Clock3 size={17} /><span><small>{t('costs.maintenanceEyebrow')}</small><strong>{t('costs.maintenanceTitle')}</strong></span></div><StatusPill status={irrigation.systemMaintenance.confidence === 'low' ? 'review-required' : 'available'} /></div>
+      <p>{t(descriptionKey, { system: t(systemTranslationKey(irrigation.waterModel.system)) })}</p>
+      <div className="maintenance-summary">
+        {[first, current, last].map((point, index) => <span key={`${point.year}-${index}`} className={index === 1 ? 'selected' : ''}><small>{index === 0 ? t('costs.yearOne') : index === 1 ? t('costs.selectedYear', { year: point.year }) : t('costs.yearThirty')}</small><strong>{formatNumber(point.maintenanceLaborHours, 1)} h</strong><b>{currency(point.managementLaborCost, costs.economics)}</b></span>)}
+      </div>
+      <svg className="maintenance-timeline-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('costs.maintenanceTimelineAria')}>
+        <defs><linearGradient id="maintenanceTimelineFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#3f8f7e" stopOpacity=".32" /><stop offset="1" stopColor="#3f8f7e" stopOpacity=".02" /></linearGradient></defs>
+        {[0, 0.5, 1].map((ratio) => <g key={ratio}><line x1={padding.left} x2={width - padding.right} y1={y(maximum * ratio)} y2={y(maximum * ratio)} /><text x={padding.left - 8} y={y(maximum * ratio) + 3} textAnchor="end">{formatNumber(maximum * ratio, 0)} h</text></g>)}
+        <path className="maintenance-area" d={area} />
+        <path className="maintenance-line" d={line} />
+        {timeline.map((point, index) => markerYears.has(point.year) ? <g key={point.year}><circle className="maintenance-point" cx={x(index)} cy={y(point.maintenanceLaborHours)} r="3.5"><title>{t('costs.maintenancePointTitle', { year: point.year, hours: formatNumber(point.maintenanceLaborHours, 1), value: currency(point.managementLaborCost, costs.economics) })}</title></circle><text className="year-label" x={x(index)} y={height - 8} textAnchor="middle">{point.year}</text></g> : null)}
+        <line className="current-year-line" x1={x(currentIndex)} x2={x(currentIndex)} y1={padding.top} y2={padding.top + plotHeight} />
+        <circle className="current-year-point" cx={x(currentIndex)} cy={y(current.maintenanceLaborHours)} r="5" />
+      </svg>
+      <div className="maintenance-task-list">
+        {current.maintenanceTasks.map((task) => <div key={task.id}><span><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h · {currency(task.cost, costs.economics)}</small></span><i><b style={{ width: `${task.hours / largestTask * 100}%` }} /></i></div>)}
+      </div>
+      <div className="maintenance-method"><span>{t(`costs.maintenanceBasis.${irrigation.systemMaintenance.basis}`)}</span><b>{t('costs.maintenanceEvidence', { count: irrigation.systemMaintenance.sources.length, confidence: translatedStatus(irrigation.systemMaintenance.confidence, t) })}</b></div>
+      <small className="maintenance-note">{t('costs.maintenanceNote', { rate: currency(irrigation.systemMaintenance.laborCostPerHour, costs.economics) })} · {t('costs.longTermHoursChange', { value: signed(Math.round(change)) })}</small>
     </section>
   );
 }
@@ -2977,6 +3077,7 @@ function evidenceUsageKey(item: Evidence) {
   if (source.includes('sentinel-2')) return 'evidence.usage.opticalWater';
   if (source.includes('sentinel-1')) return 'evidence.usage.radarWater';
   if (source.includes('planetary computer')) return 'evidence.usage.processing';
+  if (/agroforestry|almond orchard|alley model|windbreak|management practices/.test(source)) return 'evidence.usage.maintenance';
   return 'evidence.usage.generic';
 }
 function designSystemDescriptionKey(system: DesignConfiguration['system']) {

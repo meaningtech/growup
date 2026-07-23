@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies.js';
 import { GROWTH_MODEL_VERSION } from '../src/lib/growth.js';
 import { IRRIGATION_MODEL_VERSION } from '../src/lib/irrigation.js';
+import { MAINTENANCE_MODEL_VERSION } from '../src/lib/maintenance.js';
 import type { CalculationSnapshot, Evidence, ProjectRevisionSummary, ProjectState } from '../src/types.js';
 
 export const APPLICATION_MODEL_VERSION = 'growup-0.2.0';
@@ -56,12 +57,15 @@ function calculationSnapshot(project: ProjectState, revision: number, id: string
       layout: layoutVersion,
       growth: GROWTH_MODEL_VERSION,
       irrigation: IRRIGATION_MODEL_VERSION,
+      maintenance: MAINTENANCE_MODEL_VERSION,
       economics: project.economicConfiguration.sourceVersion,
     },
     evidenceVersions: evidence.map(({ source, version, observedAt }) => ({ source, version, observedAt })),
     outputSummary: {
       treeCount: variant.trees.length,
       annualWaterM3: project.irrigation?.annualWaterM3 ?? null,
+      maintenanceLaborHours: project.irrigation?.systemMaintenance?.totalHours ?? null,
+      maintenanceLaborCost: project.irrigation?.systemMaintenance?.totalCost ?? null,
       establishmentCost: project.costs?.totalCost ?? null,
       currencyCode: project.economicConfiguration.currencyCode,
     },
@@ -79,7 +83,14 @@ function evidenceRecords(project: ProjectState): Evidence[] {
       confidence: 'medium',
     })) ?? []
   ));
-  if (!profile) return uniqueEvidence(speciesEvidence);
+  const maintenanceEvidence = project.irrigation?.systemMaintenance?.sources.map((source): Evidence => ({
+    source: `${source.organization}: ${source.title}`,
+    sourceUrl: source.url,
+    version: source.version,
+    observedAt: project.updatedAt,
+    confidence: project.irrigation!.systemMaintenance.confidence,
+  })) ?? [];
+  if (!profile) return uniqueEvidence([...maintenanceEvidence, ...speciesEvidence]);
   return uniqueEvidence([
     profile.location.evidence,
     profile.terrain.evidence,
@@ -89,6 +100,7 @@ function evidenceRecords(project: ProjectState): Evidence[] {
     profile.landCover.evidence,
     ...profile.satellite.evidence,
     ...profile.satellite.existingVegetation.evidence,
+    ...maintenanceEvidence,
     ...speciesEvidence,
   ]);
 }

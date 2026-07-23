@@ -415,6 +415,42 @@ export type DesignSystemId = 'syntropic' | 'alley-cropping' | 'mixed-orchard' | 
 export type PlantingExtent = 'full-field' | 'perimeter-band' | 'selected-edges';
 export type OrientationObjective = 'solar-crop' | 'contour' | 'operations' | 'wind-protection' | 'custom';
 export type AgriculturalMachinePresetId = 'bcs-740' | 'john-deere-1025r' | 'john-deere-3033r' | 'new-holland-t4f';
+export type MaintenanceTaskId = 'vegetation-control' | 'training-pruning' | 'biomass-succession' | 'inspection-replanting';
+export type MaintenancePhase = 'establishment' | 'development' | 'mature';
+export type MaintenanceModelBasis = 'measured-agroforestry-reference' | 'enterprise-budget-reference' | 'practice-standard-reference' | 'triangulated-planning-default';
+
+export type MaintenanceTaskEstimate = {
+  id: MaintenanceTaskId;
+  hours: number;
+  cost: number;
+  areaHours: number;
+  plantHours: number;
+  fixedHours: number;
+};
+
+export type SystemMaintenanceEstimate = {
+  modelVersion: string;
+  system: DesignSystemId;
+  year: number;
+  phase: MaintenancePhase;
+  siteAreaHectares: number;
+  managedAreaHectares: number;
+  activePlantCount: number;
+  laborCostPerHour: number;
+  totalHours: number;
+  totalCost: number;
+  tasks: MaintenanceTaskEstimate[];
+  basis: MaintenanceModelBasis;
+  confidence: Evidence['confidence'];
+  sources: Array<{
+    id: string;
+    organization: string;
+    title: string;
+    version: string;
+    url: string;
+  }>;
+  exclusions: Array<'harvest' | 'annual-crops' | 'materials-inputs' | 'extraordinary-work'>;
+};
 
 export type MachineryConfiguration = {
   enabled: boolean;
@@ -701,6 +737,7 @@ export type IrrigationEstimate = {
     managementLaborCost: number;
     totalCost: number;
   };
+  systemMaintenance: SystemMaintenanceEstimate;
   satelliteScheduling: {
     adjustmentPercent: number;
     recommendation: string;
@@ -753,7 +790,9 @@ export type EstablishmentCost = {
     activePlantCount: number;
     annualWaterM3: number;
     waterAndEnergyCost: number;
+    maintenanceLaborHours: number;
     managementLaborCost: number;
+    maintenanceTasks: MaintenanceTaskEstimate[];
     maintenanceCost: number;
     annualOperatingCost: number;
     activeReplacementCost: number;
@@ -807,12 +846,15 @@ export type CalculationSnapshot = {
     layout: string | null;
     growth: string;
     irrigation: string;
+    maintenance: string;
     economics: string;
   };
   evidenceVersions: Array<{ source: string; version: string; observedAt: string }>;
   outputSummary: {
     treeCount: number;
     annualWaterM3: number | null;
+    maintenanceLaborHours: number | null;
+    maintenanceLaborCost: number | null;
     establishmentCost: number | null;
     currencyCode: string;
   };

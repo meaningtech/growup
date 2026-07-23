@@ -5,6 +5,7 @@ import type {
   IrrigationEstimate,
   LayoutVariant,
   SiteProfile,
+  SystemMaintenanceEstimate,
 } from '../types';
 
 export const OPERATIONAL_TASKS = ['verify-field', 'set-out', 'install-irrigation', 'plant', 'commission', 'monitor'] as const;
@@ -26,6 +27,8 @@ export type OperationalSchedule = {
     pumpRequired: boolean;
     annualWaterM3: number;
     annualOperatingCost: number;
+    maintenanceLaborHours: number;
+    maintenanceLaborCost: number;
   };
   tasks: Array<(typeof OPERATIONAL_TASKS)[number]>;
   planting: Array<{
@@ -40,6 +43,7 @@ export type OperationalSchedule = {
   }>;
   infrastructure: IrrigationEstimate['network']['components'];
   irrigationMonths: IrrigationEstimate['monthly'];
+  maintenance: IrrigationEstimate['systemMaintenance'];
   managementPhases: Array<(typeof MANAGEMENT_PHASES)[number]>;
   evidence: Evidence[];
   warnings: string[];
@@ -53,6 +57,7 @@ export function buildOperationalSchedule(
   costs: EstablishmentCost,
 ): OperationalSchedule {
   const speciesById = new Map(species.map((item) => [item.id, item]));
+  const maintenance = irrigation.systemMaintenance ?? legacyMaintenance(irrigation);
   const planting = costs.bySpecies.map((row) => {
     const item = speciesById.get(row.speciesId);
     if (!item) throw new Error(`Operational schedule cannot resolve species ${row.speciesId}.`);
@@ -72,6 +77,13 @@ export function buildOperationalSchedule(
     profile.landCover.evidence,
     ...profile.satellite.evidence,
     ...profile.satellite.existingVegetation.evidence,
+    ...maintenance.sources.map((source): Evidence => ({
+      source: `${source.organization}: ${source.title}`,
+      sourceUrl: source.url,
+      version: source.version,
+      observedAt: profile.generatedAt,
+      confidence: maintenance.confidence,
+    })),
     ...species.flatMap((item) => item.sources.map((source): Evidence => ({
       source: source.label,
       sourceUrl: source.url,
@@ -96,14 +108,44 @@ export function buildOperationalSchedule(
       pumpRequired: irrigation.network.pumpRequired,
       annualWaterM3: irrigation.annualWaterM3,
       annualOperatingCost: irrigation.annualOperation.totalCost,
+      maintenanceLaborHours: maintenance.totalHours,
+      maintenanceLaborCost: maintenance.totalCost,
     },
     tasks: [...OPERATIONAL_TASKS],
     planting,
     infrastructure: irrigation.network.components.map((component) => ({ ...component })),
     irrigationMonths: irrigation.monthly.map((month) => ({ ...month })),
+    maintenance: {
+      ...maintenance,
+      tasks: maintenance.tasks.map((task) => ({ ...task })),
+      sources: maintenance.sources.map((source) => ({ ...source })),
+      exclusions: [...maintenance.exclusions],
+    },
     managementPhases: [...MANAGEMENT_PHASES],
     evidence,
     warnings: [...new Set([...profile.warnings, ...variant.warnings, ...irrigation.network.warnings])],
+  };
+}
+
+function legacyMaintenance(irrigation: IrrigationEstimate): SystemMaintenanceEstimate {
+  const totalHours = irrigation.annualOperation.managementLaborHours ?? 0;
+  const totalCost = irrigation.annualOperation.managementLaborCost ?? 0;
+  return {
+    modelVersion: 'legacy-project-recalculation-required',
+    system: irrigation.waterModel.system,
+    year: irrigation.designYear,
+    phase: irrigation.designYear <= 2 ? 'establishment' : irrigation.designYear <= irrigation.waterModel.transitionYears ? 'development' : 'mature',
+    siteAreaHectares: 0,
+    managedAreaHectares: 0,
+    activePlantCount: irrigation.activePlantCount,
+    laborCostPerHour: irrigation.economics.laborCostPerHour,
+    totalHours,
+    totalCost,
+    tasks: [],
+    basis: 'triangulated-planning-default',
+    confidence: 'low',
+    sources: [],
+    exclusions: ['harvest', 'annual-crops', 'materials-inputs', 'extraordinary-work'],
   };
 }
 

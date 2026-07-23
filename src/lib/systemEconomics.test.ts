@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DESIGN_SPECIES } from '../data/designSpecies';
-import { managementLaborHours, supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
+import { supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
 
 describe('planting-system economics', () => {
   const support = DESIGN_SPECIES.find((species) => species.roles.includes('biomass') && species.nitrogenFixer)!;
@@ -13,10 +13,7 @@ describe('planting-system economics', () => {
     expect(supplementalIrrigationFactor('monoculture', productive, 1)).toBe(1);
     expect(supplementalIrrigationFactor('monoculture', productive, 30)).toBe(1);
   });
-
-  it('keeps syntropic management labour visible while reducing it after establishment', () => {
-    expect(managementLaborHours('syntropic', 100, 30)).toBeLessThan(managementLaborHours('syntropic', 100, 1));
-    expect(managementLaborHours('syntropic', 100, 30)).toBeGreaterThan(managementLaborHours('monoculture', 100, 30));
+  it('records the measured-system basis for syntropic irrigation autonomy', () => {
     expect(systemEconomicsProfile('syntropic').basis).toBe('measured-system-reference');
   });
 });

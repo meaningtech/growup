@@ -263,6 +263,20 @@ describe('Growup API integration', () => {
     expect(irrigation.body.network.requiredDynamicHeadM).toBeGreaterThan(10);
     expect(irrigation.body.economics).toEqual(expect.objectContaining({ countryCode: 'QZ', currencyCode: 'USD', baseCurrencyCode: 'USD', pricingStatus: 'usd-estimate' }));
     expect(irrigation.body.annualOperation.waterCost).toBeGreaterThan(0);
+    expect(irrigation.body.systemMaintenance).toEqual(expect.objectContaining({
+      modelVersion: 'growup-maintenance-1.0.0',
+      system: 'syntropic',
+      year: 5,
+      basis: 'measured-agroforestry-reference',
+      confidence: 'medium',
+    }));
+    expect(irrigation.body.systemMaintenance.totalHours).toBeGreaterThan(0);
+    expect(irrigation.body.systemMaintenance.tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'vegetation-control' }),
+      expect.objectContaining({ id: 'biomass-succession' }),
+    ]));
+    expect(irrigation.body.annualOperation.managementLaborHours).toBe(irrigation.body.systemMaintenance.totalHours);
+    expect(irrigation.body.annualOperation.managementLaborCost).toBe(irrigation.body.systemMaintenance.totalCost);
 
     const editableLine = irrigation.body.network.lines.find((line: { kind: string }) => line.kind === 'mainline');
     const editedLine = await request(app)
@@ -350,6 +364,12 @@ describe('Growup API integration', () => {
     expect(costs.body.establishment.plantPurchaseCost).toBeGreaterThan(0);
     expect(costs.body.establishment.plantingLaborCost).toBeGreaterThan(0);
     expect(costs.body.establishment.activeSystem.activePlantCount).toBe(phasedVariant.trees.length);
+    expect(costs.body.establishment.timeline[0].maintenanceLaborHours).toBeGreaterThan(0);
+    expect(costs.body.establishment.timeline[0].maintenanceTasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'vegetation-control', hours: expect.any(Number), cost: expect.any(Number) }),
+    ]));
+    expect(costs.body.establishment.timeline[29].maintenanceLaborHours)
+      .toBeLessThan(costs.body.establishment.timeline[0].maintenanceLaborHours);
 
     const matureCosts = await request(app)
       .post('/api/costs/calculate')
@@ -574,8 +594,8 @@ describe('Growup API integration', () => {
       revision: 1,
       inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       geometryHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      modelVersions: expect.objectContaining({ growth: 'growup-growth-1.0.0', irrigation: 'growup-irrigation-1.0.0' }),
-      outputSummary: expect.objectContaining({ treeCount: variant.trees.length }),
+      modelVersions: expect.objectContaining({ growth: 'growup-growth-1.0.0', irrigation: 'growup-irrigation-1.0.0', maintenance: 'growup-maintenance-1.0.0' }),
+      outputSummary: expect.objectContaining({ treeCount: variant.trees.length, maintenanceLaborHours: expect.any(Number), maintenanceLaborCost: expect.any(Number) }),
     }));
     const second = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send({ ...saved.body, name: 'Revised API project', updatedAt: '2026-07-21T01:00:00.000Z' }).expect(200);
     expect(second.body.revision).toBe(2);
@@ -590,6 +610,7 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.features.filter((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree')).toHaveLength(variant.trees.length);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_corridor')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'irrigation_line')).toBe(true);
+    expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.0.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
     expect(exportResponse.body.features.find((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree').properties).toEqual(expect.objectContaining({
       heightLowM: expect.any(Number),
       heightM: expect.any(Number),
@@ -607,6 +628,7 @@ describe('Growup API integration', () => {
     expect(csvLines).toHaveLength(variant.trees.length + 1);
     expect(csvLines[0]).toContain('unit_purchase_cost,planting_labor_hours,planting_labor_cost');
     expect(csvLines[0]).toContain('height_low_m,height_base_m,height_high_m');
+    expect(csvLines[0]).toContain('maintenance_year,maintenance_model,maintenance_phase,maintenance_hours,maintenance_labor_cost');
     const repeatedCsv = await request(app).get(`/api/projects/${project.id}/export.csv`).set('Cookie', sessionCookie).expect(200);
     expect(repeatedCsv.text).toBe(csvResponse.text);
     const logout = await request(app).post('/api/auth/logout').set('Cookie', sessionCookie).expect(200);

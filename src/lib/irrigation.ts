@@ -2,8 +2,9 @@ import { COST_SOURCES, normalizeEconomicConfiguration, REFERENCE_IRRIGATION_RATE
 import type { Coordinate, DesignSpecies, EconomicConfiguration, IrrigationConfiguration, IrrigationEstimate, IrrigationLine, LayoutVariant, SiteBoundary, SiteProfile } from '../types';
 import { growthState } from './growth';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid, type PointM } from './geometry';
+import { calculateSystemMaintenance } from './maintenance';
 import { siteContainsCoordinate } from './siteGeometry';
-import { managementLaborHours, supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
+import { supplementalIrrigationFactor, systemEconomicsProfile } from './systemEconomics';
 
 export const IRRIGATION_MODEL_VERSION = 'growup-irrigation-1.0.0';
 
@@ -120,8 +121,7 @@ export function calculateIrrigation(
   const waterCost = annualGrossM3 * economics.waterCostPerM3;
   const energyCost = pumpingKwh * economics.electricityCostPerKwh;
   const maintenanceCost = installationTotal * REFERENCE_IRRIGATION_RATES.annualMaintenanceRate;
-  const annualManagementLaborHours = managementLaborHours(variant.design.system, activeTrees.length, designYear);
-  const annualManagementLaborCost = annualManagementLaborHours * economics.laborCostPerHour;
+  const systemMaintenance = calculateSystemMaintenance(variant.design.system, designYear, site.areaM2, activeTrees.length, economics);
   const monthlyWithCosts = monthly.map((month) => {
     const monthlyPumpingKwh = network.pumpRequired ? pumpingEnergyKwh(month.grossM3, network.requiredDynamicHeadM) : 0;
     return { ...month, cost: round(month.grossM3 * economics.waterCostPerM3 + monthlyPumpingKwh * economics.electricityCostPerKwh) };
@@ -169,10 +169,11 @@ export function calculateIrrigation(
       pumpingKwh: round(pumpingKwh),
       energyCost: round(energyCost),
       maintenanceCost: round(maintenanceCost),
-      managementLaborHours: round(annualManagementLaborHours),
-      managementLaborCost: round(annualManagementLaborCost),
-      totalCost: round(waterCost + energyCost + maintenanceCost + annualManagementLaborCost),
+      managementLaborHours: systemMaintenance.totalHours,
+      managementLaborCost: systemMaintenance.totalCost,
+      totalCost: round(waterCost + energyCost + maintenanceCost + systemMaintenance.totalCost),
     },
+    systemMaintenance,
     satelliteScheduling: {
       adjustmentPercent: site.satellite.irrigationScheduling.adjustmentPercent,
       recommendation: site.satellite.irrigationScheduling.recommendation,
@@ -187,6 +188,7 @@ export function calculateIrrigation(
       { label: 'Distribution efficiency', value: `${configuration.distributionEfficiencyPercent}%`, source: 'FAO-56 design assumption; editable', sourceUrl: 'https://www.fao.org/4/x0490e/x0490e00.htm' },
       { label: 'Irrigation water', value: `${economics.waterCostPerM3} ${economics.currencyCode}/m³`, source: economics.sourceSummary, sourceUrl: COST_SOURCES.exchangeRates.url },
       { label: 'Common labour', value: `${economics.laborCostPerHour} ${economics.currencyCode}/h`, source: economics.sourceSummary, sourceUrl: COST_SOURCES.exchangeRates.url },
+      { label: 'Routine system maintenance', value: `${systemMaintenance.totalHours} person-hours at year ${designYear}`, source: `${systemMaintenance.modelVersion}; ${systemMaintenance.basis}; ${systemMaintenance.confidence} confidence`, sourceUrl: systemMaintenance.sources[0]?.url ?? 'https://www.fao.org/climate-smart-agriculture-sourcebook/' },
       { label: 'Irrigation materials', value: `USD reference × ${economics.irrigationReferenceMultiplier}`, source: economics.sourceSummary, sourceUrl: COST_SOURCES.agricultureReference.url },
       { label: 'Pump duty', value: `${network.requiredDynamicHeadM} m dynamic head at ${Math.round(REFERENCE_IRRIGATION_RATES.pumpEfficiency * 100)}% efficiency`, source: 'Hazen-Williams line loss, terrain elevation and emitter pressure calculation', sourceUrl: 'https://www.fao.org/4/x0490e/x0490e00.htm' },
       { label: 'Satellite scheduling', value: `${site.satellite.irrigationScheduling.adjustmentPercent}% next-pulse guidance; annual demand unchanged`, source: 'Sentinel-2 NDMI and same-orbit Sentinel-1 RTC anomaly', sourceUrl: 'https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a' },

@@ -138,7 +138,20 @@ function compactContext(context: AssistantProjectContext) {
     variants: context.variants,
     selectedVariantId: context.selectedVariantId,
     timelineYear: context.timelineYear,
-    irrigation: context.irrigation ? { annualWaterM3: context.irrigation.annualWaterM3, annualOperationCost: context.irrigation.annualOperation.totalCost, currencyCode: context.irrigation.economics.currencyCode, adjustmentPercent: context.irrigation.satelliteScheduling.adjustmentPercent } : null,
+    irrigation: context.irrigation ? {
+      annualWaterM3: context.irrigation.annualWaterM3,
+      annualOperationCost: context.irrigation.annualOperation.totalCost,
+      currencyCode: context.irrigation.economics.currencyCode,
+      adjustmentPercent: context.irrigation.satelliteScheduling.adjustmentPercent,
+      maintenance: context.irrigation.systemMaintenance ? {
+        year: context.irrigation.systemMaintenance.year,
+        phase: context.irrigation.systemMaintenance.phase,
+        personHours: context.irrigation.systemMaintenance.totalHours,
+        laborCost: context.irrigation.systemMaintenance.totalCost,
+        tasks: context.irrigation.systemMaintenance.tasks.map((task) => ({ id: task.id, personHours: task.hours, cost: task.cost })),
+        exclusions: context.irrigation.systemMaintenance.exclusions,
+      } : null,
+    } : null,
     costs: context.costs ? { totalCost: context.costs.totalCost, plantCost: context.costs.plantPurchaseCost, currencyCode: context.costs.economics.currencyCode, laborHours: context.costs.plantingLaborHours } : null,
   };
 }
