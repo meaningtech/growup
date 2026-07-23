@@ -264,7 +264,7 @@ describe('Growup API integration', () => {
     expect(irrigation.body.economics).toEqual(expect.objectContaining({ countryCode: 'QZ', currencyCode: 'USD', baseCurrencyCode: 'USD', pricingStatus: 'usd-estimate' }));
     expect(irrigation.body.annualOperation.waterCost).toBeGreaterThan(0);
     expect(irrigation.body.systemMaintenance).toEqual(expect.objectContaining({
-      modelVersion: 'growup-maintenance-1.0.0',
+      modelVersion: 'growup-maintenance-1.1.0',
       system: 'syntropic',
       year: 5,
       basis: 'measured-agroforestry-reference',
@@ -594,7 +594,7 @@ describe('Growup API integration', () => {
       revision: 1,
       inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       geometryHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      modelVersions: expect.objectContaining({ growth: 'growup-growth-1.0.0', irrigation: 'growup-irrigation-1.0.0', maintenance: 'growup-maintenance-1.0.0' }),
+      modelVersions: expect.objectContaining({ growth: 'growup-growth-1.0.0', irrigation: 'growup-irrigation-1.0.0', maintenance: 'growup-maintenance-1.1.0' }),
       outputSummary: expect.objectContaining({ treeCount: variant.trees.length, maintenanceLaborHours: expect.any(Number), maintenanceLaborCost: expect.any(Number) }),
     }));
     const second = await request(app).put(`/api/projects/${project.id}`).set('Cookie', sessionCookie).send({ ...saved.body, name: 'Revised API project', updatedAt: '2026-07-21T01:00:00.000Z' }).expect(200);
@@ -610,7 +610,7 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.features.filter((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree')).toHaveLength(variant.trees.length);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_corridor')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'irrigation_line')).toBe(true);
-    expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.0.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
+    expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.1.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
     expect(exportResponse.body.features.find((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree').properties).toEqual(expect.objectContaining({
       heightLowM: expect.any(Number),
       heightM: expect.any(Number),
@@ -810,6 +810,32 @@ describe('Growup API integration', () => {
     });
     await request(retryingApp).post('/api/assistant/plan').send({ message: 'Review this project.', context }).expect(200);
     expect(transientCalls).toBe(2);
+
+    let emptyJsonCalls = 0;
+    const deepseekApp = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      aiProviderBaseUrl: 'https://api.deepseek.com',
+      aiProviderModel: 'deepseek-v4-pro',
+      aiProviderMaxAttempts: 2,
+      aiProviderRetryDelayMs: 0,
+      fetchImpl: async (_input, init) => {
+        emptyJsonCalls += 1;
+        const body = JSON.parse(String(init?.body));
+        expect(body.thinking).toEqual({ type: 'disabled' });
+        expect(body.max_tokens).toBeGreaterThanOrEqual(2_500);
+        if (emptyJsonCalls === 1) {
+          return new Response(JSON.stringify({
+            choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'internal reasoning omitted' } }],
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: 'No changes required.', rationale: 'The current project remains valid.', warnings: [], actions: [] }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    await request(deepseekApp).post('/api/assistant/plan').send({ message: 'Review this project.', context }).expect(200);
+    expect(emptyJsonCalls).toBe(2);
 
     let rejectedCalls = 0;
     const rejectedApp = createApp({

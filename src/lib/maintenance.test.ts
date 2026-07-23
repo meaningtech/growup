@@ -4,17 +4,20 @@ import { calculateSystemMaintenance, MAINTENANCE_MODEL_VERSION } from './mainten
 describe('multi-year system maintenance', () => {
   const economics = { laborCostPerHour: 20 };
 
-  it('reduces syntropic workload after establishment while keeping mature work visible', () => {
+  it('tapers syntropic routine workload to zero at forest autonomy', () => {
     const establishment = calculateSystemMaintenance('syntropic', 1, 10_000, 800, economics);
+    const transition = calculateSystemMaintenance('syntropic', 15, 10_000, 800, economics);
     const mature = calculateSystemMaintenance('syntropic', 30, 10_000, 800, economics);
 
     expect(establishment.modelVersion).toBe(MAINTENANCE_MODEL_VERSION);
+    expect(establishment.totalHours).toBeGreaterThan(transition.totalHours);
     expect(establishment.totalHours).toBeGreaterThan(mature.totalHours);
-    expect(mature.totalHours).toBeGreaterThan(0);
-    expect(mature.tasks.find((task) => task.id === 'biomass-succession')?.hours).toBeGreaterThan(0);
+    expect(transition.totalHours).toBeGreaterThan(0);
+    expect(mature.totalHours).toBe(0);
+    expect(mature.tasks).toEqual([]);
     expect(mature.totalCost).toBeCloseTo(mature.totalHours * economics.laborCostPerHour, 2);
     expect(establishment.basis).toBe('measured-agroforestry-reference');
-    expect(establishment.sources.length).toBeGreaterThanOrEqual(2);
+    expect(establishment.sources.length).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps monoculture maintenance near a mature plateau as pruning increases', () => {

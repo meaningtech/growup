@@ -15,10 +15,14 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
   expect(assistantTriggerBox).not.toBeNull();
   expect(menuTriggerBox!.y).toBe(assistantTriggerBox!.y);
   expect(menuTriggerBox!.height).toBe(assistantTriggerBox!.height);
+  expect(menuTriggerBox!.x).toBeGreaterThan(assistantTriggerBox!.x);
+  expect(390 - (menuTriggerBox!.x + menuTriggerBox!.width)).toBeLessThanOrEqual(12);
   await menuTrigger.click();
   const mobileMenu = page.getByRole('dialog', { name: 'Menu' });
   await expect(mobileMenu).toBeVisible();
-  await expect(mobileMenu.getByLabel('Language')).toBeVisible();
+  await expect(mobileMenu.getByRole('group', { name: 'Language' })).toBeVisible();
+  await expect(mobileMenu.getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(mobileMenu.getByRole('button', { name: 'Italiano' })).toContainText('🇮🇹');
   await expect(mobileMenu.getByRole('button', { name: 'Tour' })).toBeVisible();
   await expect(mobileMenu.getByRole('button', { name: 'Info' })).toBeVisible();
   await expect(mobileMenu.getByRole('button', { name: 'Save' })).toBeVisible();
@@ -74,6 +78,35 @@ test('keeps map, inspector and workflow navigation usable on a tablet viewport',
   await expect(page.locator('.step-rail')).toBeVisible();
   const overflow = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
+});
+
+test('keeps the desktop product menu right-aligned and gives map tools distinct icons and explanatory tooltips', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 887 });
+  await page.goto('/');
+
+  const menuTrigger = page.getByRole('button', { name: 'Open menu' });
+  const assistantTrigger = page.getByRole('button', { name: 'Ask AF' });
+  const [menuBox, assistantBox] = await Promise.all([menuTrigger.boundingBox(), assistantTrigger.boundingBox()]);
+  expect(menuBox).not.toBeNull();
+  expect(assistantBox).not.toBeNull();
+  expect(menuBox!.x).toBeGreaterThan(assistantBox!.x);
+  expect(1280 - (menuBox!.x + menuBox!.width)).toBeLessThanOrEqual(10);
+
+  const toolNames = ['Edit constraint vertices', 'Draw a management path', 'Edit irrigation pipes'];
+  const iconMarkup = await Promise.all(toolNames.map((name) => page.getByRole('button', { name }).locator('svg').first().innerHTML()));
+  expect(new Set(iconMarkup).size).toBe(3);
+
+  const operationalPath = page.getByRole('button', { name: 'Draw a management path' });
+  await operationalPath.hover();
+  const tooltip = operationalPath.getByRole('tooltip');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText('Draw an operational route for people and machinery.');
+
+  await menuTrigger.click();
+  const productMenu = page.getByRole('dialog', { name: 'Menu' });
+  const productMenuBox = await productMenu.boundingBox();
+  expect(productMenuBox).not.toBeNull();
+  expect(1280 - (productMenuBox!.x + productMenuBox!.width)).toBeLessThanOrEqual(10);
 });
 
 test('prevents focus zoom on a phone in landscape without disabling page zoom', async ({ page }) => {

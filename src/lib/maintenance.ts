@@ -6,7 +6,7 @@ import type {
   SystemMaintenanceEstimate,
 } from '../types';
 
-export const MAINTENANCE_MODEL_VERSION = 'growup-maintenance-1.0.0';
+export const MAINTENANCE_MODEL_VERSION = 'growup-maintenance-1.1.0';
 
 type TaskWorkloadProfile = {
   initialAreaHoursPerHa: number;
@@ -43,6 +43,13 @@ const SOURCES: Record<string, SystemMaintenanceEstimate['sources'][number]> = {
     version: 'accessed 2026-07-23',
     url: 'https://www.atermaisdigital.cnptia.embrapa.br/web/saf/principais-manejos',
   },
+  'fao-maturing-agroforest': {
+    id: 'fao-maturing-agroforest',
+    organization: 'FAO',
+    title: 'Domestication and commercialization of non-timber forest products in agroforestry systems',
+    version: '1996',
+    url: 'https://www.fao.org/4/w3735e/w3735e.pdf',
+  },
   'ucce-almond-budget': {
     id: 'ucce-almond-budget',
     organization: 'University of California Cooperative Extension',
@@ -78,17 +85,17 @@ const ZERO_TASK: TaskWorkloadProfile = {
 
 const PROFILES: Record<DesignSystemId, MaintenanceProfile> = {
   syntropic: {
-    transitionYears: 12,
+    transitionYears: 25,
     managedAreaFraction: 1,
     managedFootprintM2PerPlant: 18,
     basis: 'measured-agroforestry-reference',
     confidence: 'medium',
-    sourceIds: ['embrapa-diversified-costs', 'embrapa-management-practices'],
+    sourceIds: ['embrapa-diversified-costs', 'embrapa-management-practices', 'fao-maturing-agroforest'],
     tasks: {
-      'vegetation-control': task(155, 28, 0.015, 0.004, 4, 2, 0.3),
-      'training-pruning': task(0, 0, 0.045, 0.05, 3, 4, 0.75),
-      'biomass-succession': task(28, 10, 0.115, 0.045, 4, 4, 0.45),
-      'inspection-replanting': task(18, 10, 0.025, 0.007, 4, 3, 0.35),
+      'vegetation-control': task(155, 0, 0.015, 0, 4, 0, 0.45),
+      'training-pruning': task(0, 0, 0.045, 0, 3, 0, 0.78),
+      'biomass-succession': task(28, 0, 0.115, 0, 4, 0, 0.58),
+      'inspection-replanting': task(18, 0, 0.025, 0, 4, 0, 0.48),
     },
   },
   monoculture: {

@@ -16,6 +16,7 @@ test('offers explicit local recovery without silently preloading a field', async
 
   await recovery.getByRole('button', { name: 'Recover' }).click();
   await expect(page.getByText(TEMPERATE_OPEN_FIELD_FIXTURE.name)).toBeVisible();
+  await page.getByRole('button', { name: 'Open menu' }).click();
   await expect(page.getByTestId('save-status')).toContainText('saved in this browser');
 });
 

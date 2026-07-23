@@ -23,7 +23,7 @@ export type AssistantProviderConfig = {
 type OpenAiCompatibleResponse = {
   choices?: Array<{
     finish_reason?: string;
-    message?: { content?: string | null };
+    message?: { content?: string | null; reasoning_content?: string | null };
   }>;
 };
 
@@ -56,8 +56,9 @@ export async function planAssistantAction(
       { role: 'user', content: JSON.stringify({ request: cleanMessage, project: compactContext(context), availableSpecies: availableSpecies(context) }) },
     ],
     response_format: { type: 'json_object' },
+    ...structuredOutputProviderOptions(baseUrl, model),
     temperature: 0.2,
-    max_tokens: 1_500,
+    max_tokens: 2_500,
   };
 
   let lastError: unknown = null;
@@ -76,12 +77,12 @@ export async function planAssistantAction(
         throw assistantError(502, 'AI_PROVIDER_ERROR', boundedProviderMessage(providerMessage) || `The configured AI provider returned ${response.status}.`, retryable);
       }
       const content = payload && 'choices' in payload ? payload.choices?.[0]?.message?.content?.trim() : '';
-      if (!content) throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.');
+      if (!content) throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.', true);
       let parsed: unknown;
       try {
         parsed = JSON.parse(content);
       } catch {
-        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned invalid JSON.');
+        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned invalid JSON.', true);
       }
       try {
         return validateProposal(parsed, context, model);
@@ -248,6 +249,18 @@ function providerBaseUrl(config: AssistantProviderConfig) {
 
 function providerModel(config: AssistantProviderConfig) {
   return config.aiProviderModel ?? process.env.AI_PROVIDER_MODEL ?? config.deepseekModel ?? process.env.DEEPSEEK_MODEL ?? DEFAULT_PROVIDER_MODEL;
+}
+
+function structuredOutputProviderOptions(baseUrl: string, model: string) {
+  try {
+    const hostname = new URL(baseUrl).hostname.toLocaleLowerCase('en');
+    if (hostname === 'api.deepseek.com' || model.toLocaleLowerCase('en').startsWith('deepseek-v4')) {
+      return { thinking: { type: 'disabled' as const } };
+    }
+  } catch {
+    return {};
+  }
+  return {};
 }
 
 function integerSetting(configured: number | undefined, environmental: string | undefined, fallback: number, minimum: number, maximum: number) {

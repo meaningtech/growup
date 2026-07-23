@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import type { EstablishmentCost, IrrigationEstimate } from '../src/types';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
@@ -40,6 +40,17 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByText('Canopy Y20')).toBeVisible();
   const successionTimeline = page.getByTestId('succession-timeline');
   await expect(successionTimeline).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 887 });
+  await page.waitForTimeout(150);
+  const [tabletTimelineBox, appShellBox] = await Promise.all([
+    successionTimeline.boundingBox(),
+    page.locator('.app-shell').boundingBox(),
+  ]);
+  expect(tabletTimelineBox).not.toBeNull();
+  expect(appShellBox).not.toBeNull();
+  expect(Math.abs(appShellBox!.height - 887)).toBeLessThanOrEqual(2);
+  expect(tabletTimelineBox!.y + tabletTimelineBox!.height).toBeLessThanOrEqual(887 - 12);
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-ipad-succession.png', fullPage: false });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#root').evaluate((element) => { element.scrollTop = 900; });
   const [mobileTimelineBox, mobileRailBox] = await Promise.all([
@@ -131,7 +142,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByTestId('cost-timeline')).toContainText('Annual operating cost over time');
   await expect(page.getByTestId('maintenance-timeline')).toContainText('Maintenance hours and labour cost');
   await expect(page.getByTestId('maintenance-timeline')).toContainText('Biomass and succession management');
-  await expect(page.getByTestId('maintenance-timeline')).toContainText('Measured agroforestry workload curve');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Agroforestry references with a forest-autonomy endpoint');
+  await expect(page.getByTestId('economic-configuration')).not.toContainText('USD');
   await expect(page.getByText('Planting labour', { exact: false })).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-costs.png', fullPage: false });
@@ -150,8 +162,25 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await schedule.getByText('Evidence register').scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-operational-schedule-evidence.png', fullPage: false });
   const schedulePdf = '/private/tmp/growup-operational-schedule.pdf';
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('.app-shell')).toHaveCSS('display', 'block');
+  await expect(page.locator('.schedule-backdrop')).toHaveCSS('position', 'static');
+  const printMetrics = await schedule.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    scrollWidth: element.scrollWidth,
+    height: element.getBoundingClientRect().height,
+    sections: element.querySelectorAll('.schedule-section').length,
+  }));
+  expect(printMetrics.scrollWidth).toBeLessThanOrEqual(Math.ceil(printMetrics.width));
+  expect(printMetrics.height).toBeGreaterThan(2_500);
+  expect(printMetrics.sections).toBe(5);
   await page.pdf({ path: schedulePdf, format: 'A4', printBackground: true });
   expect((await stat(schedulePdf)).size).toBeGreaterThan(30_000);
+  const pdfSource = (await readFile(schedulePdf)).toString('latin1');
+  const pdfPageCount = pdfSource.match(/\/Type\s*\/Page\b/g)?.length ?? 0;
+  expect(pdfPageCount).toBeGreaterThanOrEqual(3);
+  expect(pdfPageCount).toBeLessThanOrEqual(6);
+  await page.emulateMedia({ media: 'screen' });
   await schedule.getByRole('button', { name: 'Close work plan' }).click();
 
   const matureCostsPromise = page.waitForResponse((response) => {
@@ -164,26 +193,34 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   expect(matureCosts.irrigation.activePlantCount).toBeLessThanOrEqual(initialCosts.irrigation.activePlantCount);
   expect(matureCosts.irrigation.annualWaterM3).toBeLessThan(initialCosts.irrigation.annualWaterM3);
   expect(matureCosts.irrigation.systemMaintenance.totalHours).toBeLessThan(initialCosts.irrigation.systemMaintenance.totalHours);
+  expect(matureCosts.irrigation.systemMaintenance.totalHours).toBe(0);
   expect(matureCosts.irrigation.systemMaintenance.totalCost).toBeLessThan(initialCosts.irrigation.systemMaintenance.totalCost);
   expect(matureCosts.irrigation.annualOperation.totalCost).toBeLessThan(initialCosts.irrigation.annualOperation.totalCost);
   expect(matureCosts.establishment.activeSystem.totalReplacementCost).toBeLessThanOrEqual(initialCosts.establishment.activeSystem.totalReplacementCost);
   expect(matureCosts.establishment.totalCost).toBe(initialCosts.establishment.totalCost);
   await expect(page.getByText('Active system · year 29')).toBeVisible();
   await expect(page.getByText('Water + operation · year 29')).toBeVisible();
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Forest-autonomy phase');
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-year-29-costs.png', fullPage: false });
-  await page.locator('.language-select select').selectOption('it');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Italiano' }).click();
   await page.getByTestId('maintenance-timeline').scrollIntoViewIfNeeded();
-  await expect(page.getByTestId('economic-configuration').getByText(/Stima globale in USD convertita/).first()).toBeVisible();
+  await expect(page.getByTestId('economic-configuration')).toContainText('Tariffe di pianificazione adeguate al paese');
+  await expect(page.getByTestId('economic-configuration')).not.toContainText('USD');
   await expect(page.getByTestId('maintenance-timeline')).toContainText('Ore di manutenzione e costo del lavoro');
-  await expect(page.getByTestId('maintenance-timeline')).toContainText('Gestione di biomassa e successione');
+  await expect(page.getByTestId('maintenance-timeline')).toContainText('Fase di autonomia del bosco');
   await expect(page.getByText(/Global USD planning estimate converted/)).toHaveCount(0);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-syntropic-cost-curve-it.png', fullPage: false });
-  await page.locator('.language-select select').selectOption('en');
+  await page.getByRole('button', { name: 'Apri menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'English' }).click();
 
+  await page.getByRole('button', { name: 'Open menu' }).click();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('dialog', { name: 'Keep every field design together.' })).toBeVisible();
   await expect(page.getByText('Sign in with Google before saving this project.')).toBeVisible();
-  const exportLink = page.locator('a.button').filter({ hasText: 'GeoJSON' });
+  await page.getByRole('button', { name: 'Close sign in' }).click();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  const exportLink = page.getByRole('dialog', { name: 'Menu' }).locator('.mobile-export-actions a').filter({ hasText: 'GeoJSON' });
   await expect(exportLink).toHaveCount(1);
   await expect(exportLink).not.toHaveAttribute('href', /.+/);
   const projectsResponse = await page.request.get('/api/projects');
@@ -194,7 +231,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   const unexpectedConsoleErrors = consoleErrors.filter((message) =>
     !message.includes('Google Maps JavaScript API has been loaded directly') &&
     !(temporaryCloudOrigin && message === 'Failed to load resource: the server responded with a status of 403 ()') &&
-    !(temporaryCloudOrigin && message.includes('[GSI_LOGGER]: The given origin is not allowed for the given client ID.')),
+    !(temporaryCloudOrigin && message.includes('[GSI_LOGGER]: The given origin is not allowed for the given client ID.')) &&
+    !(temporaryCloudOrigin && message.includes('RefererNotAllowedMapError')),
   );
   expect(unexpectedConsoleErrors, consoleErrors.join('\n')).toEqual([]);
 });

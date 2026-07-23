@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Ban,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -30,6 +31,7 @@ import {
   Route,
   Satellite,
   Save,
+  ScanLine,
   Search,
   Send,
   ShieldCheck,
@@ -41,6 +43,7 @@ import {
   Undo2,
   Upload,
   Waves,
+  Waypoints,
   X,
 } from 'lucide-react';
 import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
@@ -341,6 +344,27 @@ export default function App() {
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const updateViewportHeight = () => {
+      document.documentElement.style.setProperty('--growup-viewport-height', `${Math.round(viewport?.height ?? window.innerHeight)}px`);
+    };
+    updateViewportHeight();
+    viewport?.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    return () => {
+      viewport?.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('resize', updateViewportHeight);
+      document.documentElement.style.removeProperty('--growup-viewport-height');
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!notice || busy || error) return;
+    const timeout = window.setTimeout(() => setNotice(null), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [notice, busy, error]);
 
   useEffect(() => {
     if (onboarding?.status !== 'active') return;
@@ -1665,26 +1689,8 @@ export default function App() {
           />
         </div>
         <div className="top-actions">
-          <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
           <button className="button ai-trigger mobile-top-action mobile-ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
-          <div className="desktop-top-actions">
-            {authUser && projects.length > 0 && <label className="project-select"><span className="visually-hidden">{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => void openProject(event.target.value)}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
-            {site && <span className={`save-status ${saveStatus}`} data-testid="save-status"><i />{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span>}
-            <label className="language-select"><span className="visually-hidden">{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.shortLabel}</option>)}</select></label>
-            <button className="button ghost tour-trigger" onClick={() => updateOnboarding('active', 'welcome')} title={t('onboarding.restart')}><MapIcon size={16} /> {t('onboarding.tour')}</button>
-            <button className="button ghost info-trigger" onClick={() => setInfoOpen(true)} title={t('info.open')}><Info size={16} /> {t('info.open')}</button>
-            <button className="button ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
-            <button className="button ghost" onClick={saveProject} disabled={!site || Boolean(busy)}><Save size={16} /> {t('actions.save')}</button>
-            <button className="button ghost history-trigger" onClick={() => setHistoryOpen(true)} disabled={!authUser || projectRevision < 1}><Database size={15} /> {t('auth.history')}</button>
-            <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined}><Download size={16} /> GeoJSON</a>
-            <a className={`button ghost export-action ${!selectedVariant || !authUser ? 'disabled' : ''}`} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined}><Download size={16} /> CSV</a>
-            {authUser ? (
-              <button className="user-chip" onClick={logout} aria-label={t('auth.signOut')} title={t('auth.signOut')}>
-                {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
-                <strong>{authUser.name}</strong><LogOut size={14} />
-              </button>
-            ) : <button className="button auth-trigger" onClick={() => setAuthOpen(true)}><LogIn size={15} /> {t('auth.signIn')}</button>}
-          </div>
+          <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
         </div>
       </header>
 
@@ -1692,9 +1698,12 @@ export default function App() {
         <button className="mobile-menu-backdrop" aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)} />
         <aside id="mobile-product-menu" className="mobile-product-menu" role="dialog" aria-modal="true" aria-label={t('mobile.menu')}>
           <header><span><strong>{t('mobile.menu')}</strong><small>{projectName}</small></span><button aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)}><X size={18} /></button></header>
-          {site && <div className={`mobile-save-status ${saveStatus}`}><i /><span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
+          {site && <div className={`mobile-save-status ${saveStatus}`} data-testid="save-status"><i /><span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
           {authUser && projects.length > 0 && <label className="mobile-project-select"><span>{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => { setMobileMenuOpen(false); void openProject(event.target.value); }}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
-          <label className="mobile-language-select"><span><MapIcon size={17} />{t('language.label')}</span><select aria-label={t('language.label')} value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{SUPPORTED_LOCALES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
+          <div className="mobile-language-picker" role="group" aria-label={t('language.label')}>
+            <span>{t('language.label')}</span>
+            <div>{SUPPORTED_LOCALES.map((item) => <button key={item.code} aria-label={item.label} aria-pressed={locale === item.code} className={locale === item.code ? 'active' : ''} onClick={() => { setLocale(item.code); setMobileMenuOpen(false); }}><b aria-hidden="true">{item.flag}</b><small>{item.shortLabel}</small></button>)}</div>
+          </div>
           <nav>
             <button onClick={() => { setMobileMenuOpen(false); updateOnboarding('active', 'welcome'); }}><span><MapIcon size={17} />{t('onboarding.tour')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); setInfoOpen(true); }}><span><Info size={17} />{t('info.open')}</span><ChevronRight size={16} /></button>
@@ -1742,16 +1751,16 @@ export default function App() {
             <small>{draftPoints.length < (drawMode === 'path' ? 2 : 3) ? t('map.pointsRemaining', { count: (drawMode === 'path' ? 2 : 3) - draftPoints.length }) : t('map.readyToFinish')}</small>
           </div>}
           <div className="map-toolbar">
-            <button aria-label={t('map.editSite')} className={drawMode === 'edit-site' ? 'active' : ''} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} title={t('map.editSite')}><MousePointer2 size={17} /></button>
-            <button aria-label={t('map.editConstraints')} className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => activateDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints')} title={t('map.editConstraints')}><Route size={17} /></button>
-            <button aria-label={t('map.drawSite')} className={drawMode === 'site' ? 'active' : ''} onClick={() => activateDrawMode('site')} title={t('map.drawSite')}><PencilRuler size={17} /></button>
-            <button aria-label={t('map.drawHole')} className={drawMode === 'hole' ? 'active' : ''} onClick={() => activateDrawMode('hole')} title={t('map.drawHole')}><CircleOff size={17} /></button>
-            <button aria-label={t('map.drawExclusion')} className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => activateDrawMode('exclusion')} title={t('map.drawExclusion')}><Layers3 size={17} /></button>
-            <button aria-label={t('map.drawPath')} className={drawMode === 'path' ? 'active' : ''} onClick={() => activateDrawMode('path')} title={t('map.drawPath')}><Route size={17} /></button>
-            {isGeometryDrawMode(drawMode) && <button aria-label={t('map.finish')} className="finish" onClick={finishDraft} title={t('map.finish')}><Check size={17} /></button>}
+            <MapToolbarButton icon={MousePointer2} label={t('map.editSite')} hint={t('map.tooltip.editSite')} active={drawMode === 'edit-site'} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} />
+            <MapToolbarButton icon={ScanLine} label={t('map.editConstraints')} hint={t('map.tooltip.editConstraints')} active={drawMode === 'edit-constraints'} onClick={() => activateDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints')} />
+            <MapToolbarButton icon={PencilRuler} label={t('map.drawSite')} hint={t('map.tooltip.drawSite')} active={drawMode === 'site'} onClick={() => activateDrawMode('site')} />
+            <MapToolbarButton icon={CircleOff} label={t('map.drawHole')} hint={t('map.tooltip.drawHole')} active={drawMode === 'hole'} onClick={() => activateDrawMode('hole')} />
+            <MapToolbarButton icon={Ban} label={t('map.drawExclusion')} hint={t('map.tooltip.drawExclusion')} active={drawMode === 'exclusion'} onClick={() => activateDrawMode('exclusion')} />
+            <MapToolbarButton icon={Tractor} label={t('map.drawPath')} hint={t('map.tooltip.drawPath')} active={drawMode === 'path'} onClick={() => activateDrawMode('path')} />
+            {isGeometryDrawMode(drawMode) && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
             <span />
-            <button aria-label={t('map.layers')} aria-expanded={showLayerPanel} className={showLayerPanel ? 'active layers' : 'layers'} onClick={() => setShowLayerPanel((value) => !value)} title={t('map.layers')}><Layers3 size={17} /></button>
-            <button aria-label={t('map.editIrrigation')} className={editingIrrigation ? 'active water' : ''} onClick={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} disabled={!irrigation} title={t('map.editIrrigation')}><Route size={17} /></button>
+            <MapToolbarButton icon={Layers3} label={t('map.layers')} hint={t('map.tooltip.layers')} active={showLayerPanel} className="layers" expanded={showLayerPanel} onClick={() => setShowLayerPanel((value) => !value)} />
+            <MapToolbarButton icon={Waypoints} label={t('map.editIrrigation')} hint={t('map.tooltip.editIrrigation')} active={editingIrrigation} className="water" disabled={!irrigation} onClick={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />
           </div>
           {showLayerPanel && <div className="map-layer-panel" data-testid="map-layer-panel" role="group" aria-label={t('map.layers')}>
             <header><span><Layers3 size={16} /><strong>{t('map.layersTitle')}</strong></span><button aria-label={t('map.closeLayers')} onClick={() => setShowLayerPanel(false)}><X size={15} /></button></header>
@@ -2001,6 +2010,29 @@ function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggl
     <i className={`map-layer-swatch ${tone}`}><Icon size={15} /></i>
     <span><strong>{label}</strong><small>{hint}</small></span>
     <Check className="map-layer-check" size={14} />
+  </button>;
+}
+
+function MapToolbarButton({ icon: Icon, label, hint, active = false, disabled = false, expanded, className = '', onClick }: {
+  icon: typeof Layers3;
+  label: string;
+  hint: string;
+  active?: boolean;
+  disabled?: boolean;
+  expanded?: boolean;
+  className?: string;
+  onClick: () => void;
+}) {
+  return <button
+    type="button"
+    aria-label={label}
+    aria-expanded={expanded}
+    className={`${className} ${active ? 'active' : ''}`.trim()}
+    disabled={disabled}
+    onClick={onClick}
+  >
+    <Icon size={17} />
+    <span className="map-toolbar-tooltip" role="tooltip"><strong>{label}</strong><small>{hint}</small></span>
   </button>;
 }
 
@@ -2341,7 +2373,9 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
     <ScheduleSection number="04" title={t('schedule.managementTitle')} subtitle={t('schedule.managementBody')}>
       <div className="schedule-maintenance-detail">
         <header><span><small>{t('costs.selectedYear', { year: schedule.maintenance.year })}</small><strong>{t('costs.maintenanceWorkload')}</strong></span><b>{formatNumber(schedule.maintenance.totalHours, 1)} h · {currency(schedule.maintenance.totalCost, costs.economics)}</b></header>
-        <div>{schedule.maintenance.tasks.map((task) => <span key={task.id}><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h</small><b>{currency(task.cost, costs.economics)}</b></span>)}</div>
+        <div>{schedule.maintenance.tasks.length > 0
+          ? schedule.maintenance.tasks.map((task) => <span key={task.id}><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h</small><b>{currency(task.cost, costs.economics)}</b></span>)
+          : <span className="schedule-maintenance-autonomous"><strong>{t('costs.maintenanceAutonomousTitle')}</strong><small>{t('costs.maintenanceAutonomousBody')}</small></span>}</div>
       </div>
       <div className="schedule-management">{schedule.managementPhases.map((phase) => <article key={phase}><small>{t(`schedule.phase.${phase}.years`)}</small><strong>{t(`schedule.phase.${phase}.title`)}</strong><p>{t(`schedule.phase.${phase}.body`)}</p><em>{t(`schedule.management.system.${variant.design.system}`)}</em><span>□ {t('schedule.recordActuals')}</span></article>)}</div>
       {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1) })}</small></span></div>}
@@ -2358,7 +2392,7 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
 }
 
 function ScheduleSection({ number, title, subtitle, children }: { number: string; title: string; subtitle: string; children: ReactNode }) {
-  return <section className="schedule-section"><header><i>{number}</i><span><h2>{title}</h2><p>{subtitle}</p></span></header>{children}</section>;
+  return <section className="schedule-section" data-section={number}><header><i>{number}</i><span><h2>{title}</h2><p>{subtitle}</p></span></header>{children}</section>;
 }
 
 function ScheduleMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
@@ -2724,7 +2758,7 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
 }
 
 function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare, onSchedule }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onSchedule: () => void }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const update = (patch: Partial<EconomicConfiguration>) => onConfiguration({
     ...configuration,
     ...patch,
@@ -2737,7 +2771,6 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
   const rateConfiguration = <div className="economic-configuration" data-testid="economic-configuration">
     <div className="card-heading"><div><CircleDollarSign size={17} /><span><small>{t('costs.localBasisEyebrow')}</small><strong>{t('costs.localBasisTitle', { country: configuration.countryCode })}</strong></span></div><StatusPill status={configuration.missingLocalRates.length ? 'review-required' : 'available'} /></div>
     <p>{localizedEconomicSummary(configuration.sourceSummary, t)}</p>
-    <small>{t('costs.exchangeBasis', { rate: formatNumber(configuration.exchangeRateToLocal, 4), currency: configuration.currencyCode, date: shortDate(configuration.sourceObservedAt, locale), confidence: translatedStatus(configuration.confidence, t) })}</small>
     <div className="economic-input-grid">
       <label><span>{t('costs.currency')}</span><input aria-label={t('costs.currency')} value={configuration.currencyCode} maxLength={3} onChange={(event) => update({ currencyCode: event.target.value.toUpperCase() })} /></label>
       <label><span>{t('costs.labourRate')}</span><input aria-label={t('costs.labourRate')} type="number" min="0" step="0.01" value={configuration.laborCostPerHour} onChange={(event) => update({ laborCostPerHour: Number(event.target.value) })} /><i>{configuration.currencyCode}/h</i></label>
@@ -2868,7 +2901,9 @@ function MaintenanceTimelineChart({ costs, irrigation }: { costs: EstablishmentC
         <circle className="current-year-point" cx={x(currentIndex)} cy={y(current.maintenanceLaborHours)} r="5" />
       </svg>
       <div className="maintenance-task-list">
-        {current.maintenanceTasks.map((task) => <div key={task.id}><span><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h · {currency(task.cost, costs.economics)}</small></span><i><b style={{ width: `${task.hours / largestTask * 100}%` }} /></i></div>)}
+        {current.maintenanceTasks.length > 0
+          ? current.maintenanceTasks.map((task) => <div key={task.id}><span><strong>{t(`costs.maintenanceTask.${task.id}`)}</strong><small>{formatNumber(task.hours, 1)} h · {currency(task.cost, costs.economics)}</small></span><i><b style={{ width: `${task.hours / largestTask * 100}%` }} /></i></div>)
+          : <div className="maintenance-autonomous"><span><strong>{t('costs.maintenanceAutonomousTitle')}</strong><small>{t('costs.maintenanceAutonomousBody')}</small></span><Check size={17} /></div>}
       </div>
       <div className="maintenance-method"><span>{t(`costs.maintenanceBasis.${irrigation.systemMaintenance.basis}`)}</span><b>{t('costs.maintenanceEvidence', { count: irrigation.systemMaintenance.sources.length, confidence: translatedStatus(irrigation.systemMaintenance.confidence, t) })}</b></div>
       <small className="maintenance-note">{t('costs.maintenanceNote', { rate: currency(irrigation.systemMaintenance.laborCostPerHour, costs.economics) })} · {t('costs.longTermHoursChange', { value: signed(Math.round(change)) })}</small>

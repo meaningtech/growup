@@ -21,7 +21,11 @@ test('starts with an empty editable workspace and no bundled local field', async
   await expect(page.locator('.map-badge')).toHaveCount(0);
   await expect(page.locator('.gm-style')).toBeVisible();
   await expect(page.getByText('Oops! Something went wrong.')).toHaveCount(0);
-  await expect(page.locator('.topbar')).toHaveCSS('height', '68px');
+  await expect(page.locator('.topbar')).toHaveCSS('height', '60px');
+  await expect(page.locator('.top-actions > button')).toHaveCount(2);
+  const menuBox = await page.getByRole('button', { name: 'Open menu' }).boundingBox();
+  expect(menuBox).not.toBeNull();
+  expect(1440 - (menuBox!.x + menuBox!.width)).toBeLessThanOrEqual(10);
 
   const config = await (await page.request.get('/api/config')).json();
   expect(config).not.toHaveProperty('defaultSite');

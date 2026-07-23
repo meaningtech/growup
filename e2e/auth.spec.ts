@@ -14,7 +14,8 @@ test('loads the real optional Google sign-in client without exposing server cred
   const config = await (await page.request.get('/api/config')).json() as { auth: { configured: boolean; googleClientId: string } };
   expect(config.auth.configured).toBe(true);
   expect(config.auth.googleClientId).toMatch(/\.apps\.googleusercontent\.com$/);
-  const signIn = page.getByRole('button', { name: 'Sign in' });
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  const signIn = page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Sign in' });
   await expect(signIn).toBeVisible();
   await signIn.click();
   const dialog = page.getByRole('dialog', { name: 'Keep every field design together.' });
