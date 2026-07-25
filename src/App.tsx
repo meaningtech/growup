@@ -210,6 +210,7 @@ export default function App() {
   const [editingIrrigation, setEditingIrrigation] = useState(false);
   const [busy, setBusy] = useState<string | null>(() => t('busy.loading'));
   const [error, setError] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -376,6 +377,16 @@ export default function App() {
     const timeout = window.setTimeout(() => setNotice(null), 5_000);
     return () => window.clearTimeout(timeout);
   }, [notice, busy, error]);
+
+  useEffect(() => {
+    if (!guidance || busy || error || notice) return;
+    const timeout = window.setTimeout(() => setGuidance(null), 6_000);
+    return () => window.clearTimeout(timeout);
+  }, [guidance, busy, error, notice]);
+
+  useEffect(() => {
+    if (guidance && (busy || error || notice)) setGuidance(null);
+  }, [guidance, busy, error, notice]);
 
   useEffect(() => {
     if (onboarding?.status !== 'active') return;
@@ -582,7 +593,7 @@ export default function App() {
         const coordinate = coordinateFromLatLng(event.latLng);
         if (!siteContainsCoordinate(site, coordinate)) {
           marker.setPosition(point.coordinate);
-          setError(t('errors.infrastructureOutside'));
+          showBoundaryGuidance();
           return;
         }
         void relocateWaterSource(coordinate, point.id);
@@ -874,7 +885,7 @@ export default function App() {
       const coordinate = coordinateFromLatLng(event.latLng);
       if (!siteContainsCoordinate(site, coordinate)) {
         sourceMarker.setPosition(irrigation.network.source.coordinate);
-        setError(t('errors.infrastructureOutside'));
+        showBoundaryGuidance();
         return;
       }
       void relocateWaterSource(coordinate);
@@ -927,8 +938,7 @@ export default function App() {
     }
     if (site && (drawMode === 'access-point' || drawMode === 'water-point' || drawMode === 'existing-tree')) {
       if (!siteContainsCoordinate(site, coordinate)) {
-        setError(t('errors.infrastructureOutside'));
-        setDrawMode('idle');
+        showBoundaryGuidance();
         return;
       }
       const id = crypto.randomUUID();
@@ -979,6 +989,11 @@ export default function App() {
     const normalized = normalizeSiteBoundary(nextSite);
     const validation = localSiteValidation(normalized);
     if (!validation.valid) {
+      if (validation.reason === 'Access, water and existing-tree points must lie inside the site.') {
+        if (site && drawMode === 'edit-site') setSite(cloneSite(site));
+        showBoundaryGuidance();
+        return;
+      }
       setError(localizedDomainMessage(validation.reason, t));
       return;
     }
@@ -1223,7 +1238,7 @@ export default function App() {
 
   async function relocateWaterSource(coordinate: Coordinate, requestedPointId?: string) {
     if (!site) return;
-    if (!siteContainsCoordinate(site, coordinate)) return setError(t('errors.infrastructureOutside'));
+    if (!siteContainsCoordinate(site, coordinate)) return showBoundaryGuidance();
     const existingPoint = site.waterPoints.find((point) => point.id === requestedPointId)
       ?? site.waterPoints.find((point) => point.id === irrigationConfiguration.sourcePointId)
       ?? site.waterPoints[0]
@@ -1253,7 +1268,7 @@ export default function App() {
   async function relocateIrrigationVertex(lineId: string, vertexIndex: number, points: Coordinate[]) {
     if (!site || !irrigation || points.length < 2) return;
     if (points.some((point) => !siteContainsCoordinate(site, point))) {
-      setError(t('errors.infrastructureOutside'));
+      showBoundaryGuidance();
       setIrrigation({ ...irrigation });
       return;
     }
@@ -1743,9 +1758,16 @@ export default function App() {
     commitTrees(selectedVariant.trees.map((tree) => tree.id === selectedTree.id ? { ...tree, locked: !tree.locked } : tree));
   }
 
+  function showBoundaryGuidance() {
+    setError(null);
+    setNotice(null);
+    setGuidance(t('guidance.pointOutside'));
+  }
+
   async function runBusy<T>(label: string, operation: () => Promise<T>) {
     setBusy(label);
     setError(null);
+    setGuidance(null);
     try {
       return await operation();
     } catch (operationError) {
@@ -1792,7 +1814,10 @@ export default function App() {
           />
         </div>
         <div className="top-actions">
-          <button className="button ai-trigger mobile-top-action mobile-ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> {t('actions.ask')}</button>
+          <button className="button ai-trigger mobile-top-action mobile-ai-trigger" aria-label={t('actions.ask')} title={t('actions.ask')} onClick={() => setAssistantOpen(true)}>
+            <Sparkles size={16} />
+            <span className="mobile-ai-label">{t('actions.ask')}</span>
+          </button>
           <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
         </div>
       </header>
@@ -2007,11 +2032,11 @@ export default function App() {
         onClose={() => setScheduleOpen(false)}
       />}
 
-      {(busy || error || notice) && (
-        <div className={`toast ${error ? 'error' : notice ? 'success' : ''}`} role="status">
-          {busy ? <LoaderCircle className="spin" size={18} /> : error ? <span className="toast-symbol">!</span> : <Check size={18} />}
-          <span>{busy ?? error ?? notice}</span>
-          {!busy && <button onClick={() => { setError(null); setNotice(null); }}>×</button>}
+      {(busy || error || guidance || notice) && (
+        <div className={`toast ${error ? 'error' : guidance ? 'guidance' : notice ? 'success' : ''}`} role="status">
+          {busy ? <LoaderCircle className="spin" size={18} /> : error ? <span className="toast-symbol">!</span> : guidance ? <Info size={18} /> : <Check size={18} />}
+          <span>{busy ?? error ?? guidance ?? notice}</span>
+          {!busy && <button aria-label={t('actions.close')} onClick={() => { setError(null); setGuidance(null); setNotice(null); }}>×</button>}
         </div>
       )}
     </div>

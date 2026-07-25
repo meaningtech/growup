@@ -3,6 +3,55 @@ import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/l
 import { distanceToSiteBoundaryM, distanceToSitePathM, importSiteGeoJson, siteContainsCoordinate } from '../src/lib/siteGeometry';
 import type { LayoutVariant, SiteProfile } from '../src/types';
 
+test('keeps an outside infrastructure attempt non-destructive and ready to retry', async ({ page }, testInfo) => {
+  await page.route('**/api/site/validate', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      valid: true,
+      reason: 'Valid site geometry',
+      areaM2: 2_400,
+      perimeterM: 210,
+      plantableAreaM2: 2_200,
+      geometryType: 'Polygon',
+      counts: { polygons: 1, holes: 0, exclusions: 0, paths: 0, accessPoints: 0, waterPoints: 0, existingTrees: 0 },
+    }),
+  }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  for (const coordinate of [
+    { lat: 36.92130, lng: 14.75300 },
+    { lat: 36.92105, lng: 14.75365 },
+    { lat: 36.92073, lng: 14.75320 },
+  ]) {
+    await page.getByLabel('Coordinate latitude').fill(String(coordinate.lat));
+    await page.getByLabel('Coordinate longitude').fill(String(coordinate.lng));
+    await page.getByRole('button', { name: 'Add coordinate' }).click();
+  }
+  await page.getByRole('button', { name: 'Finish geometry' }).click();
+  await expect(page.getByText('Authoritative user-defined boundary')).toBeVisible();
+
+  const waterTool = page.locator('.site-tool-grid').getByRole('button', { name: /^Water/ });
+  await waterTool.click();
+  await page.getByLabel('Coordinate latitude').fill('36.925');
+  await page.getByLabel('Coordinate longitude').fill('14.76');
+  await page.getByRole('button', { name: 'Add coordinate' }).click();
+
+  const guidance = page.locator('.toast.guidance');
+  await expect(guidance).toContainText('That point is outside the field, so nothing changed.');
+  await expect(waterTool).toHaveClass(/active/);
+  await expect(page.getByText('Water source 1', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('growup-checkpoint-outside-guidance.png'), fullPage: false });
+
+  await page.getByLabel('Coordinate latitude').fill('36.92095');
+  await page.getByLabel('Coordinate longitude').fill('14.75340');
+  await page.getByRole('button', { name: 'Add coordinate' }).click();
+
+  await expect(page.getByText('Water source 1', { exact: true })).toBeVisible();
+  await expect(waterTool).not.toHaveClass(/active/);
+});
+
 test('imports and validates complete site infrastructure before generating a design', async ({ page }) => {
   const geojson = completeInfrastructureGeoJson();
   const expectedSite = importSiteGeoJson(geojson);

@@ -15,8 +15,11 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
   expect(assistantTriggerBox).not.toBeNull();
   expect(menuTriggerBox!.y).toBe(assistantTriggerBox!.y);
   expect(menuTriggerBox!.height).toBe(assistantTriggerBox!.height);
+  expect(assistantTriggerBox!.width).toBe(assistantTriggerBox!.height);
+  expect(assistantTriggerBox!.width).toBe(menuTriggerBox!.width);
   expect(menuTriggerBox!.x).toBeGreaterThan(assistantTriggerBox!.x);
   expect(390 - (menuTriggerBox!.x + menuTriggerBox!.width)).toBeLessThanOrEqual(12);
+  await expect(assistantTrigger.locator('.mobile-ai-label')).toBeHidden();
   await menuTrigger.click();
   const mobileMenu = page.getByRole('dialog', { name: 'Menu' });
   await expect(mobileMenu).toBeVisible();
