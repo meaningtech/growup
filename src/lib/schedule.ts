@@ -19,6 +19,9 @@ export type OperationalSchedule = {
     machineryCorridorCount: number;
     machineryReservedAreaM2: number;
     machineryHeadlandDepthM: number;
+    firebreakLengthM: number;
+    firebreakWidthM: number;
+    firebreakReservedAreaM2: number;
     purchasePipeM: number;
     emitterCount: number;
     zones: number;
@@ -77,6 +80,7 @@ export function buildOperationalSchedule(
     profile.landCover.evidence,
     ...profile.satellite.evidence,
     ...profile.satellite.existingVegetation.evidence,
+    ...(variant.firebreak?.evidence ?? []),
     ...maintenance.sources.map((source): Evidence => ({
       source: `${source.organization}: ${source.title}`,
       sourceUrl: source.url,
@@ -100,6 +104,9 @@ export function buildOperationalSchedule(
       machineryCorridorCount: variant.machinery.corridors.length,
       machineryReservedAreaM2: variant.machinery.reservedAreaM2,
       machineryHeadlandDepthM: variant.machinery.headlandDepthM,
+      firebreakLengthM: variant.firebreak?.totalLengthM ?? 0,
+      firebreakWidthM: variant.firebreak?.plannedWidthM ?? 0,
+      firebreakReservedAreaM2: variant.firebreak?.reservedAreaM2 ?? 0,
       purchasePipeM: irrigation.network.totalPurchasePipeM,
       emitterCount: irrigation.emitterCount,
       zones: irrigation.zones,

@@ -478,17 +478,21 @@ function segmentIsClear(start: PointM, end: PointM, obstacles: PointM[][], bound
 }
 
 function configurationCrossings(boundary: SiteBoundary, variant: LayoutVariant, lines: IrrigationLine[]): IrrigationLine[] {
-  if (!variant.design.machinery.protectPipeCrossings || !variant.machinery.enabled) return [];
+  const corridors: Array<{ id: string; points: Coordinate[]; widthM: number }> = [];
+  if (variant.design.machinery.protectPipeCrossings && variant.machinery.enabled) corridors.push(...variant.machinery.corridors);
+  if (variant.firebreak?.enabled && variant.firebreak.protectPipeCrossings) corridors.push(...variant.firebreak.lines);
+  if (!corridors.length) return [];
   const projection = createLocalProjection(polygonCentroid(boundary.polygon));
   const crossings: IrrigationLine[] = [];
   for (const line of lines) {
     if (line.kind === 'protected-crossing') continue;
-    for (const corridor of variant.machinery.corridors) {
+    for (const corridor of corridors) {
       const crossing = segmentIntersection(
         projection.project(line.points[0]), projection.project(line.points[line.points.length - 1]),
         projection.project(corridor.points[0]), projection.project(corridor.points[corridor.points.length - 1]),
       );
       if (!crossing) continue;
+      if (crossings.some((item) => item.id.startsWith(`sleeve-${line.id}-`) && haversineM(item.points[0], projection.unproject(crossing)) < 1)) continue;
       const half = Math.max(1.5, corridor.widthM / 2 + 0.5);
       const lineStart = projection.project(line.points[0]);
       const lineEnd = projection.project(line.points[line.points.length - 1]);
@@ -520,7 +524,7 @@ function networkComponents(lines: IrrigationLine[], emitterCount: number, zones:
     const purchase = Math.ceil(group.measured / coilM) * coilM;
     const referenceUnitCost = protection ? REFERENCE_IRRIGATION_RATES.mainlinePerM * 1.5 : lateral ? REFERENCE_IRRIGATION_RATES.pressureCompensatingLateralPerM : REFERENCE_IRRIGATION_RATES.mainlinePerM;
     const unitCost = referenceUnitCost * economics.irrigationReferenceMultiplier;
-    components.push(component(`pipe-${key}`, protection ? 'protection' : 'pipe', protection ? 'Machinery crossing sleeve' : `${group.kind} pipe`, `PE ${group.diameterMm} mm · ${coilM} m coils`, 'm', group.measured, purchase, unitCost));
+    components.push(component(`pipe-${key}`, protection ? 'protection' : 'pipe', protection ? 'Operational crossing sleeve' : `${group.kind} pipe`, `PE ${group.diameterMm} mm · ${coilM} m coils`, 'm', group.measured, purchase, unitCost));
   }
   components.push(
     component('emitters', 'emitter', 'Pressure-compensating emitters', `${configuration.emitterFlowLHour} L/h`, 'each', emitterCount, Math.ceil(emitterCount * 1.05), REFERENCE_IRRIGATION_RATES.pressureCompensatingEmitterEach * economics.irrigationReferenceMultiplier),

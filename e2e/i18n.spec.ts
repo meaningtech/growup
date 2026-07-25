@@ -49,12 +49,14 @@ test('renders live field evidence, Sentinel notices and source traceability enti
   await page.getByRole('button', { name: 'Analizza questo terreno' }).click();
 
   await expect(page.getByText('02 · Evidenze multi-sorgente')).toBeVisible({ timeout: 60_000 });
+  await page.getByRole('tab', { name: /Satellite/ }).click();
   await expect(page.getByText('Acqua del terreno da Sentinel')).toBeVisible();
   await expect(page.getByText(/Pixel liberi da nuvole del/)).toBeVisible();
   await expect(page.getByText(/Evidenze pronte:/)).toBeVisible();
+  await page.getByRole('tab', { name: /Fonti/ }).click();
   const traceability = page.getByTestId('evidence-traceability');
   await expect(traceability).toContainText('Dato letto');
   await expect(traceability).toContainText('Calcolo Growup');
   await expect(traceability).toContainText('Decisione influenzata');
-  await expect(traceability.locator('a')).toHaveCount(0);
+  await expect(traceability.locator('a')).not.toHaveCount(0);
 });

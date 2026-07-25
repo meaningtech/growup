@@ -2,7 +2,7 @@ import { fromArrayBuffer } from 'geotiff';
 import { bounds, createLocalProjection, haversineM, polygonAreaM2, polygonCentroid, polygonPerimeterM } from '../src/lib/geometry.js';
 import { siteContainsCoordinate, sitePolygons } from '../src/lib/siteGeometry.js';
 import { defaultFieldConditions } from '../src/lib/siteOverrides.js';
-import type { Coordinate, Evidence, LocationSearchResult, SiteBoundary, SiteProfile, SolarClimateBin, SolarResourceProfile } from '../src/types.js';
+import type { Coordinate, Evidence, LocationSearchResult, SatelliteProfile, SiteBoundary, SiteProfile, SoilPropertyEstimate, SoilPropertyEstimateKey, SolarClimateBin, SolarResourceProfile, WindClimatologyPeriod, WindDirectionSector } from '../src/types.js';
 import { fetchSatelliteProfile, type SentinelProviderConfig, unavailableSatelliteProfile } from './sentinel.js';
 
 const CLIMATE_START = '2021-01-01';
@@ -106,15 +106,9 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
     terrain,
     climate: climate.value,
     solar: solar.value ?? unavailableSolarProfile(generatedAt),
-    soil: soil.value ?? {
-      ph: null,
-      sandPercent: null,
-      siltPercent: null,
-      clayPercent: null,
-      organicCarbonGKg: null,
-      textureClass: null,
-      status: 'unavailable',
-      evidence: evidence('SoilGrids WCS', config.soilGridsWcsUrl ?? process.env.SOILGRIDS_WCS_URL ?? 'https://maps.isric.org/mapserv', '2.0', generatedAt, 'low', '250 m'),
+    soil: {
+      ...(soil.value ?? unavailableSoil(config, generatedAt)),
+      satelliteScreening: satelliteSoilScreening(satelliteProfile),
     },
     fieldConditions: defaultFieldConditions(),
     overrides: [],
@@ -278,7 +272,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
   };
 }
 
-async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, config: SiteProviderConfig): Promise<SolarResourceProfile> {
+export async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, config: SiteProviderConfig): Promise<SolarResourceProfile> {
   const baseUrl = config.openMeteoArchiveUrl ?? process.env.OPEN_METEO_ARCHIVE_URL ?? 'https://archive-api.open-meteo.com/v1/archive';
   const url = new URL(baseUrl);
   url.search = new URLSearchParams({
@@ -315,12 +309,15 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
   let windCos = 0;
   let windSpeedTotal = 0;
   let validWind = 0;
+  const windSamples: Array<{ month: number; speedMs: number; directionDegrees: number }> = [];
   for (let index = 0; index < time.length; index += 1) {
     const month = Number(time[index].slice(5, 7));
     const hour = Number(time[index].slice(11, 13));
     if (!Number.isFinite(month) || !Number.isFinite(hour)) continue;
-    const directionRadians = toRadians(Number(windDirection[index] ?? 0));
+    const directionDegrees = modulo(Number(windDirection[index] ?? 0), 360);
+    const directionRadians = toRadians(directionDegrees);
     const speed = Math.max(0, Number(windSpeed[index] ?? 0));
+    if (!Number.isFinite(speed) || !Number.isFinite(directionDegrees)) continue;
     const key = `${month}-${hour}`;
     const bin = bins.get(key) ?? {
       month, hour, directNormalWm2: 0, diffuseWm2: 0, shortwaveWm2: 0, windSpeedMs: 0,
@@ -342,6 +339,7 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
       windSpeedTotal += speed;
       validWind += 1;
     }
+    windSamples.push({ month, speedMs: speed, directionDegrees });
   }
   const hourlyClimatology = [...bins.values()].map((bin) => ({
     month: bin.month,
@@ -354,6 +352,8 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
     sampleCount: bin.sampleCount,
   })).sort((a, b) => a.month - b.month || a.hour - b.hour);
   const prevailingWindDirectionDegrees = validWind ? round((toDegrees(Math.atan2(windSin, windCos)) + 360) % 360, 0) : null;
+  const windClimatology = summarizeWindClimatology(windSamples);
+  const annualWind = windClimatology.find((item) => item.period === 'annual');
   return {
     status: 'available', period: '2021–2025',
     annualGlobalHorizontalKwhM2: round(globalWh / 1000 / 5, 0),
@@ -361,6 +361,9 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
     prevailingWindDirectionDegrees,
     prevailingWindDirectionLabel: prevailingWindDirectionDegrees === null ? null : compass(prevailingWindDirectionDegrees),
     meanWindSpeedMs: validWind ? round(windSpeedTotal / validWind, 2) : null,
+    windSpeedP90Ms: annualWind?.speedP90Ms ?? null,
+    calmWindFrequencyPercent: annualWind?.calmFrequencyPercent ?? null,
+    windClimatology,
     hourlyClimatology,
     evidence: evidence('Open-Meteo Historical Weather API', url.toString(), 'ERA5-family reanalysis, 2021–2025 hourly aggregate', new Date().toISOString(), 'high', 'hourly radiation and 10 m wind grid'),
     limitations: ['Reanalysis does not resolve local obstacles, hedges or gust corridors; verify damaging winds on site.'],
@@ -370,9 +373,84 @@ async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof fetch, 
 function unavailableSolarProfile(observedAt: string): SolarResourceProfile {
   return {
     status: 'unavailable', period: 'unavailable', annualGlobalHorizontalKwhM2: 0, annualDirectNormalKwhM2: 0,
-    prevailingWindDirectionDegrees: null, prevailingWindDirectionLabel: null, meanWindSpeedMs: null, hourlyClimatology: [],
+    prevailingWindDirectionDegrees: null, prevailingWindDirectionLabel: null, meanWindSpeedMs: null,
+    windSpeedP90Ms: null, calmWindFrequencyPercent: null, windClimatology: [], hourlyClimatology: [],
     evidence: evidence('Open-Meteo Historical Weather API', 'https://archive-api.open-meteo.com/v1/archive', 'unavailable', observedAt, 'low'),
     limitations: ['Historical hourly radiation and wind could not be retrieved.'],
+  };
+}
+
+export function summarizeWindClimatology(
+  samples: Array<{ month: number; speedMs: number; directionDegrees: number }>,
+): WindClimatologyPeriod[] {
+  const definitions: Array<{ period: WindClimatologyPeriod['period']; months: number[] }> = [
+    { period: 'annual', months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] },
+    { period: 'winter', months: [12, 1, 2] },
+    { period: 'spring', months: [3, 4, 5] },
+    { period: 'summer', months: [6, 7, 8] },
+    { period: 'autumn', months: [9, 10, 11] },
+  ];
+  return definitions.map(({ period, months }) => summarizeWindPeriod(
+    period,
+    samples.filter((sample) => months.includes(sample.month)),
+  ));
+}
+
+function summarizeWindPeriod(
+  period: WindClimatologyPeriod['period'],
+  samples: Array<{ speedMs: number; directionDegrees: number }>,
+): WindClimatologyPeriod {
+  const valid = samples.filter((sample) => (
+    Number.isFinite(sample.speedMs)
+    && sample.speedMs >= 0
+    && Number.isFinite(sample.directionDegrees)
+  ));
+  const sectorLabels: WindDirectionSector['directionLabel'][] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const sectorBins = sectorLabels.map((directionLabel, index) => ({
+    directionLabel,
+    centerDegrees: index * 45,
+    speedTotal: 0,
+    sampleCount: 0,
+  }));
+  let speedTotal = 0;
+  let windSin = 0;
+  let windCos = 0;
+  let calmCount = 0;
+  for (const sample of valid) {
+    const speedMs = Math.max(0, sample.speedMs);
+    const directionDegrees = modulo(sample.directionDegrees, 360);
+    speedTotal += speedMs;
+    if (speedMs < 0.5) calmCount += 1;
+    if (speedMs > 0) {
+      const radians = toRadians(directionDegrees);
+      windSin += Math.sin(radians) * speedMs;
+      windCos += Math.cos(radians) * speedMs;
+    }
+    if (speedMs < 0.5) continue;
+    const sector = sectorBins[Math.round(directionDegrees / 45) % 8];
+    sector.speedTotal += speedMs;
+    sector.sampleCount += 1;
+  }
+  const sampleCount = valid.length;
+  const prevailingDirectionDegrees = sampleCount && Math.hypot(windSin, windCos) > 1e-9
+    ? round(modulo(toDegrees(Math.atan2(windSin, windCos)), 360), 0)
+    : null;
+  const sortedSpeeds = valid.map((sample) => sample.speedMs).sort((a, b) => a - b);
+  return {
+    period,
+    prevailingDirectionDegrees,
+    prevailingDirectionLabel: prevailingDirectionDegrees === null ? null : compass(prevailingDirectionDegrees) as WindDirectionSector['directionLabel'],
+    meanSpeedMs: sampleCount ? round(speedTotal / sampleCount, 2) : null,
+    speedP90Ms: sampleCount ? round(percentile(sortedSpeeds, 0.9), 2) : null,
+    calmFrequencyPercent: sampleCount ? round(calmCount / sampleCount * 100, 1) : null,
+    sampleCount,
+    sectors: sectorBins.map((sector) => ({
+      directionLabel: sector.directionLabel,
+      centerDegrees: sector.centerDegrees,
+      frequencyPercent: sampleCount ? round(sector.sampleCount / sampleCount * 100, 1) : 0,
+      meanSpeedMs: sector.sampleCount ? round(sector.speedTotal / sector.sampleCount, 2) : 0,
+      sampleCount: sector.sampleCount,
+    })),
   };
 }
 
@@ -419,7 +497,32 @@ async function fetchClimate(centroid: Coordinate, fetchImpl: typeof fetch, confi
   };
 }
 
-async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, config: SiteProviderConfig) {
+type SoilCoverageDescriptor = {
+  property: string;
+  key: SoilPropertyEstimateKey;
+  category: SoilPropertyEstimate['category'];
+  depth: '0-5cm' | '0-30cm';
+  unit: string;
+  transform: (raw: number) => number;
+  uncertainty: boolean;
+};
+
+const SOIL_COVERAGES: SoilCoverageDescriptor[] = [
+  { property: 'phh2o', key: 'ph', category: 'chemical', depth: '0-5cm', unit: 'pH', transform: (raw) => raw / 10, uncertainty: true },
+  { property: 'sand', key: 'sand', category: 'physical', depth: '0-5cm', unit: '%', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'silt', key: 'silt', category: 'physical', depth: '0-5cm', unit: '%', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'clay', key: 'clay', category: 'physical', depth: '0-5cm', unit: '%', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'soc', key: 'organic-carbon', category: 'chemical', depth: '0-5cm', unit: 'g/kg', transform: (raw) => raw / 10, uncertainty: true },
+  { property: 'nitrogen', key: 'total-nitrogen', category: 'chemical', depth: '0-5cm', unit: 'g/kg', transform: (raw) => raw / 100, uncertainty: true },
+  { property: 'cec', key: 'cation-exchange-capacity', category: 'chemical', depth: '0-5cm', unit: 'cmol(c)/kg', transform: (raw) => raw / 10, uncertainty: true },
+  { property: 'bdod', key: 'bulk-density', category: 'physical', depth: '0-5cm', unit: 'kg/dm³', transform: (raw) => raw / 100, uncertainty: false },
+  { property: 'cfvo', key: 'coarse-fragments', category: 'physical', depth: '0-5cm', unit: 'vol%', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'ocs', key: 'organic-carbon-stock', category: 'chemical', depth: '0-30cm', unit: 'kg/m²', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'wv0033', key: 'water-field-capacity', category: 'physical', depth: '0-5cm', unit: 'vol%', transform: (raw) => raw / 10, uncertainty: false },
+  { property: 'wv1500', key: 'water-wilting-point', category: 'physical', depth: '0-5cm', unit: 'vol%', transform: (raw) => raw / 10, uncertainty: false },
+];
+
+export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, config: SiteProviderConfig = {}) {
   const baseUrl = config.soilGridsWcsUrl ?? process.env.SOILGRIDS_WCS_URL ?? 'https://maps.isric.org/mapserv';
   const origin = polygonCentroid(polygon);
   const projection = createLocalProjection(origin);
@@ -427,21 +530,90 @@ async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, config:
   const padding = 160;
   const southwest = projection.unproject({ x: localBounds.minX - padding, y: localBounds.minY - padding });
   const northeast = projection.unproject({ x: localBounds.maxX + padding, y: localBounds.maxY + padding });
-  const properties = await Promise.all([
-    soilCoverage('phh2o', 'phh2o_0-5cm_mean', baseUrl, southwest, northeast, fetchImpl, (raw) => raw / 10),
-    soilCoverage('sand', 'sand_0-5cm_mean', baseUrl, southwest, northeast, fetchImpl, (raw) => raw / 10),
-    soilCoverage('silt', 'silt_0-5cm_mean', baseUrl, southwest, northeast, fetchImpl, (raw) => raw / 10),
-    soilCoverage('clay', 'clay_0-5cm_mean', baseUrl, southwest, northeast, fetchImpl, (raw) => raw / 10),
-    soilCoverage('soc', 'soc_0-5cm_mean', baseUrl, southwest, northeast, fetchImpl, (raw) => raw / 10),
-  ]);
-  const values = Object.fromEntries(properties) as Record<string, number | null>;
-  const textureClass = soilTexture(values.sand, values.silt, values.clay);
-  const available = Object.values(values).filter((value) => value !== null).length;
+  const observedAt = providerNow(config);
+  const primaryEvidence = evidence(
+    'ISRIC SoilGrids WCS',
+    baseUrl,
+    'SoilGrids 2.0 modelled means and 90% prediction intervals',
+    observedAt,
+    'medium',
+    '250 m; topsoil values are 0–5 cm unless labelled 0–30 cm',
+  );
+  const requests = SOIL_COVERAGES.flatMap((descriptor) => {
+    const mean = soilCoverage(
+      descriptor.property,
+      `${descriptor.property}_${descriptor.depth}_mean`,
+      baseUrl,
+      southwest,
+      northeast,
+      fetchImpl,
+      descriptor.transform,
+    ).then(([, value]) => [`${descriptor.key}:mean`, value] as const);
+    if (!descriptor.uncertainty) return [mean];
+    return [
+      mean,
+      soilCoverage(descriptor.property, `${descriptor.property}_${descriptor.depth}_Q0.05`, baseUrl, southwest, northeast, fetchImpl, descriptor.transform)
+        .then(([, value]) => [`${descriptor.key}:low`, value] as const),
+      soilCoverage(descriptor.property, `${descriptor.property}_${descriptor.depth}_Q0.95`, baseUrl, southwest, northeast, fetchImpl, descriptor.transform)
+        .then(([, value]) => [`${descriptor.key}:high`, value] as const),
+    ];
+  });
+  const values = Object.fromEntries(await Promise.all(requests)) as Record<string, number | null>;
+  const value = (key: SoilPropertyEstimateKey) => values[`${key}:mean`] ?? null;
+  const interval = (key: SoilPropertyEstimateKey) => {
+    const low = values[`${key}:low`];
+    const high = values[`${key}:high`];
+    return low !== null && low !== undefined && high !== null && high !== undefined
+      ? { low: nullableRound(Math.min(low, high), 2)!, high: nullableRound(Math.max(low, high), 2)! }
+      : null;
+  };
+  const properties: SoilPropertyEstimate[] = SOIL_COVERAGES.map((descriptor) => ({
+    key: descriptor.key,
+    category: descriptor.category,
+    value: nullableRound(value(descriptor.key), descriptor.unit === 'pH' || descriptor.unit === 'kg/dm³' ? 2 : 1),
+    unit: descriptor.unit,
+    depthTopCm: 0,
+    depthBottomCm: descriptor.depth === '0-30cm' ? 30 : 5,
+    predictionInterval90: descriptor.uncertainty ? interval(descriptor.key) : null,
+    estimateType: 'modelled-mean',
+    evidence: { ...primaryEvidence },
+  }));
+  const carbonNitrogenRatio = value('organic-carbon') !== null && value('total-nitrogen') !== null && value('total-nitrogen')! > 0
+    ? round(value('organic-carbon')! / value('total-nitrogen')!, 1)
+    : null;
+  const availableWater = value('water-field-capacity') !== null && value('water-wilting-point') !== null
+    ? round(Math.max(0, value('water-field-capacity')! - value('water-wilting-point')!), 1)
+    : null;
+  properties.push(
+    derivedSoilProperty('carbon-nitrogen-ratio', 'chemical', carbonNitrogenRatio, 'ratio', primaryEvidence),
+    derivedSoilProperty('plant-available-water', 'derived', availableWater, 'vol%', primaryEvidence),
+  );
+  const sand = value('sand');
+  const silt = value('silt');
+  const clay = value('clay');
+  const textureClass = soilTexture(sand, silt, clay);
+  const available = SOIL_COVERAGES.filter((descriptor) => value(descriptor.key) !== null).length;
+  const coreAvailable = ['ph', 'sand', 'silt', 'clay', 'organic-carbon'].every((key) => value(key as SoilPropertyEstimateKey) !== null);
+  primaryEvidence.confidence = coreAvailable && available >= 9 ? 'medium' : 'low';
+  for (const property of properties) property.evidence.confidence = primaryEvidence.confidence;
   return {
-    ph: nullableRound(values.phh2o, 1), sandPercent: nullableRound(values.sand, 1), siltPercent: nullableRound(values.silt, 1),
-    clayPercent: nullableRound(values.clay, 1), organicCarbonGKg: nullableRound(values.soc, 1), textureClass,
-    status: available === 5 ? 'available' as const : available > 0 ? 'partial' as const : 'unavailable' as const,
-    evidence: evidence('SoilGrids WCS', baseUrl, 'SoilGrids 2.0 mean, 0–5 cm', new Date().toISOString(), available === 5 ? 'medium' : 'low', '250 m; field sampling required for execution'),
+    ph: nullableRound(value('ph'), 1),
+    sandPercent: nullableRound(sand, 1),
+    siltPercent: nullableRound(silt, 1),
+    clayPercent: nullableRound(clay, 1),
+    organicCarbonGKg: nullableRound(value('organic-carbon'), 1),
+    textureClass,
+    status: coreAvailable && available >= 9 ? 'available' as const : available > 0 ? 'partial' as const : 'unavailable' as const,
+    evidence: primaryEvidence,
+    properties,
+    reactionClass: soilReaction(value('ph')),
+    carbonNitrogenRatio,
+    limitations: [
+      'Values are global model predictions, not laboratory measurements from this parcel.',
+      'SoilGrids explains approximately 30–70% of observed variation depending on property and location.',
+      'Total nitrogen is not plant-available nitrogen; phosphorus, potassium, micronutrients, salinity and contaminants are not estimated here.',
+      'Use georeferenced laboratory samples before fertilisation, amendment or contamination decisions.',
+    ],
   };
 }
 
@@ -449,22 +621,29 @@ async function soilCoverage(
   property: string, coverageId: string, baseUrl: string, southwest: Coordinate, northeast: Coordinate,
   fetchImpl: typeof fetch, transform: (raw: number) => number,
 ): Promise<[string, number | null]> {
-  const url = new URL(baseUrl);
-  url.search = new URLSearchParams({
-    map: `/map/${property}.map`, SERVICE: 'WCS', VERSION: '2.0.1', REQUEST: 'GetCoverage', COVERAGEID: coverageId,
-    FORMAT: 'GEOTIFF_INT16',
-  }).toString();
-  url.searchParams.append('SUBSET', `Long(${southwest.lng},${northeast.lng})`);
-  url.searchParams.append('SUBSET', `Lat(${southwest.lat},${northeast.lat})`);
-  url.searchParams.set('SUBSETTINGCRS', 'http://www.opengis.net/def/crs/EPSG/0/4326');
-  url.searchParams.set('OUTPUTCRS', 'http://www.opengis.net/def/crs/EPSG/0/4326');
-  const response = await fetchWithTimeout(fetchImpl, url, {}, 35_000);
-  if (!response.ok) return [property, null];
-  const tiff = await fromArrayBuffer(await response.arrayBuffer());
-  const image = await tiff.getImage();
-  const raster = await image.readRasters();
-  const values = Array.from(raster[0] as ArrayLike<number>).filter((value) => Number.isFinite(value) && value >= 0);
-  return [property, values.length ? transform(average(values)) : null];
+  try {
+    const url = new URL(baseUrl);
+    url.search = new URLSearchParams({
+      map: `/map/${property}.map`, SERVICE: 'WCS', VERSION: '2.0.1', REQUEST: 'GetCoverage', COVERAGEID: coverageId,
+      FORMAT: 'GEOTIFF_INT16',
+    }).toString();
+    url.searchParams.append('SUBSET', `Long(${southwest.lng},${northeast.lng})`);
+    url.searchParams.append('SUBSET', `Lat(${southwest.lat},${northeast.lat})`);
+    url.searchParams.set('SUBSETTINGCRS', 'http://www.opengis.net/def/crs/EPSG/0/4326');
+    url.searchParams.set('OUTPUTCRS', 'http://www.opengis.net/def/crs/EPSG/0/4326');
+    const response = await fetchWithTimeout(fetchImpl, url, {}, 35_000);
+    if (!response.ok) return [property, null];
+    const tiff = await fromArrayBuffer(await response.arrayBuffer());
+    const image = await tiff.getImage();
+    const noData = image.getGDALNoData();
+    const raster = await image.readRasters();
+    const values = Array.from(raster[0] as ArrayLike<number>).filter((value) => (
+      Number.isFinite(value) && value >= 0 && (noData === null || value !== noData)
+    ));
+    return [property, values.length ? transform(average(values)) : null];
+  } catch {
+    return [property, null];
+  }
 }
 
 async function fetchLandCover(centroid: Coordinate, fetchImpl: typeof fetch, config: SiteProviderConfig) {
@@ -588,6 +767,85 @@ function soilTexture(sand: number | null, silt: number | null, clay: number | nu
   return 'loam';
 }
 
+function soilReaction(ph: number | null): NonNullable<SiteProfile['soil']['reactionClass']> {
+  if (ph === null) return 'unknown';
+  if (ph < 4.5) return 'strongly-acidic';
+  if (ph < 5.5) return 'acidic';
+  if (ph < 6.5) return 'slightly-acidic';
+  if (ph <= 7.5) return 'neutral';
+  if (ph <= 8.5) return 'alkaline';
+  return 'strongly-alkaline';
+}
+
+function derivedSoilProperty(
+  key: SoilPropertyEstimateKey,
+  category: SoilPropertyEstimate['category'],
+  value: number | null,
+  unit: string,
+  source: Evidence,
+): SoilPropertyEstimate {
+  return {
+    key,
+    category,
+    value,
+    unit,
+    depthTopCm: 0,
+    depthBottomCm: 5,
+    predictionInterval90: null,
+    estimateType: 'derived-from-modelled',
+    evidence: {
+      ...source,
+      version: `${source.version}; derived by Growup from modelled inputs`,
+      confidence: value === null ? 'low' : source.confidence,
+    },
+  };
+}
+
+function unavailableSoil(config: SiteProviderConfig, generatedAt: string): SiteProfile['soil'] {
+  return {
+    ph: null,
+    sandPercent: null,
+    siltPercent: null,
+    clayPercent: null,
+    organicCarbonGKg: null,
+    textureClass: null,
+    status: 'unavailable',
+    evidence: evidence(
+      'ISRIC SoilGrids WCS',
+      config.soilGridsWcsUrl ?? process.env.SOILGRIDS_WCS_URL ?? 'https://maps.isric.org/mapserv',
+      'SoilGrids 2.0',
+      generatedAt,
+      'low',
+      '250 m',
+    ),
+    properties: [],
+    reactionClass: 'unknown',
+    carbonNitrogenRatio: null,
+    limitations: ['SoilGrids was unavailable; obtain a georeferenced laboratory soil analysis.'],
+  };
+}
+
+function satelliteSoilScreening(profile: SatelliteProfile): NonNullable<SiteProfile['soil']['satelliteScreening']> {
+  const candidates = profile.optical.history.filter((observation) => (
+    observation.ndvi.mean <= 0.3
+    && observation.bareSoilIndex.validPixels > 0
+  ));
+  const opticalEvidence = profile.evidence.find((item) => /sentinel-2|planetary computer/i.test(`${item.source} ${item.version}`)) ?? null;
+  return {
+    status: candidates.length >= 2 ? 'usable' : candidates.length === 1 ? 'limited' : 'unavailable',
+    bareSoilObservationCount: candidates.length,
+    totalObservationCount: profile.optical.history.length,
+    latestBareSoilIndex: candidates[0]?.bareSoilIndex.mean ?? null,
+    use: 'variability-screening-only',
+    evidence: opticalEvidence ? { ...opticalEvidence } : null,
+    limitations: [
+      'Sentinel-2 bare-soil reflectance can screen relative within-field variability but does not directly measure chemical concentrations.',
+      'Crop cover, residues, moisture and roughness can dominate the spectral signal.',
+      'Locally calibrated laboratory samples are required before converting spectral zones into chemical estimates.',
+    ],
+  };
+}
+
 async function safeProvider<T>(operation: () => Promise<T>, warning: string): Promise<ProviderResult<T>> {
   try { return { value: await operation(), warning: null }; } catch { return { value: null, warning }; }
 }
@@ -613,6 +871,12 @@ function compass(degrees: number): string {
 
 function average(values: number[]): number { return values.length ? sum(values) / values.length : 0; }
 function sum(values: number[]): number { return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0); }
+function percentile(sortedValues: number[], fraction: number): number {
+  if (!sortedValues.length) return 0;
+  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.ceil(sortedValues.length * fraction) - 1));
+  return sortedValues[index];
+}
+function modulo(value: number, divisor: number): number { return ((value % divisor) + divisor) % divisor; }
 function round(value: number, digits: number): number { return Number(value.toFixed(digits)); }
 function nullableRound(value: number | null, digits: number): number | null { return value === null ? null : round(value, digits); }
 function toRadians(value: number): number { return value * Math.PI / 180; }

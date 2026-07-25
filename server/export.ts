@@ -196,6 +196,20 @@ function appendVariantFeatures(features: GeoJsonFeature[], variant: LayoutVarian
   [...variant.machinery.turningAreas].sort(byId).forEach((area) => features.push(pointFeature(area.center, {
     kind: 'machinery_turning_area', id: area.id, radiusM: area.radiusM, rowIndexes: area.rowIndexes,
   })));
+  [...(variant.firebreak?.lines ?? [])].sort(byId).forEach((line) => features.push({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: line.points.map(coordinatePair) },
+    properties: {
+      kind: 'firebreak',
+      id: line.id,
+      widthM: line.widthM,
+      lengthM: line.lengthM,
+      priority: line.priority,
+      treatment: variant.firebreak.treatment,
+      planningWidthSatisfied: variant.firebreak.planningWidthSatisfied,
+      localReviewRequired: variant.firebreak.localReviewRequired,
+    },
+  }));
 }
 
 function selectedVariant(project: ProjectState): LayoutVariant | null {

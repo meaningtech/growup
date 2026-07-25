@@ -473,6 +473,12 @@ describe('Growup API integration', () => {
         designConfiguration: {
           ...DEFAULT_DESIGN_CONFIGURATION,
           machinery: { ...DEFAULT_DESIGN_CONFIGURATION.machinery, enabled: true },
+          firebreak: {
+            ...DEFAULT_DESIGN_CONFIGURATION.firebreak,
+            enabled: true,
+            expectedFlameLengthM: 2,
+            widthM: 5,
+          },
         },
       })
       .expect(200);
@@ -486,6 +492,21 @@ describe('Growup API integration', () => {
       bySuccession: expect.any(Object),
       targets: expect.objectContaining({ minimumStrata: expect.any(Number) }),
     }));
+    expect(variant.firebreak).toEqual(expect.objectContaining({
+      enabled: true,
+      minimumPlanningWidthM: 5,
+      plannedWidthM: 5,
+      planningWidthSatisfied: true,
+      localReviewRequired: true,
+      lines: expect.any(Array),
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ source: 'Italian Civil Protection Department' }),
+      ]),
+    }));
+    expect(variant.firebreak.lines).toHaveLength(TEMPERATE_OPEN_FIELD_FIXTURE.polygon.length);
+    expect(variant.trees.every((tree: { coordinate: { lat: number; lng: number } }) => (
+      distanceToSiteBoundaryM(TEMPERATE_OPEN_FIELD_FIXTURE, tree.coordinate) >= 4.95
+    ))).toBe(true);
     const patch = profile.satellite.existingVegetation.patches[0];
     const projection = createLocalProjection(polygonCentroid(TEMPERATE_OPEN_FIELD_FIXTURE.polygon));
     const protectedPolygon = patch.polygon.map(projection.project);
@@ -558,6 +579,8 @@ describe('Growup API integration', () => {
     expect(costsResponse.body.irrigation.installation.laborHours).toBeGreaterThan(0);
     expect(costsResponse.body.irrigation.network.lines.length).toBeGreaterThan(5);
     expect(costsResponse.body.irrigation.network.components.length).toBeGreaterThan(8);
+    expect(costsResponse.body.irrigation.network.protectedCrossingCount).toBeGreaterThan(0);
+    expect(costsResponse.body.irrigation.network.components.some((component: { label: string }) => component.label === 'Operational crossing sleeve')).toBe(true);
     expect(costsResponse.body.irrigation.network.totalPurchasePipeM).toBeGreaterThanOrEqual(costsResponse.body.irrigation.network.totalMeasuredPipeM);
     expect(costsResponse.body.establishment.plantingLaborHours).toBeGreaterThan(0);
     expect(costsResponse.body.establishment.totalCost).toBeGreaterThan(0);
@@ -609,6 +632,7 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'existing_woody_vegetation')).toBe(true);
     expect(exportResponse.body.features.filter((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree')).toHaveLength(variant.trees.length);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_corridor')).toBe(true);
+    expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'firebreak')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'irrigation_line')).toBe(true);
     expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.1.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
     expect(exportResponse.body.features.find((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree').properties).toEqual(expect.objectContaining({

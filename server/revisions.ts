@@ -74,6 +74,7 @@ function calculationSnapshot(project: ProjectState, revision: number, id: string
 
 function evidenceRecords(project: ProjectState): Evidence[] {
   const profile = project.siteProfile;
+  const firebreakEvidence = (project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0])?.firebreak?.evidence ?? [];
   const speciesEvidence = project.selectedSpeciesIds.flatMap((id) => (
     DESIGN_SPECIES_BY_ID.get(id)?.sources.map((source): Evidence => ({
       source: source.label,
@@ -90,7 +91,7 @@ function evidenceRecords(project: ProjectState): Evidence[] {
     observedAt: project.updatedAt,
     confidence: project.irrigation!.systemMaintenance.confidence,
   })) ?? [];
-  if (!profile) return uniqueEvidence([...maintenanceEvidence, ...speciesEvidence]);
+  if (!profile) return uniqueEvidence([...firebreakEvidence, ...maintenanceEvidence, ...speciesEvidence]);
   return uniqueEvidence([
     profile.location.evidence,
     profile.terrain.evidence,
@@ -100,6 +101,7 @@ function evidenceRecords(project: ProjectState): Evidence[] {
     profile.landCover.evidence,
     ...profile.satellite.evidence,
     ...profile.satellite.existingVegetation.evidence,
+    ...firebreakEvidence,
     ...maintenanceEvidence,
     ...speciesEvidence,
   ]);

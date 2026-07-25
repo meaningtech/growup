@@ -1,5 +1,7 @@
 import type { Coordinate, DesignConfiguration, DesignSpecies, LayoutVariant, MachineryPlan, SiteBoundary, SiteProfile, TreeInstance } from '../types';
+import { DEFAULT_FIREBREAK_CONFIGURATION, normalizeFirebreakConfiguration } from '../data/firebreak';
 import { DEFAULT_MACHINERY_CONFIGURATION, machineryEnvelope, normalizeMachineryConfiguration } from '../data/machinery';
+import { buildFirebreakPlan, plantingBoundaryClearanceM } from './firebreak';
 import { growthState } from './growth';
 import { compositionTargets, DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives, speciesObjectiveScore } from './objectives';
 import { distanceToSiteBoundaryM, distanceToSitePathM, estimatedPlantableAreaM2, siteContainsCoordinate, sitePolygons } from './siteGeometry';
@@ -38,7 +40,7 @@ type LockedPlacement = {
   species: DesignSpecies;
 };
 
-export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.1.0';
+export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.2.0';
 
 export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   system: 'syntropic',
@@ -53,6 +55,7 @@ export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   seed: 41,
   objectives: DEFAULT_DESIGN_OBJECTIVES,
   machinery: DEFAULT_MACHINERY_CONFIGURATION,
+  firebreak: DEFAULT_FIREBREAK_CONFIGURATION,
 };
 
 export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration> | null): DesignConfiguration {
@@ -74,6 +77,7 @@ export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration
     seed: Math.round(clamp(Number(value?.seed ?? 41), 1, 2_147_483_647)),
     objectives: normalizeDesignObjectives(value?.objectives),
     machinery: normalizeMachineryConfiguration(value?.machinery),
+    firebreak: normalizeFirebreakConfiguration(value?.firebreak),
   };
 }
 
@@ -165,6 +169,7 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const protectedVegetation = siteProfile.satellite.existingVegetation.patches.map((patch) => patch.polygon);
   const allExclusions = [...site.exclusions, ...protectedVegetation];
   const exclusions = allExclusions.map((exclusion) => exclusion.map(projection.project));
+  const boundaryClearanceM = plantingBoundaryClearanceM(site, design.firebreak);
   const candidates = design.extent === 'full-field'
     ? fullFieldCandidates(site, polygons, projection, exclusions, definition, design)
     : perimeterCandidates(site, polygons, projection, exclusions, definition, design);
@@ -172,7 +177,7 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const speciesById = new Map(permitted.map((item) => [item.id, item]));
   const lockedPlacements: LockedPlacement[] = options.lockedTrees.map((tree) => ({ tree, point: projection.project(tree.coordinate), species: speciesById.get(tree.speciesId)! }));
   for (const locked of lockedPlacements) {
-    if (!isPlantableCandidate(locked.tree.coordinate, locked.point, site, exclusions)) {
+    if (!isPlantableCandidate(locked.tree.coordinate, locked.point, site, exclusions, boundaryClearanceM)) {
       throw new Error(`Locked tree ${locked.tree.id} violates a current site, exclusion, path or protected-tree constraint.`);
     }
   }
@@ -208,7 +213,11 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
     placedBySpecies.set(selected.id, [...(placedBySpecies.get(selected.id) ?? []), candidate]);
   }
 
-  const areaM2 = Math.max(1, estimatedPlantableAreaM2(site) - protectedVegetation.reduce((sum, exclusion) => sum + polygonAreaM2(exclusion), 0));
+  const firebreak = buildFirebreakPlan(site, siteProfile, design.firebreak);
+  const additionalFirebreakReserveM2 = firebreak.enabled
+    ? firebreak.totalLengthM * Math.max(0, firebreak.plannedWidthM - site.setbackM)
+    : 0;
+  const areaM2 = Math.max(1, estimatedPlantableAreaM2(site) - additionalFirebreakReserveM2 - protectedVegetation.reduce((sum, exclusion) => sum + polygonAreaM2(exclusion), 0));
   const canopy10 = canopyCoverage(trees, permitted, 10, areaM2);
   const canopy20 = canopyCoverage(trees, permitted, 20, areaM2);
   const representedSpecies = new Set(trees.map((tree) => tree.speciesId));
@@ -225,6 +234,8 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   if (protectedVegetation.length) warnings.push(`${protectedVegetation.length} existing woody ${protectedVegetation.length === 1 ? 'patch is' : 'patches are'} protected from new planting.`);
   if (site.existingTrees.length) warnings.push(`${site.existingTrees.length} field-observed existing ${site.existingTrees.length === 1 ? 'tree is' : 'trees are'} protected from new planting.`);
   if (site.paths.length) warnings.push(`${site.paths.length} management ${site.paths.length === 1 ? 'path is' : 'paths are'} reserved before placement.`);
+  if (firebreak.enabled) warnings.push(`${firebreak.plannedWidthM.toFixed(1)} m perimeter firebreak reserve excludes ${firebreak.reservedAreaM2} m² from planting and requires local AIB review.`);
+  if (firebreak.enabled && !firebreak.planningWidthSatisfied) warnings.push(`The firebreak width is below the ${firebreak.minimumPlanningWidthM.toFixed(1)} m flame-length planning basis.`);
   const dimensions = averageCanopy(permitted, design.analysisYear);
   const solar = assessSolarOrientation(siteProfile, design, definition.directionDegrees, dimensions);
   const cropInteriorAreaM2 = estimateCropInteriorArea(site, areaM2, design, definition);
@@ -261,6 +272,7 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
       conflicts,
     },
     machinery,
+    firebreak,
     composition,
     metrics: {
       totalTrees: trees.length,
@@ -283,6 +295,7 @@ function fullFieldCandidates(
 ) {
   const candidates: Array<PointM & { rowIndex: number; positionIndex: number }> = [];
   const { headlandDepthM } = machineryEnvelope(design.machinery);
+  const boundaryClearanceM = plantingBoundaryClearanceM(site, design.firebreak);
   let rowIndex = 0;
   for (const polygon of polygons) {
     const rotatedPolygon = polygon.map((point) => rotate(point, -definition.directionDegrees));
@@ -296,9 +309,9 @@ function fullFieldCandidates(
         const currentPositionIndex = positionIndex;
         positionIndex += 1;
         const local = rotate({ x, y }, definition.directionDegrees);
-        if (!pointInPolygon(local, polygon) || distanceToPolygonEdge(local, polygon) < site.setbackM) continue;
+        if (!pointInPolygon(local, polygon) || distanceToPolygonEdge(local, polygon) < boundaryClearanceM) continue;
         const coordinate = projection.unproject(local);
-        if (!isPlantableCandidate(coordinate, local, site, exclusions)) continue;
+        if (!isPlantableCandidate(coordinate, local, site, exclusions, boundaryClearanceM)) continue;
         candidates.push({ ...local, rowIndex, positionIndex: currentPositionIndex });
       }
       rowIndex += 1;
@@ -318,6 +331,7 @@ function perimeterCandidates(
   const candidates: Array<PointM & { rowIndex: number; positionIndex: number }> = [];
   const bandM = design.perimeterBandM;
   const { headlandDepthM } = machineryEnvelope(design.machinery);
+  const boundaryClearanceM = plantingBoundaryClearanceM(site, design.firebreak);
   let rowIndex = 0;
   for (const polygon of polygons) {
     const center = polygon.reduce((result, point) => ({ x: result.x + point.x / polygon.length, y: result.y + point.y / polygon.length }), { x: 0, y: 0 });
@@ -340,9 +354,9 @@ function perimeterCandidates(
       const inward = normals.sort((a, b) => distanceToCenter(midpoint, a, center) - distanceToCenter(midpoint, b, center))[0];
       const rowCount = design.system === 'windbreak'
         ? design.windbreakRows
-        : Math.max(1, Math.floor((bandM - site.setbackM) / definition.rowSpacingM) + 1);
+        : Math.max(1, Math.floor((bandM - boundaryClearanceM) / definition.rowSpacingM) + 1);
       for (let row = 0; row < rowCount; row += 1) {
-        const offset = site.setbackM + definition.treeSpacingM * 0.45 + row * definition.rowSpacingM;
+        const offset = boundaryClearanceM + definition.treeSpacingM * 0.45 + row * definition.rowSpacingM;
         if (offset > bandM) continue;
         let positionIndex = 0;
         for (let along = headlandDepthM + definition.treeSpacingM / 2; along < edge.length - headlandDepthM; along += definition.treeSpacingM) {
@@ -353,7 +367,7 @@ function perimeterCandidates(
             y: edge.start.y + tangent.y * along + inward.y * offset,
           };
           const coordinate = projection.unproject(local);
-          if (!pointInPolygon(local, polygon) || !isPlantableCandidate(coordinate, local, site, exclusions)) continue;
+          if (!pointInPolygon(local, polygon) || !isPlantableCandidate(coordinate, local, site, exclusions, boundaryClearanceM)) continue;
           if (distanceToSiteBoundaryM(site, coordinate) > bandM) continue;
           if (candidates.some((candidate) => Math.hypot(candidate.x - local.x, candidate.y - local.y) < definition.treeSpacingM * 0.65)) continue;
           candidates.push({ ...local, rowIndex, positionIndex: currentPositionIndex });
@@ -365,9 +379,9 @@ function perimeterCandidates(
   return candidates;
 }
 
-function isPlantableCandidate(coordinate: Coordinate, local: PointM, site: SiteBoundary, exclusions: PointM[][]) {
+function isPlantableCandidate(coordinate: Coordinate, local: PointM, site: SiteBoundary, exclusions: PointM[][], boundaryClearanceM: number) {
   if (!siteContainsCoordinate(site, coordinate)) return false;
-  if (distanceToSiteBoundaryM(site, coordinate) < site.setbackM) return false;
+  if (distanceToSiteBoundaryM(site, coordinate) < boundaryClearanceM) return false;
   if (exclusions.some((exclusion) => pointInPolygon(local, exclusion))) return false;
   if (site.paths.some((path) => distanceToSitePathM(coordinate, path) < path.widthM / 2)) return false;
   if (site.existingTrees.some((tree) => {
@@ -472,12 +486,15 @@ function generationAssumptions(
     : design.extent === 'perimeter-band'
       ? `${design.perimeterBandM.toFixed(1)} m inward perimeter band`
       : 'selected boundary edges';
+  const boundaryRule = design.firebreak.enabled
+    ? `${polygons} planting ${polygons === 1 ? 'polygon' : 'polygons'}; ${design.firebreak.widthM.toFixed(1)} m firebreak reserve`
+    : `${polygons} planting ${polygons === 1 ? 'polygon' : 'polygons'}; ${site.setbackM.toFixed(1)} m setback`;
   return [
     { label: 'Placement seed', value: String(design.seed) },
-    { label: 'Boundary rule', value: `${polygons} planting ${polygons === 1 ? 'polygon' : 'polygons'}; ${site.setbackM.toFixed(1)} m setback` },
+    { label: 'Boundary rule', value: boundaryRule },
     { label: 'Grid geometry', value: `${definition.rowSpacingM.toFixed(1)} m rows × ${definition.treeSpacingM.toFixed(1)} m plants at ${Math.round(definition.directionDegrees)}°` },
     { label: 'Planting extent', value: extent },
-    { label: 'Hard constraints', value: 'holes, exclusions, paths, observed trees and detected woody vegetation' },
+    { label: 'Hard constraints', value: `holes, exclusions, paths, observed trees, detected woody vegetation${design.firebreak.enabled ? ' and perimeter firebreak' : ''}` },
   ];
 }
 

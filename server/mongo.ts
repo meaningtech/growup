@@ -1,7 +1,9 @@
 import { MongoClient, type Collection, type Db, type IndexDescriptionInfo } from 'mongodb';
 import type { CalculationSnapshot, ProjectRevisionSummary, ProjectState, SiteBoundary, SiteValidation } from '../src/types.js';
 import { normalizeEconomicConfiguration } from '../src/data/economicProfiles.js';
+import { disabledFirebreakPlan } from '../src/lib/firebreak.js';
 import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
+import { normalizeDesignConfiguration } from '../src/lib/layout.js';
 import { normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
 import { buildRevisionArtifacts, projectContentHash } from './revisions.js';
 
@@ -359,9 +361,15 @@ function userFromDocument(document: UserDocument): GrowupUser {
 
 function normalizeProject(project: ProjectState): ProjectState {
   const countryCode = project.siteProfile?.location.countryCode ?? '';
+  const designConfiguration = normalizeDesignConfiguration(project.designConfiguration);
   return {
     ...project,
     site: normalizeSiteBoundary(project.site),
+    designConfiguration,
+    variants: project.variants.map((variant) => {
+      const design = normalizeDesignConfiguration(variant.design);
+      return { ...variant, design, firebreak: variant.firebreak ?? disabledFirebreakPlan(design.firebreak) };
+    }),
     irrigationConfiguration: normalizeIrrigationConfiguration(project.irrigationConfiguration),
     economicConfiguration: normalizeEconomicConfiguration(project.economicConfiguration, countryCode),
   };

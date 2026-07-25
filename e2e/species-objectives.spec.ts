@@ -7,6 +7,7 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await page.goto('/');
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByRole('tab', { name: /Satellite/ }).click();
   await expect(page.getByTestId('existing-vegetation-audit')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('step-species').click();
 

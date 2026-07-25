@@ -17,14 +17,17 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await expect(page.getByText('02 · Multi-source evidence')).toBeVisible({ timeout: 60_000 });
+  await page.getByRole('tab', { name: /Satellite/ }).click();
   await expect(page.getByText('Sentinel field water')).toBeVisible();
   await expect(page.getByTestId('existing-vegetation-audit')).toBeVisible();
   await expect(page.getByTestId('existing-vegetation-audit')).toContainText('0 protected woody areas');
   await expect(page.getByText('Sentinel-1:', { exact: false })).toBeVisible();
+  await page.getByRole('tab', { name: /Sources/ }).click();
   await expect(page.getByTestId('evidence-traceability')).toContainText('Data read');
   await expect(page.getByTestId('evidence-traceability')).toContainText('Growup calculation');
   await expect(page.getByTestId('evidence-traceability')).toContainText('Decision affected');
-  await expect(page.getByTestId('evidence-traceability').locator('a')).toHaveCount(0);
+  await expect(page.getByTestId('evidence-traceability').locator('a')).not.toHaveCount(0);
+  await page.getByRole('tab', { name: /Satellite/ }).click();
   await expect(page.locator('.satellite-image img')).toBeVisible();
   await page.waitForTimeout(2_000);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-evidence.png', fullPage: false });

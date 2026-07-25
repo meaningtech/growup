@@ -13,6 +13,7 @@ import {
   Database,
   Download,
   Droplets,
+  Flame,
   FlaskConical,
   Info,
   Layers3,
@@ -44,11 +45,14 @@ import {
   Upload,
   Waves,
   Waypoints,
+  Wind as WindIcon,
   X,
 } from 'lucide-react';
 import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
 import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
+import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope } from './data/firebreak';
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
+import { disabledFirebreakPlan } from './lib/firebreak';
 import { growthState } from './lib/growth';
 import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
@@ -98,9 +102,12 @@ import type {
   SiteProfile,
   SiteProfileOverrideField,
   SiteValidation,
+  SoilPropertyEstimate,
+  SoilPropertyEstimateKey,
   SpeciesRecommendation,
   SuitabilityComponent,
   TreeInstance,
+  WindClimatologyPeriod,
 } from './types';
 
 type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'costs';
@@ -197,6 +204,8 @@ export default function App() {
   const [showObservedTrees, setShowObservedTrees] = useState(true);
   const [showPlannedTrees, setShowPlannedTrees] = useState(true);
   const [showMachinery, setShowMachinery] = useState(true);
+  const [showFirebreaks, setShowFirebreaks] = useState(true);
+  const [showWind, setShowWind] = useState(true);
   const [showIrrigation, setShowIrrigation] = useState(true);
   const [editingIrrigation, setEditingIrrigation] = useState(false);
   const [busy, setBusy] = useState<string | null>(() => t('busy.loading'));
@@ -241,6 +250,8 @@ export default function App() {
   const draftPointOverlaysRef = useRef<any[]>([]);
   const treeOverlaysRef = useRef<any[]>([]);
   const machineryOverlaysRef = useRef<any[]>([]);
+  const firebreakOverlaysRef = useRef<any[]>([]);
+  const windOverlaysRef = useRef<any[]>([]);
   const waterOverlaysRef = useRef<any[]>([]);
   const irrigationNetworkOverlaysRef = useRef<any[]>([]);
   const ndmiOverlayRef = useRef<any>(null);
@@ -705,6 +716,89 @@ export default function App() {
     const map = mapRef.current;
     const maps = window.google?.maps;
     if (!map || !maps) return;
+    firebreakOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    firebreakOverlaysRef.current = [];
+    if (!selectedVariant?.firebreak?.enabled || !showFirebreaks) return;
+    for (const line of selectedVariant.firebreak.lines) {
+      const priority = line.priority === 'windward';
+      firebreakOverlaysRef.current.push(new maps.Polygon({
+        map,
+        paths: corridorSegmentPolygon(line.points[0], line.points[line.points.length - 1], line.widthM),
+        strokeColor: priority ? '#7d2917' : '#613b12',
+        strokeOpacity: 0.92,
+        strokeWeight: priority ? 2.5 : 1.5,
+        fillColor: priority ? '#f06f3c' : '#e9b44c',
+        fillOpacity: priority ? 0.54 : 0.42,
+        clickable: false,
+        zIndex: 17,
+      }));
+      firebreakOverlaysRef.current.push(new maps.Polyline({
+        map,
+        path: line.points,
+        strokeColor: priority ? '#fff3d3' : '#fff8e8',
+        strokeOpacity: 0,
+        strokeWeight: 2,
+        icons: [{ icon: { path: 'M 0,-1 0,1', strokeColor: priority ? '#fff3d3' : '#fff8e8', strokeOpacity: 0.95, strokeWeight: 1.5, scale: 2 }, offset: '0', repeat: '12px' }],
+        clickable: false,
+        zIndex: 18,
+      }));
+    }
+    return () => firebreakOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [selectedVariant?.firebreak, showFirebreaks]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    windOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    windOverlaysRef.current = [];
+    const direction = siteProfile?.solar.prevailingWindDirectionDegrees;
+    if (!showWind || siteProfile?.solar.status !== 'available' || direction === null || direction === undefined) return;
+    const [source, destination] = windVectorCoordinates(
+      siteProfile.centroid,
+      direction,
+      Math.max(35, Math.sqrt(siteProfile.areaM2) * 0.75),
+    );
+    windOverlaysRef.current.push(new maps.Polyline({
+      map,
+      path: [source, destination],
+      strokeColor: '#1f7f89',
+      strokeOpacity: 0.9,
+      strokeWeight: 5,
+      icons: [{
+        icon: {
+          path: maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          fillColor: '#d7ff83',
+          fillOpacity: 1,
+          strokeColor: '#113c39',
+          strokeOpacity: 1,
+          strokeWeight: 1.5,
+          scale: 5,
+        },
+        offset: '100%',
+      }],
+      clickable: false,
+      zIndex: 20,
+    }));
+    windOverlaysRef.current.push(new maps.Circle({
+      map,
+      center: source,
+      radius: Math.max(2, Math.sqrt(siteProfile.areaM2) * 0.035),
+      strokeColor: '#ffffff',
+      strokeOpacity: 0.95,
+      strokeWeight: 2,
+      fillColor: '#1f7f89',
+      fillOpacity: 0.9,
+      clickable: false,
+      zIndex: 21,
+    }));
+    return () => windOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [showWind, siteProfile]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
     treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     treeOverlaysRef.current = [];
     if (!selectedVariant || !showPlannedTrees) return;
@@ -845,7 +939,7 @@ export default function App() {
       return;
     }
     if (drawMode === 'add-tree' && selectedVariant && treeSpeciesId) {
-      const restriction = plantingRestriction(coordinate, site, siteProfile, t);
+      const restriction = plantingRestriction(coordinate, site, siteProfile, selectedVariant.firebreak, t);
       if (restriction) {
         setError(restriction);
         setDrawMode('idle');
@@ -870,7 +964,7 @@ export default function App() {
       return;
     }
     if (drawMode === 'move-tree' && selectedTree && !selectedTree.locked) {
-      const restriction = plantingRestriction(coordinate, site, siteProfile, t);
+      const restriction = plantingRestriction(coordinate, site, siteProfile, selectedVariant.firebreak, t);
       if (restriction) {
         setError(restriction);
         setDrawMode('idle');
@@ -1405,6 +1499,15 @@ export default function App() {
   function loadProjectIntoWorkspace(project: ProjectState, status: SaveStatus) {
     suppressDirtyRef.current = true;
     const revision = project.revision ?? 0;
+    const normalizedDesign = normalizeDesignConfiguration(project.designConfiguration);
+    const normalizedVariants = project.variants.map((variant) => {
+      const variantDesign = normalizeDesignConfiguration(variant.design);
+      return {
+        ...variant,
+        design: variantDesign,
+        firebreak: variant.firebreak ?? disabledFirebreakPlan(variantDesign.firebreak),
+      };
+    });
     projectRevisionRef.current = revision;
     setProjectRevision(revision);
     setProjectId(project.id);
@@ -1415,17 +1518,17 @@ export default function App() {
     setSiteProfile(project.siteProfile);
     setSelectedSpeciesIds(project.selectedSpeciesIds);
     setTreeSpeciesId(project.selectedSpeciesIds[0] ?? '');
-    setDesignConfiguration(normalizeDesignConfiguration(project.designConfiguration));
+    setDesignConfiguration(normalizedDesign);
     setIrrigationConfiguration(normalizeIrrigationConfiguration(project.irrigationConfiguration));
     setEconomicConfiguration(normalizeEconomicConfiguration(project.economicConfiguration, project.siteProfile?.location.countryCode ?? project.economicConfiguration?.countryCode ?? ''));
-    setVariants(project.variants);
+    setVariants(normalizedVariants);
     setSelectedVariantId(project.selectedVariantId);
     setTimelineYear(project.timelineYear);
     setIrrigation(project.irrigation);
     setCosts(project.costs);
     setSelectedTreeId(null);
     fittedSiteRef.current = null;
-    setSection(project.costs ? 'costs' : project.irrigation ? 'water' : project.variants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
+    setSection(project.costs ? 'costs' : project.irrigation ? 'water' : normalizedVariants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
     setSaveStatus(status);
     if (project.siteProfile) {
       void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives }))
@@ -1773,8 +1876,10 @@ export default function App() {
             <MapLayerToggle icon={TreePine} tone="observed" active={showObservedTrees} disabled={!site?.existingTrees.length} label={t('map.layerObservedTrees')} hint={t('map.layerObservedTreesHint')} toggleLabel={t('map.toggleObservedTrees')} onToggle={() => setShowObservedTrees((value) => !value)} />
             <MapLayerToggle icon={Sprout} tone="trees" active={showPlannedTrees} disabled={!selectedVariant} label={t('map.layerTrees')} hint={t('map.layerTreesHint')} toggleLabel={t('map.toggleTrees')} onToggle={() => setShowPlannedTrees((value) => !value)} />
             <MapLayerToggle icon={Tractor} tone="machinery" active={showMachinery} disabled={!selectedVariant?.machinery.enabled} label={t('map.layerMachinery')} hint={t('map.layerMachineryHint')} toggleLabel={t('map.toggleMachinery')} onToggle={() => setShowMachinery((value) => !value)} />
+            <MapLayerToggle icon={Flame} tone="firebreak" active={showFirebreaks} disabled={!selectedVariant?.firebreak?.enabled} label={t('map.layerFirebreak')} hint={t('map.layerFirebreakHint')} toggleLabel={t('map.toggleFirebreak')} onToggle={() => setShowFirebreaks((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="irrigation" active={showIrrigation} disabled={!irrigation} label={t('map.layerIrrigation')} hint={t('map.layerIrrigationHint')} toggleLabel={t('map.toggleIrrigation')} onToggle={() => { const next = !showIrrigation; setShowIrrigation(next); if (!next) setEditingIrrigation(false); }} />
             <small>{t('map.evidenceLayers')}</small>
+            <MapLayerToggle icon={WindIcon} tone="wind" active={showWind} disabled={siteProfile?.solar.status !== 'available'} label={t('map.layerWind')} hint={t('map.layerWindHint')} toggleLabel={t('map.toggleWind')} onToggle={() => setShowWind((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="vegetation" active={showExistingVegetation} disabled={!siteProfile?.satellite.existingVegetation.patches.length} label={t('map.layerVegetation')} hint={t('map.layerVegetationHint')} toggleLabel={t('map.toggleVegetation')} onToggle={() => setShowExistingVegetation((value) => !value)} />
             <MapLayerToggle icon={Waves} tone="ndmi" active={showNdmi} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} label={t('map.layerNdmi')} hint={t('map.layerNdmiHint')} toggleLabel={t('map.toggleNdmi')} onToggle={() => setShowNdmi((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="water" active={showWaterSamples} disabled={!siteProfile?.satellite.optical.waterSamples.length} label={t('map.layerWater')} hint={t('map.layerWaterHint')} toggleLabel={t('map.toggleWater')} onToggle={() => setShowWaterSamples((value) => !value)} />
@@ -1799,6 +1904,12 @@ export default function App() {
               <span><i className="balanced" /> {t('map.priorityMonitor')}</span>
               <span><i className="wet" /> {t('map.priorityLow')}</span>
               <small>Sentinel-2 · {shortDate(siteProfile.satellite.optical.latest.acquiredAt, locale)}</small>
+            </div>
+          )}
+          {showWind && siteProfile?.solar.status === 'available' && siteProfile.solar.prevailingWindDirectionDegrees !== null && (
+            <div className="wind-map-legend" data-testid="wind-map-legend">
+              <i style={{ transform: `rotate(${siteProfile.solar.prevailingWindDirectionDegrees + 180}deg)` }}>↑</i>
+              <span><small>{t('wind.mapEyebrow')}</small><strong>{t('wind.fromDirection', { direction: siteProfile.solar.prevailingWindDirectionLabel ?? '—' })}</strong><b>{t('wind.mapSpeed', { mean: formatNumber(siteProfile.solar.meanWindSpeedMs ?? 0, 1), p90: formatNumber(siteProfile.solar.windSpeedP90Ms ?? 0, 1) })}</b></span>
             </div>
           )}
         </section>
@@ -1827,7 +1938,7 @@ export default function App() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={setSelectedVariantId} selectedTree={selectedTree} onTreeSelect={setSelectedTreeId} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} />}
           {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
@@ -1997,7 +2108,7 @@ function OnboardingTour({
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
   icon: typeof Layers3;
-  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'irrigation' | 'vegetation' | 'ndmi' | 'water';
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'firebreak' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
   active: boolean;
   disabled: boolean;
   label: string;
@@ -2379,6 +2490,7 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       </div>
       <div className="schedule-management">{schedule.managementPhases.map((phase) => <article key={phase}><small>{t(`schedule.phase.${phase}.years`)}</small><strong>{t(`schedule.phase.${phase}.title`)}</strong><p>{t(`schedule.phase.${phase}.body`)}</p><em>{t(`schedule.management.system.${variant.design.system}`)}</em><span>□ {t('schedule.recordActuals')}</span></article>)}</div>
       {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1) })}</small></span></div>}
+      {variant.firebreak?.enabled && <div className="schedule-machinery firebreak"><Flame size={18} /><span><strong>{t('schedule.firebreakTitle')}</strong><small>{t('schedule.firebreakBody', { length: formatNumber(schedule.summary.firebreakLengthM, 0), width: formatNumber(schedule.summary.firebreakWidthM, 1), area: formatNumber(schedule.summary.firebreakReservedAreaM2, 0) })}</small></span></div>}
     </ScheduleSection>
     <ScheduleSection number="05" title={t('schedule.evidenceTitle')} subtitle={t('schedule.evidenceBody')}>
       <div className="schedule-evidence">{schedule.evidence.map((item, index) => {
@@ -2420,8 +2532,9 @@ function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, p
   return values;
 }
 
-function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void> }) {
+function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride, additionalEvidence }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[] }) {
   const { t, locale } = useI18n();
+  const [activeEvidenceTab, setActiveEvidenceTab] = useState<'overview' | 'wind' | 'soil' | 'satellite' | 'sources'>('overview');
   const [overrideField, setOverrideField] = useState<SiteProfileOverrideField>(SITE_PROFILE_OVERRIDE_DEFINITIONS[0].field);
   const [overrideInput, setOverrideInput] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
@@ -2437,20 +2550,70 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
   const optical = profile.satellite.optical.latest;
   const radar = profile.satellite.radar;
   const vegetation = profile.satellite.existingVegetation;
+  const soilProperties = profile.soil.properties ?? [];
+  const chemicalSoilProperties = soilProperties.filter((property) => property.category === 'chemical');
+  const physicalSoilProperties = soilProperties.filter((property) => property.category === 'physical' || property.key === 'plant-available-water');
+  const soilSatellite = profile.soil.satelliteScreening;
+  const evidenceItems = [
+    profile.terrain.evidence,
+    profile.climate.evidence,
+    profile.solar.evidence,
+    profile.soil.evidence,
+    ...profile.satellite.existingVegetation.evidence,
+    ...profile.satellite.evidence,
+    ...additionalEvidence,
+  ];
+  const evidenceTabs = [
+    ['overview', t('evidence.tab.overview'), 6],
+    ['wind', t('evidence.tab.wind'), profile.solar.windClimatology?.[0]?.sectors.length ?? 1],
+    ['soil', t('evidence.tab.soil'), soilProperties.length || 1],
+    ['satellite', t('evidence.tab.satellite'), profile.satellite.evidence.length + profile.satellite.existingVegetation.evidence.length],
+    ['sources', t('evidence.tab.sources'), evidenceItems.length],
+  ] as const;
   return (
     <div className="panel-body">
       <div className="panel-intro compact"><span className="eyebrow">{t('profile.eyebrow')}</span><h1>{profile.location.municipality ?? profile.location.region ?? profile.location.countryCode ?? t('profile.locationUnknown')}</h1><p>{profile.location.displayName}</p></div>
-      <div className="metric-grid">
+      <div className="evidence-tabs" role="tablist" aria-label={t('evidence.tabsLabel')} data-testid="evidence-tabs">
+        {evidenceTabs.map(([id, label, count]) => <button key={id} id={`evidence-tab-${id}`} role="tab" aria-selected={activeEvidenceTab === id} aria-controls={`evidence-panel-${id}`} className={activeEvidenceTab === id ? 'active' : ''} onClick={() => setActiveEvidenceTab(id)}><span>{label}</span><b>{count}</b></button>)}
+      </div>
+      {activeEvidenceTab === 'overview' && <div className="evidence-tabpanel" id="evidence-panel-overview" role="tabpanel" aria-labelledby="evidence-tab-overview">
+        <div className="metric-grid">
         <Metric label={t('profile.elevation')} value={`${formatNumber(profile.terrain.elevationMeanM, 0)} m`} detail={`${profile.terrain.elevationMinM}–${profile.terrain.elevationMaxM} m`} />
         <Metric label={t('profile.slope')} value={`${profile.terrain.slopePercent}%`} detail={t('profile.aspect', { value: localizedEnum(profile.terrain.aspectLabel, t) })} />
         <Metric label={t('profile.rain')} value={`${formatNumber(profile.climate.annualPrecipitationMm, 0)} mm`} detail={t('profile.annualMean')} />
         <Metric label="ET₀" value={`${formatNumber(profile.climate.annualEt0Mm, 0)} mm`} detail={t('profile.aridity', { value: profile.climate.aridityIndex })} />
         <Metric label={t('profile.solar')} value={profile.solar.status === 'available' ? `${formatNumber(profile.solar.annualGlobalHorizontalKwhM2, 0)} kWh/m²` : '—'} detail={t('profile.annualHorizontal')} />
         <Metric label={t('profile.wind')} value={profile.solar.prevailingWindDirectionLabel ? localizedEnum(profile.solar.prevailingWindDirectionLabel, t) : '—'} detail={profile.solar.meanWindSpeedMs === null ? t('status.unavailable') : t('profile.windMean', { value: profile.solar.meanWindSpeedMs })} />
-      </div>
-      <div className="evidence-card soil-card">
-        <div className="card-heading"><div><FlaskConical size={17} /><span><small>SoilGrids · 0–5 cm</small><strong>{profile.soil.textureClass ? localizedEnum(profile.soil.textureClass, t) : t('profile.fieldTestRequired')}</strong></span></div><StatusPill status={profile.soil.status} /></div>
-        <div className="soil-values"><span><small>pH</small><strong>{profile.soil.ph ?? '—'}</strong></span><span><small>{t('profile.sand')}</small><strong>{profile.soil.sandPercent ?? '—'}%</strong></span><span><small>{t('profile.clay')}</small><strong>{profile.soil.clayPercent ?? '—'}%</strong></span><span><small>{t('profile.soc')}</small><strong>{profile.soil.organicCarbonGKg ?? '—'}</strong></span></div>
+        </div>
+        {profile.warnings.length > 0 && <div className="warning-list">{profile.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
+      </div>}
+      {activeEvidenceTab === 'wind' && <div className="evidence-tabpanel" id="evidence-panel-wind" role="tabpanel" aria-labelledby="evidence-tab-wind">
+        <WindClimatologyCard solar={profile.solar} />
+      </div>}
+      {activeEvidenceTab === 'soil' && <div className="evidence-tabpanel" id="evidence-panel-soil" role="tabpanel" aria-labelledby="evidence-tab-soil">
+      <div className="evidence-card soil-card" data-testid="soil-composition">
+        <div className="card-heading"><div><FlaskConical size={17} /><span><small>{t('soil.eyebrow')}</small><strong>{profile.soil.reactionClass && profile.soil.reactionClass !== 'unknown' ? t(`soil.reaction.${profile.soil.reactionClass}`) : profile.soil.textureClass ? localizedEnum(profile.soil.textureClass, t) : t('profile.fieldTestRequired')}</strong></span></div><StatusPill status={profile.soil.status} /></div>
+        <p className="soil-intro">{t('soil.intro')}</p>
+        <div className="soil-values">
+          <span><small>pH</small><strong>{profile.soil.ph ?? '—'}</strong></span>
+          <span><small>{t('profile.soc')}</small><strong>{profile.soil.organicCarbonGKg ?? '—'} <i>g/kg</i></strong></span>
+          <span><small>{t('soil.property.total-nitrogen')}</small><strong>{soilPropertyValue(soilProperties, 'total-nitrogen')}</strong></span>
+          <span><small>{t('soil.property.cation-exchange-capacity')}</small><strong>{soilPropertyValue(soilProperties, 'cation-exchange-capacity')}</strong></span>
+        </div>
+        {soilProperties.length > 0 && <div className="soil-composition-groups">
+          <SoilPropertyGroup title={t('soil.chemicalTitle')} body={t('soil.chemicalBody')} properties={chemicalSoilProperties} />
+          <SoilPropertyGroup title={t('soil.physicalTitle')} body={t('soil.physicalBody')} properties={physicalSoilProperties} />
+        </div>}
+        {soilSatellite && <div className={`soil-satellite-screening ${soilSatellite.status}`}>
+          <Satellite size={18} />
+          <span><small>{t('soil.satelliteEyebrow')}</small><strong>{t(`soil.satellite.${soilSatellite.status}`)}</strong><p>{t('soil.satelliteBody', { usable: soilSatellite.bareSoilObservationCount, total: soilSatellite.totalObservationCount })}</p></span>
+        </div>}
+        <div className="soil-provenance">
+          <Database size={15} />
+          <span><strong>{t('soil.sourceTitle')}</strong><small>{profile.soil.evidence.version} · {profile.soil.evidence.resolution ?? '250 m'} · {t('soil.modelled')}</small></span>
+          <a href={profile.soil.evidence.sourceUrl} target="_blank" rel="noreferrer">{t('soil.openSource')}</a>
+        </div>
+        {(profile.soil.limitations?.length ?? 0) > 0 && <details className="soil-limitations"><summary>{t('soil.limitations')}</summary>{profile.soil.limitations!.map((limitation) => <p key={limitation}>• {localizedSoilLimitation(limitation, t)}</p>)}</details>}
       </div>
       <div className="profile-overrides" data-testid="profile-overrides">
         <div className="card-heading"><div><PencilRuler size={17} /><span><small>{t('profile.overrideEyebrow')}</small><strong>{t('profile.overrideTitle')}</strong></span></div><StatusPill status={(profile.overrides?.length ?? 0) > 0 ? 'available' : 'partial'} /></div>
@@ -2468,6 +2631,8 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
         </form>
         {(profile.overrides?.length ?? 0) > 0 && <div className="override-audit"><strong>{t('profile.overrideAudit')}</strong>{[...(profile.overrides ?? [])].reverse().slice(0, 8).map((item) => <article key={item.id}><span><b>{t(SITE_PROFILE_OVERRIDE_DEFINITIONS.find((definition) => definition.field === item.field)?.labelKey ?? item.field)}</b><small>{item.sourceLabel} · {shortDate(item.observedAt, locale)}</small></span><span><s>{String(item.previousValue ?? '—')}</s><strong>{String(item.value)}{item.unit ? ` ${item.unit}` : ''}</strong></span><p>{item.reason}</p></article>)}</div>}
       </div>
+      </div>}
+      {activeEvidenceTab === 'satellite' && <div className="evidence-tabpanel" id="evidence-panel-satellite" role="tabpanel" aria-labelledby="evidence-tab-satellite">
       <div className="vegetation-audit" data-testid="existing-vegetation-audit">
         <div className="card-heading"><div><TreePine size={17} /><span><small>{t('profile.vegetationAudit')}</small><strong>{t('profile.protectedAreas', { count: vegetation.patches.length })}</strong></span></div><StatusPill status={vegetation.suitability} /></div>
         <div className="vegetation-metrics"><span><small>{t('profile.detectedCover')}</small><strong>{vegetation.detectedCoverPercent}%</strong></span><span><small>{t('profile.protectedArea')}</small><strong>{vegetation.protectedCoverPercent}%</strong></span><span><small>{t('profile.ndviDates')}</small><strong>{vegetation.analyzedOpticalScenes}</strong></span><span><small>{t('profile.treeMaps')}</small><strong>{vegetation.annualLandCoverYears.length + 1 + Number(vegetation.woodyVegetationLayerAvailable)}</strong></span></div>
@@ -2483,10 +2648,11 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
           <button className="text-button" onClick={onShowNdmi}>{t('profile.showWaterLayers')} <ChevronRight size={14} /></button>
         </div>
       </div>
-      {profile.warnings.length > 0 && <div className="warning-list">{profile.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
+      </div>}
+      {activeEvidenceTab === 'sources' && <div className="evidence-tabpanel" id="evidence-panel-sources" role="tabpanel" aria-labelledby="evidence-tab-sources">
       <div className="source-traceability" data-testid="evidence-traceability">
         <div className="card-heading"><div><Database size={17} /><span><small>{t('evidence.traceability')}</small><strong>{t('evidence.howUsed')}</strong></span></div></div>
-        {[profile.terrain.evidence, profile.climate.evidence, profile.solar.evidence, profile.soil.evidence, ...profile.satellite.existingVegetation.evidence, ...profile.satellite.evidence].map((item, index) => {
+        {evidenceItems.map((item, index) => {
           const usageKey = evidenceUsageKey(item);
           return <article className="evidence-use-card" key={`${item.source}-${item.version}-${index}`}>
             <header><strong>{item.source}</strong><span className={`evidence-confidence ${item.confidence}`}>{t(`status.${item.confidence}`)}</span></header>
@@ -2495,12 +2661,85 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
               <div><dt>{t('evidence.calculation')}</dt><dd>{t(`${usageKey}.calculation`)}</dd></div>
               <div><dt>{t('evidence.decision')}</dt><dd>{t(`${usageKey}.decision`)}</dd></div>
             </dl>
-            <footer><span>{item.version}</span><span>{item.resolution ?? t('evidence.resolutionUnavailable')}</span><time dateTime={item.observedAt}>{shortDate(item.observedAt, locale)}</time></footer>
+            <footer><span>{item.version}</span><span>{item.resolution ?? t('evidence.resolutionUnavailable')}</span><time dateTime={item.observedAt}>{shortDate(item.observedAt, locale)}</time><a href={item.sourceUrl} target="_blank" rel="noreferrer">{t('evidence.openSource')}</a></footer>
           </article>;
         })}
       </div>
+      </div>}
     </div>
   );
+}
+
+function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
+  const { t, locale } = useI18n();
+  const [activePeriod, setActivePeriod] = useState<WindClimatologyPeriod['period']>('annual');
+  const periods = solar.windClimatology ?? [];
+  const selected = periods.find((item) => item.period === activePeriod) ?? periods[0] ?? null;
+  if (solar.status !== 'available' || !selected) {
+    return <div className="wind-card unavailable" data-testid="wind-climatology"><WindIcon size={24} /><span><strong>{t('wind.unavailableTitle')}</strong><p>{t('wind.unavailableBody')}</p></span></div>;
+  }
+  const maxFrequency = Math.max(1, ...selected.sectors.map((sector) => sector.frequencyPercent));
+  const maxSpeed = Math.max(1, ...selected.sectors.map((sector) => sector.meanSpeedMs));
+  return <div className="wind-card" data-testid="wind-climatology">
+    <header className="wind-card-header">
+      <span className="wind-card-mark"><WindIcon size={20} /></span>
+      <span><small>{t('wind.eyebrow')}</small><strong>{t('wind.title')}</strong><p>{t('wind.intro')}</p></span>
+      <StatusPill status={solar.evidence.confidence} />
+    </header>
+    <div className="wind-periods" role="group" aria-label={t('wind.periodLabel')}>
+      {periods.map((period) => <button key={period.period} aria-pressed={selected.period === period.period} className={selected.period === period.period ? 'active' : ''} onClick={() => setActivePeriod(period.period)}>{t(`wind.period.${period.period}`)}</button>)}
+    </div>
+    <div className="wind-summary">
+      <span><small>{t('wind.prevailing')}</small><strong>{selected.prevailingDirectionLabel ?? '—'} <i>{selected.prevailingDirectionDegrees === null ? '' : `${formatNumber(selected.prevailingDirectionDegrees, 0)}°`}</i></strong></span>
+      <span><small>{t('wind.meanSpeed')}</small><strong>{selected.meanSpeedMs === null ? '—' : formatNumber(selected.meanSpeedMs, 1)} <i>m/s</i></strong></span>
+      <span><small>{t('wind.p90Speed')}</small><strong>{selected.speedP90Ms === null ? '—' : formatNumber(selected.speedP90Ms, 1)} <i>m/s</i></strong></span>
+      <span><small>{t('wind.calm')}</small><strong>{selected.calmFrequencyPercent === null ? '—' : formatNumber(selected.calmFrequencyPercent, 1)}<i>%</i></strong></span>
+    </div>
+    <div className="wind-rose-layout">
+      <figure className="wind-rose" data-testid="wind-rose">
+        <svg viewBox="0 0 240 240" role="img" aria-label={t('wind.roseLabel', { period: t(`wind.period.${selected.period}`) })}>
+          {[30, 58, 86].map((radius) => <circle key={radius} cx="120" cy="120" r={radius} className="wind-ring" />)}
+          {[0, 45, 90, 135].map((degrees) => <line key={degrees} x1="120" y1="23" x2="120" y2="217" className="wind-axis" transform={`rotate(${degrees} 120 120)`} />)}
+          {selected.sectors.map((sector) => {
+            const length = 18 + 70 * sector.frequencyPercent / maxFrequency;
+            return <line
+              key={sector.directionLabel}
+              x1="120"
+              y1="102"
+              x2="120"
+              y2={120 - length}
+              className="wind-petal"
+              strokeOpacity={0.42 + 0.58 * sector.meanSpeedMs / maxSpeed}
+              transform={`rotate(${sector.centerDegrees} 120 120)`}
+            ><title>{t('wind.sectorDetail', { direction: sector.directionLabel, frequency: formatNumber(sector.frequencyPercent, 1), speed: formatNumber(sector.meanSpeedMs, 1) })}</title></line>;
+          })}
+          <circle cx="120" cy="120" r="19" className="wind-centre" />
+          <text x="120" y="116" className="wind-centre-label">{selected.prevailingDirectionLabel ?? '—'}</text>
+          <text x="120" y="128" className="wind-centre-speed">{selected.meanSpeedMs === null ? '—' : `${formatNumber(selected.meanSpeedMs, 1)} m/s`}</text>
+          <text x="120" y="14" className="wind-direction-label">N</text>
+          <text x="226" y="123" className="wind-direction-label">E</text>
+          <text x="120" y="235" className="wind-direction-label">S</text>
+          <text x="14" y="123" className="wind-direction-label">W</text>
+        </svg>
+        <figcaption>{t('wind.roseCaption', { period: solar.period, samples: formatNumber(selected.sampleCount, 0) })}</figcaption>
+      </figure>
+      <div className="wind-sector-list">
+        {selected.sectors.map((sector) => <article key={sector.directionLabel}>
+          <strong>{sector.directionLabel}</strong>
+          <span><i style={{ width: `${Math.max(4, sector.frequencyPercent / maxFrequency * 100)}%` }} /></span>
+          <b>{formatNumber(sector.frequencyPercent, 1)}%</b>
+          <small>{formatNumber(sector.meanSpeedMs, 1)} m/s</small>
+        </article>)}
+      </div>
+    </div>
+    <div className="wind-planning-impact"><Flame size={17} /><span><strong>{t('wind.planTitle')}</strong><p>{t('wind.planBody', { direction: selected.prevailingDirectionLabel ?? '—' })}</p></span></div>
+    <div className="wind-source">
+      <Database size={15} />
+      <span><strong>{solar.evidence.source}</strong><small>{solar.evidence.version} · {solar.evidence.resolution ?? t('evidence.resolutionUnavailable')} · {shortDate(solar.evidence.observedAt, locale)}</small></span>
+      <a href={solar.evidence.sourceUrl} target="_blank" rel="noreferrer">{t('evidence.openSource')}</a>
+    </div>
+    {solar.limitations.length > 0 && <details className="wind-limitations"><summary>{t('wind.limitations')}</summary>{solar.limitations.map((limitation) => <p key={limitation}>• {localizedWindLimitation(limitation, t)}</p>)}</details>}
+  </div>;
 }
 
 function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
@@ -2526,7 +2765,9 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const selectedOptions = recommendations.map((item) => item.species).filter((item) => selectedIds.includes(item.id) && item.treeLike && item.productiveFromYear !== null);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
   const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
+  const updateFirebreak = (patch: Partial<DesignConfiguration['firebreak']>) => update({ firebreak: { ...design.firebreak, ...patch } });
   const machineEnvelope = machineryEnvelope(design.machinery);
+  const plannedFirebreak = firebreakEnvelope(design.firebreak);
   const objectives = [
     { key: 'production', label: t('species.objective.production') },
     { key: 'biodiversity', label: t('species.objective.biodiversity') },
@@ -2574,6 +2815,34 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
           <option value="custom">{t('orientation.custom')}</option>
         </select></label>
         {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label={t('design.bearing')} type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
+      </div>
+      <div className="firebreak-config" data-testid="firebreak-config">
+        <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.eyebrow')}</small><strong>{t('firebreak.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('firebreak.enabled')} type="checkbox" checked={design.firebreak.enabled} onChange={(event) => updateFirebreak({ enabled: event.target.checked })} /><span>{t('firebreak.enabled')}</span></label></div>
+        <p>{t('firebreak.body')}</p>
+        <div className="firebreak-inputs">
+          <label className="select-label"><span>{t('firebreak.fuelModel')}</span><select aria-label={t('firebreak.fuelModel')} value={design.firebreak.fuelModel} disabled={!design.firebreak.enabled} onChange={(event) => {
+            const next = firebreakConfigurationFromFuelModel(event.target.value as DesignConfiguration['firebreak']['fuelModel']);
+            update({ firebreak: { ...next, treatment: design.firebreak.treatment, supportVehicleAccess: design.firebreak.supportVehicleAccess, protectPipeCrossings: design.firebreak.protectPipeCrossings } });
+          }}>
+            {FIREBREAK_FUEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(`firebreak.fuel.${preset.id}`)}</option>)}
+            <option value="custom">{t('firebreak.fuel.custom')}</option>
+          </select></label>
+          <label className="select-label"><span>{t('firebreak.treatment')}</span><select aria-label={t('firebreak.treatment')} value={design.firebreak.treatment} disabled={!design.firebreak.enabled} onChange={(event) => updateFirebreak({ treatment: event.target.value as DesignConfiguration['firebreak']['treatment'] })}>
+            <option value="mown">{t('firebreak.treatment.mown')}</option>
+            <option value="low-fuel-vegetation">{t('firebreak.treatment.lowFuel')}</option>
+            <option value="bare-ground">{t('firebreak.treatment.bareGround')}</option>
+          </select></label>
+          <label><span>{t('firebreak.expectedFlame')}</span><span><input aria-label={t('firebreak.expectedFlame')} type="number" min="0.2" max="20" step="0.1" disabled={!design.firebreak.enabled} value={design.firebreak.expectedFlameLengthM} onChange={(event) => updateFirebreak({ fuelModel: 'custom', expectedFlameLengthM: Number(event.target.value) })} /> m</span></label>
+          <label><span>{t('firebreak.plannedWidth')}</span><span><input aria-label={t('firebreak.plannedWidth')} type="number" min="1" max="60" step="0.5" disabled={!design.firebreak.enabled} value={design.firebreak.widthM} onChange={(event) => updateFirebreak({ widthM: Number(event.target.value) })} /> m</span></label>
+        </div>
+        <div className={`firebreak-result ${plannedFirebreak.planningWidthSatisfied ? 'satisfied' : 'insufficient'}`}>
+          <span><small>{t('firebreak.minimumBasis')}</small><strong>{formatNumber(plannedFirebreak.minimumPlanningWidthM, 1)} m</strong></span>
+          <span><small>{t('firebreak.plannedWidth')}</small><strong>{formatNumber(plannedFirebreak.plannedWidthM, 1)} m</strong></span>
+          <span><small>{t('firebreak.widthCheck')}</small><strong>{t(plannedFirebreak.planningWidthSatisfied ? 'firebreak.basisMet' : 'firebreak.basisNotMet')}</strong></span>
+        </div>
+        <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.firebreak.supportVehicleAccess} disabled={!design.firebreak.enabled} onChange={(event) => updateFirebreak({ supportVehicleAccess: event.target.checked })} /><span><strong>{t('firebreak.vehicleAccess')}</strong><small>{t('firebreak.vehicleAccessBody')}</small></span></label>
+        <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.firebreak.protectPipeCrossings} disabled={!design.firebreak.enabled} onChange={(event) => updateFirebreak({ protectPipeCrossings: event.target.checked })} /><span><strong>{t('firebreak.pipeCrossings')}</strong><small>{t('firebreak.pipeCrossingsBody')}</small></span></label>
+        <p className="firebreak-source"><a href="https://www.gov.uk/government/publications/heather-and-grass-management-code/heather-and-grass-management-code-2025" target="_blank" rel="noreferrer">{t('firebreak.widthSource')}</a> · {t('firebreak.localReview')}</p>
       </div>
       <div className="machinery-config" data-testid="machinery-config">
         <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.eyebrow')}</small><strong>{t('machinery.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('machinery.enabled')} type="checkbox" checked={design.machinery.enabled} onChange={(event) => updateMachinery({ enabled: event.target.checked })} /><span>{t('machinery.enabled')}</span></label></div>
@@ -2672,6 +2941,12 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, onTree
         <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.planEyebrow')}</small><strong>{t('machinery.planTitle')}</strong></span></div><StatusPill status={selectedVariant.machinery.clearanceSatisfied ? 'available' : 'review-required'} /></div>
         <div className="machinery-result"><span><small>{t('machinery.corridors')}</small><strong>{selectedVariant.machinery.corridors.length}</strong></span><span><small>{t('machinery.turningAreas')}</small><strong>{selectedVariant.machinery.turningAreas.length}</strong></span><span><small>{t('machinery.reservedArea')}</small><strong>{formatNumber(selectedVariant.machinery.reservedAreaM2, 0)} m²</strong></span></div>
         <p>{t('machinery.planBody', { corridor: formatNumber(selectedVariant.machinery.requiredCorridorWidthM, 2), headland: formatNumber(selectedVariant.machinery.headlandDepthM, 2) })}</p>
+      </div>}
+      {selectedVariant.firebreak?.enabled && <div className="firebreak-plan" data-testid="firebreak-plan">
+        <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.planEyebrow')}</small><strong>{t('firebreak.planTitle')}</strong></span></div><StatusPill status="review-required" /></div>
+        <div className="firebreak-result"><span><small>{t('firebreak.plannedWidth')}</small><strong>{formatNumber(selectedVariant.firebreak.plannedWidthM, 1)} m</strong></span><span><small>{t('firebreak.totalLength')}</small><strong>{formatNumber(selectedVariant.firebreak.totalLengthM, 0)} m</strong></span><span><small>{t('firebreak.reservedArea')}</small><strong>{formatNumber(selectedVariant.firebreak.reservedAreaM2, 0)} m²</strong></span></div>
+        <p>{t('firebreak.planBody', { width: formatNumber(selectedVariant.firebreak.plannedWidthM, 1), minimum: formatNumber(selectedVariant.firebreak.minimumPlanningWidthM, 1), treatment: t(`firebreak.treatment.${selectedVariant.firebreak.treatment === 'low-fuel-vegetation' ? 'lowFuel' : selectedVariant.firebreak.treatment === 'bare-ground' ? 'bareGround' : 'mown'}`) })}</p>
+        <small className="firebreak-review">{t('firebreak.localReview')}</small>
       </div>}
       <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
       <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
@@ -2914,6 +3189,21 @@ function MaintenanceTimelineChart({ costs, irrigation }: { costs: EstablishmentC
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="metric"><small>{label}</small><strong>{value}</strong><span>{detail}</span></div>; }
 function Index({ label, value }: { label: string; value: number }) { return <span><small>{label}</small><strong>{value.toFixed(3)}</strong></span>; }
 function Row({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) { return <div className={strong ? 'strong' : ''}><span>{label}</span><strong>{value}</strong></div>; }
+function SoilPropertyGroup({ title, body, properties }: { title: string; body: string; properties: SoilPropertyEstimate[] }) {
+  const { t } = useI18n();
+  return <section>
+    <header><strong>{title}</strong><small>{body}</small></header>
+    <div>{properties.map((property) => {
+      const decimals = property.unit === 'kg/dm³' || property.unit === 'pH' ? 2 : 1;
+      const unit = property.unit === 'ratio' ? '' : ` ${property.unit}`;
+      return <article key={property.key}>
+        <span><small>{t(`soil.property.${property.key}`)}</small><strong>{property.value === null ? '—' : `${formatNumber(property.value, decimals)}${unit}`}</strong></span>
+        <p>{t('soil.depth', { top: property.depthTopCm, bottom: property.depthBottomCm })} · {t(`soil.estimate.${property.estimateType}`)}</p>
+        {property.predictionInterval90 && <b>{t('soil.interval90', { low: formatNumber(property.predictionInterval90.low, decimals), high: formatNumber(property.predictionInterval90.high, decimals), unit })}</b>}
+      </article>;
+    })}</div>
+  </section>;
+}
 function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
@@ -2936,10 +3226,38 @@ async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Unexpected Growup error'; }
-function plantingRestriction(coordinate: Coordinate, site: SiteBoundary | null, profile: SiteProfile | null, t: (key: string, values?: Record<string, string | number>) => string) {
+function soilPropertyValue(properties: SoilPropertyEstimate[], key: SoilPropertyEstimateKey) {
+  const property = properties.find((item) => item.key === key);
+  if (!property || property.value === null) return '—';
+  return `${formatNumber(property.value, property.unit === 'kg/dm³' ? 2 : 1)}${property.unit === 'ratio' ? '' : ` ${property.unit}`}`;
+}
+function localizedSoilLimitation(value: string, t: (key: string) => string) {
+  const keys: Record<string, string> = {
+    'Values are global model predictions, not laboratory measurements from this parcel.': 'soil.limitation.modelled',
+    'SoilGrids explains approximately 30–70% of observed variation depending on property and location.': 'soil.limitation.accuracy',
+    'Total nitrogen is not plant-available nitrogen; phosphorus, potassium, micronutrients, salinity and contaminants are not estimated here.': 'soil.limitation.missingChemistry',
+    'Use georeferenced laboratory samples before fertilisation, amendment or contamination decisions.': 'soil.limitation.fieldTest',
+    'SoilGrids was unavailable; obtain a georeferenced laboratory soil analysis.': 'soil.limitation.unavailable',
+  };
+  return t(keys[value] ?? value);
+}
+function localizedWindLimitation(value: string, t: (key: string) => string) {
+  if (value === 'Reanalysis does not resolve local obstacles, hedges or gust corridors; verify damaging winds on site.') return t('wind.limitation.reanalysis');
+  if (value === 'Historical hourly radiation and wind could not be retrieved.') return t('wind.limitation.unavailable');
+  return value;
+}
+function plantingRestriction(
+  coordinate: Coordinate,
+  site: SiteBoundary | null,
+  profile: SiteProfile | null,
+  firebreak: LayoutVariant['firebreak'] | null,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
   if (!site) return t('errors.selectSite');
   if (!siteContainsCoordinate(site, coordinate)) return t('errors.plantOutside');
-  if (distanceToSiteBoundaryM(site, coordinate) < site.setbackM) return t('errors.boundarySetback', { value: site.setbackM });
+  const boundaryDistanceM = distanceToSiteBoundaryM(site, coordinate);
+  if (boundaryDistanceM < site.setbackM) return t('errors.boundarySetback', { value: site.setbackM });
+  if (firebreak?.enabled && boundaryDistanceM < firebreak.plannedWidthM) return t('errors.firebreakReserve', { value: firebreak.plannedWidthM });
   if (site.paths.some((path) => distanceToSitePathM(coordinate, path) < path.widthM / 2)) return t('errors.reservedPath');
   if (site.existingTrees.some((tree) => {
     const projection = createLocalProjection(tree.coordinate);
@@ -2970,6 +3288,16 @@ function corridorSegmentPolygon(start: Coordinate, end: Coordinate, widthM: numb
     projection.unproject({ x: projectedEnd.x + normalX, y: projectedEnd.y + normalY }),
     projection.unproject({ x: projectedEnd.x - normalX, y: projectedEnd.y - normalY }),
     projection.unproject({ x: projectedStart.x - normalX, y: projectedStart.y - normalY }),
+  ];
+}
+function windVectorCoordinates(center: Coordinate, sourceDirectionDegrees: number, lengthM: number): [Coordinate, Coordinate] {
+  const projection = createLocalProjection(center);
+  const radians = sourceDirectionDegrees * Math.PI / 180;
+  const halfLength = Math.max(10, lengthM / 2);
+  const sourceOffset = { x: Math.sin(radians) * halfLength, y: Math.cos(radians) * halfLength };
+  return [
+    projection.unproject(sourceOffset),
+    projection.unproject({ x: -sourceOffset.x, y: -sourceOffset.y }),
   ];
 }
 function cloneSite(site: SiteBoundary): SiteBoundary {
@@ -3078,6 +3406,10 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
   if (match) return t('layout.warning.trees', { count: match[1] });
   match = value.match(/^(\d+) management (?:path is|paths are) reserved before placement\.$/);
   if (match) return t('layout.warning.paths', { count: match[1] });
+  match = value.match(/^([\d.]+) m perimeter firebreak reserve excludes ([\d.]+) m² from planting and requires local AIB review\.$/);
+  if (match) return t('layout.warning.firebreak', { width: match[1], area: match[2] });
+  match = value.match(/^The firebreak width is below the ([\d.]+) m flame-length planning basis\.$/);
+  if (match) return t('layout.warning.firebreakWidth', { minimum: match[1] });
   match = value.match(/^Native composition ([\d.]+)% is below the ([\d.]+)% objective target\.$/);
   if (match) return t('layout.warning.native', { value: match[1], target: match[2] });
   match = value.match(/^Nitrogen-fixer composition ([\d.]+)% is below the ([\d.]+)% target\.$/);
@@ -3112,6 +3444,7 @@ function evidenceUsageKey(item: Evidence) {
   if (source.includes('sentinel-2')) return 'evidence.usage.opticalWater';
   if (source.includes('sentinel-1')) return 'evidence.usage.radarWater';
   if (source.includes('planetary computer')) return 'evidence.usage.processing';
+  if (/natural england|natural resources conservation service|civil protection department/.test(source)) return 'evidence.usage.firebreak';
   if (/agroforestry|almond orchard|alley model|windbreak|management practices/.test(source)) return 'evidence.usage.maintenance';
   return 'evidence.usage.generic';
 }
@@ -3175,6 +3508,7 @@ function localizedNetworkComponent(value: string, t: (key: string) => string) {
     'Header tank': 'water.component.tank',
     'Well head and abstraction controls': 'water.component.wellHead',
     'Machinery crossing sleeve': 'water.component.sleeve',
+    'Operational crossing sleeve': 'water.component.sleeve',
     'mainline pipe': 'water.component.mainlinePipe',
     'submain pipe': 'water.component.submainPipe',
     'lateral pipe': 'water.component.lateralPipe',

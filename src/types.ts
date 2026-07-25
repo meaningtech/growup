@@ -175,6 +175,44 @@ export type SatelliteProfile = {
   limitations: string[];
 };
 
+export type SoilPropertyEstimateKey =
+  | 'ph'
+  | 'sand'
+  | 'silt'
+  | 'clay'
+  | 'organic-carbon'
+  | 'total-nitrogen'
+  | 'cation-exchange-capacity'
+  | 'bulk-density'
+  | 'coarse-fragments'
+  | 'organic-carbon-stock'
+  | 'water-field-capacity'
+  | 'water-wilting-point'
+  | 'plant-available-water'
+  | 'carbon-nitrogen-ratio';
+
+export type SoilPropertyEstimate = {
+  key: SoilPropertyEstimateKey;
+  category: 'chemical' | 'physical' | 'derived';
+  value: number | null;
+  unit: string;
+  depthTopCm: number;
+  depthBottomCm: number;
+  predictionInterval90: { low: number; high: number } | null;
+  estimateType: 'modelled-mean' | 'derived-from-modelled';
+  evidence: Evidence;
+};
+
+export type SoilSatelliteScreening = {
+  status: 'usable' | 'limited' | 'unavailable';
+  bareSoilObservationCount: number;
+  totalObservationCount: number;
+  latestBareSoilIndex: number | null;
+  use: 'variability-screening-only';
+  evidence: Evidence | null;
+  limitations: string[];
+};
+
 export type SiteProfile = {
   generatedAt: string;
   centroid: Coordinate;
@@ -224,6 +262,11 @@ export type SiteProfile = {
     textureClass: string | null;
     evidence: Evidence;
     status: 'available' | 'partial' | 'unavailable';
+    properties?: SoilPropertyEstimate[];
+    reactionClass?: 'strongly-acidic' | 'acidic' | 'slightly-acidic' | 'neutral' | 'alkaline' | 'strongly-alkaline' | 'unknown';
+    carbonNitrogenRatio?: number | null;
+    satelliteScreening?: SoilSatelliteScreening;
+    limitations?: string[];
   };
   fieldConditions?: {
     soilDepthM: number | null;
@@ -296,6 +339,25 @@ export type SolarClimateBin = {
   sampleCount: number;
 };
 
+export type WindDirectionSector = {
+  directionLabel: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+  centerDegrees: number;
+  frequencyPercent: number;
+  meanSpeedMs: number;
+  sampleCount: number;
+};
+
+export type WindClimatologyPeriod = {
+  period: 'annual' | 'winter' | 'spring' | 'summer' | 'autumn';
+  prevailingDirectionDegrees: number | null;
+  prevailingDirectionLabel: WindDirectionSector['directionLabel'] | null;
+  meanSpeedMs: number | null;
+  speedP90Ms: number | null;
+  calmFrequencyPercent: number | null;
+  sampleCount: number;
+  sectors: WindDirectionSector[];
+};
+
 export type SolarResourceProfile = {
   status: 'available' | 'unavailable';
   period: string;
@@ -304,6 +366,9 @@ export type SolarResourceProfile = {
   prevailingWindDirectionDegrees: number | null;
   prevailingWindDirectionLabel: string | null;
   meanWindSpeedMs: number | null;
+  windSpeedP90Ms?: number | null;
+  calmWindFrequencyPercent?: number | null;
+  windClimatology?: WindClimatologyPeriod[];
   hourlyClimatology: SolarClimateBin[];
   evidence: Evidence;
   limitations: string[];
@@ -415,6 +480,8 @@ export type DesignSystemId = 'syntropic' | 'alley-cropping' | 'mixed-orchard' | 
 export type PlantingExtent = 'full-field' | 'perimeter-band' | 'selected-edges';
 export type OrientationObjective = 'solar-crop' | 'contour' | 'operations' | 'wind-protection' | 'custom';
 export type AgriculturalMachinePresetId = 'bcs-740' | 'john-deere-1025r' | 'john-deere-3033r' | 'new-holland-t4f';
+export type FirebreakFuelModel = 'managed-herbaceous' | 'crop-residue' | 'shrub-edge' | 'woodland-edge' | 'custom';
+export type FirebreakTreatment = 'mown' | 'bare-ground' | 'low-fuel-vegetation';
 export type MaintenanceTaskId = 'vegetation-control' | 'training-pruning' | 'biomass-succession' | 'inspection-replanting';
 export type MaintenancePhase = 'establishment' | 'development' | 'mature';
 export type MaintenanceModelBasis = 'measured-agroforestry-reference' | 'enterprise-budget-reference' | 'practice-standard-reference' | 'triangulated-planning-default';
@@ -463,6 +530,16 @@ export type MachineryConfiguration = {
   protectPipeCrossings: boolean;
 };
 
+export type FirebreakConfiguration = {
+  enabled: boolean;
+  fuelModel: FirebreakFuelModel;
+  treatment: FirebreakTreatment;
+  expectedFlameLengthM: number;
+  widthM: number;
+  supportVehicleAccess: boolean;
+  protectPipeCrossings: boolean;
+};
+
 export type DesignObjectives = {
   production: number;
   biodiversity: number;
@@ -484,6 +561,7 @@ export type DesignConfiguration = {
   seed: number;
   objectives: DesignObjectives;
   machinery: MachineryConfiguration;
+  firebreak: FirebreakConfiguration;
 };
 
 export type SolarOrientationAssessment = {
@@ -548,6 +626,32 @@ export type MachineryPlan = {
   notes: string[];
 };
 
+export type FirebreakLine = {
+  id: string;
+  points: Coordinate[];
+  widthM: number;
+  lengthM: number;
+  priority: 'windward' | 'standard';
+};
+
+export type FirebreakPlan = {
+  enabled: boolean;
+  fuelModel: FirebreakFuelModel;
+  treatment: FirebreakTreatment;
+  expectedFlameLengthM: number;
+  minimumPlanningWidthM: number;
+  plannedWidthM: number;
+  totalLengthM: number;
+  reservedAreaM2: number;
+  supportVehicleAccess: boolean;
+  protectPipeCrossings: boolean;
+  planningWidthSatisfied: boolean;
+  localReviewRequired: true;
+  lines: FirebreakLine[];
+  notes: string[];
+  evidence: Evidence[];
+};
+
 export type LayoutVariant = {
   id: string;
   name: string;
@@ -562,6 +666,7 @@ export type LayoutVariant = {
   warnings: string[];
   generation: LayoutGenerationAudit;
   machinery: MachineryPlan;
+  firebreak: FirebreakPlan;
   composition: {
     byStratum: Partial<Record<Stratum, number>>;
     bySuccession: Partial<Record<SuccessionPhase, number>>;
