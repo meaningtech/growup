@@ -75,6 +75,17 @@ export function exportProjectGeoJson(project: ProjectState) {
       },
     }));
   }
+  [...project.collaboration.comments].sort(byId).filter((comment) => comment.coordinate).forEach((comment) => features.push(pointFeature(comment.coordinate!, {
+    kind: 'review_comment',
+    id: comment.id,
+    authorName: comment.authorName,
+    message: comment.message,
+    target: comment.target,
+    targetId: comment.targetId,
+    revision: comment.revision,
+    createdAt: comment.createdAt,
+    resolvedAt: comment.resolvedAt,
+  })));
 
   return {
     type: 'FeatureCollection',
@@ -85,6 +96,9 @@ export function exportProjectGeoJson(project: ProjectState) {
     generatedAt: project.updatedAt,
     generation: variant?.generation ?? null,
     maintenance: project.irrigation?.systemMaintenance ?? null,
+    fireOperations: project.fireOperations,
+    review: project.collaboration.review,
+    commentCount: project.collaboration.comments.length,
     features,
   };
 }
@@ -99,6 +113,7 @@ export function exportProjectCsv(project: ProjectState): string {
     'currency_code', 'unit_purchase_cost', 'planting_labor_hours', 'planting_labor_cost',
     'maintenance_year', 'maintenance_model', 'maintenance_phase', 'maintenance_hours', 'maintenance_labor_cost',
     'vegetation_control_hours', 'training_pruning_hours', 'biomass_succession_hours', 'inspection_replanting_hours',
+    'fire_controls_complete', 'fire_controls_due', 'review_status', 'review_comment_count',
   ];
   if (!variant) return `${headers.join(',')}\n`;
   const year = project.timelineYear;
@@ -154,6 +169,10 @@ export function exportProjectCsv(project: ProjectState): string {
         fixed(maintenanceHours.get('training-pruning') ?? 0, 2),
         fixed(maintenanceHours.get('biomass-succession') ?? 0, 2),
         fixed(maintenanceHours.get('inspection-replanting') ?? 0, 2),
+        project.fireOperations.tasks.filter((task) => task.status === 'complete').length,
+        project.fireOperations.tasks.filter((task) => task.status === 'due').length,
+        project.collaboration.review?.status ?? 'pending',
+        project.collaboration.comments.length,
       ].map(csvCell).join(',');
     });
   return `${headers.join(',')}\n${rows.join('\n')}\n`;

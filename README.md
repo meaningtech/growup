@@ -16,12 +16,15 @@ The workflow is location-independent and starts with an empty workspace. Runtime
 - existing woody-vegetation protection using seasonally separated Sentinel-2 observations, 2021–2023 annual tree classes, ESA WorldCover and the Copernicus 5 m Woody Vegetation Layer;
 - objective-weighted, evidence-ranked species selection with explainable components, invasive-species safety gates and linked sources;
 - six planting systems, full-field and perimeter planting, three deterministic layouts, locked partial regeneration, species-parameterized growth uncertainty, solar/shade assessment and composition targets;
+- multi-tree selection with row, species and full-layout scopes, plus bulk replacement, locking, deletion, bearing alignment and equal spacing;
 - independently switchable boundary, constraint, infrastructure, existing-vegetation, planned-tree, machinery, irrigation and satellite map layers, with machinery-space reservation opt-in by default;
+- opt-in firebreak geometry, an official EFFIS fire-weather overlay and a persisted operational checklist with forecast date, source, inspection dates and field notes;
 - editable irrigation sizing, pipe routing and bill of materials, annual water/energy cost, plant purchase cost and planting person-hours;
 - printable planting, irrigation, procurement and management schedules backed by exact generated quantities and evidence records;
 - PostGIS geometry validation plus owner-isolated current projects, immutable revisions and calculation runs in Growup-specific collections on the existing Mongo-compatible database instance;
-- optional Google sign-in: anonymous users can analyse and design, while authenticated users can save private projects;
-- reproducible GeoJSON and per-tree CSV exports with site infrastructure, protected vegetation, machinery, irrigation, model metadata, growth ranges and unit planting costs;
+- optional Google sign-in: anonymous users can analyse and design, while authenticated users can save and reopen private projects including fire operations, group edits and collaboration state;
+- signed, expiring view or review links with map-pinned comments, approval/change requests, owner-side resolution and immediate revocation;
+- reproducible GeoJSON and per-tree CSV exports with site infrastructure, protected vegetation, machinery, irrigation, fire controls, review metadata, model metadata, growth ranges and unit planting costs;
 - a provider-agnostic AI planning assistant that can propose catalogue-backed species and project changes, while Growup validates every action and requires explicit confirmation before applying it.
 
 No pilot parcel is loaded in production. The design-ready ecological catalogue is a deliberately validated subset of the much larger global taxonomy search index. Jurisdiction-level nativeness and invasiveness are reported only where supporting evidence exists; unknown regions remain explicitly unclassified. Contrasting field geometries are isolated test fixtures used to prove that location, economics, terrain, satellite and irrigation logic are selected dynamically.

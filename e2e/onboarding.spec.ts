@@ -23,7 +23,8 @@ test('guides a first-time visitor into a resumable project setup', async ({ page
   await expect(tour).toHaveCount(0);
   await page.reload();
   await expect(tour).toHaveCount(0);
-  await page.getByRole('button', { name: 'Tour' }).click();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Tour' }).click();
   await expect(tour).toContainText('Turn a field into a buildable plan.');
 });
 

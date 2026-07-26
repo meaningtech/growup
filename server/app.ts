@@ -10,6 +10,7 @@ import { normalizeDesignObjectives } from '../src/lib/objectives.js';
 import { rankSpecies, recommendedPalette } from '../src/lib/recommendations.js';
 import { applySiteProfileOverride } from '../src/lib/siteOverrides.js';
 import { localSiteValidation, normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
+import { createProjectComment, MAX_PROJECT_COMMENTS, requireProjectReview, rotateShareVersion } from '../src/lib/collaboration.js';
 import type { LayoutVariant, ProjectState, SiteBoundary, SiteProfile, SiteProfileOverrideField } from '../src/types.js';
 import type { AssistantProjectContext } from '../src/types.js';
 import { assistantStatus, planAssistantAction, type AssistantProviderConfig } from './assistant.js';
@@ -29,6 +30,7 @@ import { exportProjectCsv, exportProjectGeoJson } from './export.js';
 import {
   assertMongoIndexesReady,
   getProject,
+  getSharedProject,
   getProjectRevision,
   getCalculationRun,
   getUser,
@@ -43,6 +45,7 @@ import {
 } from './mongo.js';
 import { buildSiteProfile, searchLocations, type SiteProviderConfig } from './site.js';
 import { allowedOrigins, rateLimit, securityHeaders, type SecurityConfig } from './security.js';
+import { createProjectShareToken, publicProject, sharingStatus, verifyProjectShareToken } from './sharing.js';
 
 export type GrowupAppConfig = SiteProviderConfig & AssistantProviderConfig & AuthConfig & EconomicProviderConfig & SecurityConfig & {
   skipDatabaseMigration?: boolean;
@@ -61,6 +64,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     upsertUser,
     updateUserOnboarding,
     getProject,
+    getSharedProject,
     listProjects,
     listProjectRevisions,
     getProjectRevision,
@@ -75,6 +79,7 @@ export function createApp(config: GrowupAppConfig = {}) {
   const assistantLimiter = rateLimit('assistant', config.assistantRateLimit ?? 10, config);
   const computeLimiter = rateLimit('compute', config.computeRateLimit ?? 80, config);
   const authLimiter = rateLimit('auth', config.authRateLimit ?? 20, { ...config, rateLimitWindowMs: 15 * 60_000 });
+  const reviewLimiter = rateLimit('review', 30, { ...config, rateLimitWindowMs: 15 * 60_000 });
 
   app.get('/api/health', async (_req: Request, res: Response) => {
     const db = await database.health();
@@ -92,6 +97,7 @@ export function createApp(config: GrowupAppConfig = {}) {
       modelVersion: 'growup-0.1.0',
       assistant: assistantStatus(config),
       auth: authStatus(config),
+      sharing: sharingStatus(config),
     });
   });
 
@@ -358,6 +364,132 @@ export function createApp(config: GrowupAppConfig = {}) {
     });
   });
 
+  app.get('/api/projects/:id/share', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const project = await database.getProject(user.id, paramValue(req.params.id));
+      if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      if (!project.collaboration.share.enabled) return { enabled: false, project };
+      return {
+        enabled: true,
+        mode: project.collaboration.share.mode,
+        expiresAt: project.collaboration.share.expiresAt,
+        path: `/shared/${createProjectShareToken(project.id, project.collaboration.share.tokenVersion, project.collaboration.share.expiresAt, config)}`,
+        project,
+      };
+    });
+  });
+
+  app.post('/api/projects/:id/share', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      if (!sharingStatus(config).configured) throw httpError(503, 'PROJECT_SHARING_NOT_CONFIGURED', 'Project sharing is not configured.');
+      const user = await requireAuthenticatedUser(req, database, config);
+      const project = await database.getProject(user.id, paramValue(req.params.id));
+      if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      const now = (config.now?.() ?? new Date()).toISOString();
+      const mode = req.body?.mode === 'review' ? 'review' : 'view';
+      const expiresAt = shareExpiry(req.body?.expiresAt, now);
+      const tokenVersion = !project.collaboration.share.enabled || req.body?.rotate === true
+        ? rotateShareVersion()
+        : project.collaboration.share.tokenVersion;
+      const saved = await database.saveProject(user.id, {
+        ...project,
+        collaboration: {
+          ...project.collaboration,
+          share: {
+            enabled: true,
+            mode,
+            tokenVersion,
+            createdAt: project.collaboration.share.createdAt ?? now,
+            expiresAt,
+          },
+        },
+        updatedAt: now,
+      });
+      return {
+        enabled: true,
+        mode,
+        expiresAt,
+        path: `/shared/${createProjectShareToken(saved.id, tokenVersion, expiresAt, config)}`,
+        project: saved,
+      };
+    });
+  });
+
+  app.delete('/api/projects/:id/share', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      const project = await database.getProject(user.id, paramValue(req.params.id));
+      if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+      const now = (config.now?.() ?? new Date()).toISOString();
+      const saved = await database.saveProject(user.id, {
+        ...project,
+        collaboration: {
+          ...project.collaboration,
+          share: {
+            ...project.collaboration.share,
+            enabled: false,
+            tokenVersion: rotateShareVersion(),
+            expiresAt: null,
+          },
+        },
+        updatedAt: now,
+      });
+      return { enabled: false, project: saved };
+    });
+  });
+
+  app.get('/api/shared/projects/:token', reviewLimiter, async (req: Request, res: Response) => {
+    await handle(res, async () => publicProject((await requireSharedProject(database, paramValue(req.params.token), config)).project));
+  });
+
+  app.post('/api/shared/projects/:token/comments', reviewLimiter, async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const shared = await requireSharedProject(database, paramValue(req.params.token), config, true);
+      const project = shared.project;
+      const now = (config.now?.() ?? new Date()).toISOString();
+      const comment = createProjectComment({
+        authorName: req.body?.authorName,
+        message: req.body?.message,
+        coordinate: req.body?.coordinate,
+        target: req.body?.target,
+        targetId: req.body?.targetId,
+        revision: project.revision ?? 0,
+        now,
+      });
+      const saved = await database.saveProject(shared.ownerUserId, {
+        ...project,
+        collaboration: {
+          ...project.collaboration,
+          comments: [...project.collaboration.comments, comment].slice(-MAX_PROJECT_COMMENTS),
+        },
+        updatedAt: now,
+      });
+      return publicProject(saved);
+    });
+  });
+
+  app.post('/api/shared/projects/:token/review', reviewLimiter, async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const shared = await requireSharedProject(database, paramValue(req.params.token), config, true);
+      const project = shared.project;
+      const now = (config.now?.() ?? new Date()).toISOString();
+      const review = requireProjectReview({
+        status: req.body?.status,
+        reviewerName: req.body?.reviewerName,
+        note: req.body?.note,
+        revision: project.revision ?? 0,
+        now,
+      });
+      const saved = await database.saveProject(shared.ownerUserId, {
+        ...project,
+        collaboration: { ...project.collaboration, review },
+        updatedAt: now,
+      });
+      return publicProject(saved);
+    });
+  });
+
   app.get('/api/projects/:id/export.geojson', async (req: Request, res: Response) => {
     try {
       const user = await requireAuthenticatedUser(req, database, config);
@@ -400,6 +532,30 @@ export async function initializeApp(config: GrowupAppConfig = {}) {
     await assertMongoIndexesReady();
   }
   return createApp(config);
+}
+
+async function requireSharedProject(database: GrowupDatabase, token: string, config: AuthConfig, reviewRequired = false) {
+  const payload = verifyProjectShareToken(token, config);
+  if (!payload) throw httpError(404, 'SHARED_PROJECT_NOT_FOUND', 'This shared project link is invalid or expired.');
+  const shared = await database.getSharedProject(payload.projectId);
+  if (!shared) throw httpError(404, 'SHARED_PROJECT_NOT_FOUND', 'This shared project link is no longer available.');
+  const share = shared.project.collaboration.share;
+  if (!share.enabled || share.tokenVersion !== payload.tokenVersion || (share.expiresAt && Date.parse(share.expiresAt) <= (config.now?.() ?? new Date()).getTime())) {
+    throw httpError(404, 'SHARED_PROJECT_NOT_FOUND', 'This shared project link is no longer available.');
+  }
+  if (reviewRequired && share.mode !== 'review') throw httpError(403, 'SHARED_PROJECT_READ_ONLY', 'This project is shared as read-only.');
+  return shared;
+}
+
+function shareExpiry(value: unknown, now: string) {
+  const fallback = new Date(Date.parse(now) + 30 * 24 * 60 * 60_000).toISOString();
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return fallback;
+  const timestamp = Date.parse(value);
+  const minimum = Date.parse(now) + 60_000;
+  const maximum = Date.parse(now) + 366 * 24 * 60 * 60_000;
+  if (timestamp < minimum || timestamp > maximum) throw httpError(400, 'INVALID_SHARE_EXPIRY', 'Share expiry must be between one minute and one year from now.');
+  return new Date(timestamp).toISOString();
 }
 
 async function handle(res: Response, operation: () => Promise<unknown> | unknown) {

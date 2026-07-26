@@ -55,7 +55,8 @@ test('keeps product information behind an explicit control', async ({ page }, te
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await expect(page.getByTestId('info-panel')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Info' }).click();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Info' }).click();
   const panel = page.getByTestId('info-panel');
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('heading', { name: 'Data driven agroforestry planning.' })).toBeVisible();

@@ -4,8 +4,10 @@ import { importSiteFixture } from './support/siteFixture';
 
 test('switches English and Italian through an extensible persisted locale', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByLabel('Language')).toBeVisible();
-  await page.getByLabel('Language').selectOption('it');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  const languagePicker = page.getByRole('dialog', { name: 'Menu' }).getByRole('group', { name: 'Language' });
+  await expect(languagePicker).toBeVisible();
+  await languagePicker.getByRole('button', { name: 'Italiano' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'it');
   await expect(page.getByTestId('step-site')).toContainText('Terreno');
   await expect(page.getByText('Nessun terreno attivo')).toBeVisible();
@@ -25,7 +27,7 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByTestId('economic-configuration')).toContainText('Profilo economico · XX');
   await expect(page.getByLabel('Codice valuta')).toHaveValue('USD');
   await expect(page.getByLabel('Costo manodopera')).toHaveValue('18');
-  await expect(page.getByText(/Stima globale di pianificazione in USD/)).toBeVisible();
+  await expect(page.getByText(/Tariffe di pianificazione stimate per l’area del progetto/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Nessun piano dei costi' })).toBeVisible();
 
   await page.getByTestId('step-species').click();
@@ -36,14 +38,18 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'it');
   await expect(page.getByTestId('step-site')).toContainText('Terreno');
-  await page.getByLabel('Lingua').selectOption('en');
+  await page.getByRole('button', { name: 'Apri menu' }).click();
+  const italianLanguagePicker = page.getByRole('dialog', { name: 'Menu' }).getByRole('group', { name: 'Lingua' });
+  await expect(italianLanguagePicker.getByRole('button', { name: 'Italiano' })).toHaveAttribute('aria-pressed', 'true');
+  await italianLanguagePicker.getByRole('button', { name: 'English' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByTestId('step-site')).toContainText('Site');
 });
 
 test('renders live field evidence, Sentinel notices and source traceability entirely in Italian', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Language').selectOption('it');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Italiano' }).click();
   await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await expect(page.getByRole('button', { name: 'Analizza questo terreno' })).toBeEnabled();
   await page.getByRole('button', { name: 'Analizza questo terreno' }).click();

@@ -1,0 +1,70 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { ProjectState } from '../src/types.js';
+import type { AuthConfig } from './auth.js';
+
+type ShareTokenPayload = {
+  projectId: string;
+  tokenVersion: string;
+  expiresAt: number;
+};
+
+export function sharingStatus(config: AuthConfig = {}) {
+  return { configured: Boolean(sharingSecret(config)) };
+}
+
+export function createProjectShareToken(projectId: string, tokenVersion: string, expiresAt: string | null, config: AuthConfig = {}) {
+  const expiry = expiresAt ? Date.parse(expiresAt) : (config.now?.() ?? new Date()).getTime() + 90 * 24 * 60 * 60_000;
+  const payload: ShareTokenPayload = {
+    projectId,
+    tokenVersion,
+    expiresAt: Math.floor(expiry / 1_000),
+  };
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${encoded}.${signature(encoded, config)}`;
+}
+
+export function verifyProjectShareToken(token: string, config: AuthConfig = {}): ShareTokenPayload | null {
+  if (!sharingStatus(config).configured || token.length > 4_096) return null;
+  const [encoded, suppliedSignature] = token.split('.');
+  if (!encoded || !suppliedSignature) return null;
+  const expected = Buffer.from(signature(encoded, config));
+  const supplied = Buffer.from(suppliedSignature);
+  if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as ShareTokenPayload;
+    const now = Math.floor((config.now?.() ?? new Date()).getTime() / 1_000);
+    return typeof payload.projectId === 'string'
+      && payload.projectId.length > 0
+      && typeof payload.tokenVersion === 'string'
+      && payload.tokenVersion.length > 0
+      && Number.isFinite(payload.expiresAt)
+      && payload.expiresAt > now
+      ? payload
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function publicProject(project: ProjectState) {
+  return {
+    ...project,
+    collaboration: {
+      ...project.collaboration,
+      share: {
+        enabled: project.collaboration.share.enabled,
+        mode: project.collaboration.share.mode,
+        createdAt: project.collaboration.share.createdAt,
+        expiresAt: project.collaboration.share.expiresAt,
+      },
+    },
+  };
+}
+
+function signature(value: string, config: AuthConfig) {
+  return createHmac('sha256', sharingSecret(config)).update(`growup-share:${value}`).digest('base64url');
+}
+
+function sharingSecret(config: AuthConfig) {
+  return config.authSessionSecret ?? process.env.AUTH_SESSION_SECRET ?? '';
+}

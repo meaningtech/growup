@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
 import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/lib/geometry.js';
+import { defaultProjectCollaboration } from '../src/lib/collaboration.js';
+import { defaultFireOperationsPlan } from '../src/lib/fireOperations.js';
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
 import { distanceToSiteBoundaryM, siteContainsCoordinate } from '../src/lib/siteGeometry.js';
 import type { Evidence, ProjectState, SiteProfile } from '../src/types.js';
@@ -409,6 +411,7 @@ describe('Growup API integration', () => {
         return storedUser;
       },
       getProject: async (ownerUserId, id) => ownerUserId === testUser.id && stored?.id === id ? stored : null,
+      getSharedProject: async (id) => stored?.id === id ? { ownerUserId: testUser.id, project: stored } : null,
       listProjects: async (ownerUserId) => ownerUserId === testUser.id && stored ? [{ id: stored.id, name: stored.name, updatedAt: stored.updatedAt }] : [],
       listProjectRevisions: async (ownerUserId, projectId) => ownerUserId === testUser.id && projectId === stored?.id
         ? revisionStates.map((state) => buildRevisionArtifacts(testUser.id, state, state.revision ?? 0).summary).reverse()
@@ -585,6 +588,27 @@ describe('Growup API integration', () => {
     expect(costsResponse.body.establishment.plantingLaborHours).toBeGreaterThan(0);
     expect(costsResponse.body.establishment.totalCost).toBeGreaterThan(0);
 
+    const fireOperations = defaultFireOperationsPlan(observedAt);
+    fireOperations.reviewedAt = observedAt;
+    fireOperations.nextInspectionAt = '2026-08-01T08:00:00.000Z';
+    fireOperations.tasks[0] = {
+      ...fireOperations.tasks[0],
+      status: 'complete',
+      completedAt: observedAt,
+      notes: 'Surface fuels inspected after mowing.',
+    };
+    const collaboration = defaultProjectCollaboration();
+    collaboration.comments.push({
+      id: 'authenticated-persistence-comment',
+      authorName: 'Test Planner',
+      message: 'Keep the western firebreak accessible.',
+      coordinate: { lat: 36.92102, lng: 14.75325 },
+      target: 'firebreak',
+      targetId: variant.firebreak?.lines[0]?.id ?? null,
+      revision: 0,
+      createdAt: observedAt,
+      resolvedAt: null,
+    });
     const project: ProjectState = {
       id: 'api-integration-project',
       name: 'API integration project',
@@ -599,6 +623,8 @@ describe('Growup API integration', () => {
       timelineYear: 5,
       irrigation: costsResponse.body.irrigation,
       costs: costsResponse.body.establishment,
+      fireOperations,
+      collaboration,
       createdAt: observedAt,
       updatedAt: observedAt,
     };
@@ -607,6 +633,22 @@ describe('Growup API integration', () => {
     expect(saved.body).toEqual(expect.objectContaining({ revision: 1, revisionId: expect.any(String), calculationRunId: expect.any(String) }));
     const storedResponse = await request(app).get(`/api/projects/${project.id}`).set('Cookie', sessionCookie).expect(200);
     expect(storedResponse.body).toEqual(expect.objectContaining({ id: project.id, revision: 1 }));
+    expect(storedResponse.body.fireOperations).toEqual(expect.objectContaining({
+      reviewedAt: observedAt,
+      nextInspectionAt: '2026-08-01T08:00:00.000Z',
+    }));
+    expect(storedResponse.body.fireOperations.tasks[0]).toEqual(expect.objectContaining({
+      status: 'complete',
+      completedAt: observedAt,
+      notes: 'Surface fuels inspected after mowing.',
+    }));
+    expect(storedResponse.body.collaboration.comments).toEqual([
+      expect.objectContaining({
+        id: 'authenticated-persistence-comment',
+        target: 'firebreak',
+        message: 'Keep the western firebreak accessible.',
+      }),
+    ]);
     const revisions = await request(app).get(`/api/projects/${project.id}/revisions`).set('Cookie', sessionCookie).expect(200);
     expect(revisions.body).toEqual([expect.objectContaining({ revision: 1, treeCount: variant.trees.length })]);
     const historical = await request(app).get(`/api/projects/${project.id}/revisions/1`).set('Cookie', sessionCookie).expect(200);
@@ -633,7 +675,10 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.features.filter((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree')).toHaveLength(variant.trees.length);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_corridor')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'firebreak')).toBe(true);
+    expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'review_comment')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'irrigation_line')).toBe(true);
+    expect(exportResponse.body.fireOperations.tasks[0]).toEqual(expect.objectContaining({ status: 'complete' }));
+    expect(exportResponse.body.commentCount).toBe(1);
     expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.1.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
     expect(exportResponse.body.features.find((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree').properties).toEqual(expect.objectContaining({
       heightLowM: expect.any(Number),
@@ -653,6 +698,7 @@ describe('Growup API integration', () => {
     expect(csvLines[0]).toContain('unit_purchase_cost,planting_labor_hours,planting_labor_cost');
     expect(csvLines[0]).toContain('height_low_m,height_base_m,height_high_m');
     expect(csvLines[0]).toContain('maintenance_year,maintenance_model,maintenance_phase,maintenance_hours,maintenance_labor_cost');
+    expect(csvLines[0]).toContain('fire_controls_complete,fire_controls_due,review_status,review_comment_count');
     const repeatedCsv = await request(app).get(`/api/projects/${project.id}/export.csv`).set('Cookie', sessionCookie).expect(200);
     expect(repeatedCsv.text).toBe(csvResponse.text);
     const logout = await request(app).post('/api/auth/logout').set('Cookie', sessionCookie).expect(200);
@@ -715,6 +761,7 @@ describe('Growup API integration', () => {
         upsertUser: async () => testUser,
         updateUserOnboarding: async (_id, preference) => ({ ...testUser, preferences: { onboarding: preference } }),
         getProject: async () => null,
+        getSharedProject: async () => null,
         listProjects: async () => [],
         listProjectRevisions: async () => [],
         getProjectRevision: async () => null,

@@ -5,7 +5,8 @@ import { importSiteFixture } from './support/siteFixture';
 
 test('renders canopy-scale woody ellipses and rejects or routes around them', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Language').selectOption('it');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Italiano' }).click();
   await importSiteFixture(page, WOODY_FIELD_FIXTURE);
   const profilePromise = page.waitForResponse((response) => response.url().endsWith('/api/site/profile') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Analizza questo terreno' }).click();

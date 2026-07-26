@@ -1,7 +1,9 @@
 import { MongoClient, type Collection, type Db, type IndexDescriptionInfo } from 'mongodb';
 import type { CalculationSnapshot, ProjectRevisionSummary, ProjectState, SiteBoundary, SiteValidation } from '../src/types.js';
 import { normalizeEconomicConfiguration } from '../src/data/economicProfiles.js';
+import { normalizeProjectCollaboration } from '../src/lib/collaboration.js';
 import { disabledFirebreakPlan } from '../src/lib/firebreak.js';
+import { normalizeFireOperationsPlan } from '../src/lib/fireOperations.js';
 import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
 import { normalizeDesignConfiguration } from '../src/lib/layout.js';
 import { normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
@@ -54,6 +56,7 @@ export type GrowupDatabase = {
   upsertUser: (identity: GoogleIdentity) => Promise<GrowupUser>;
   updateUserOnboarding: (id: string, preference: OnboardingPreference) => Promise<GrowupUser>;
   getProject: (ownerUserId: string, id: string) => Promise<ProjectState | null>;
+  getSharedProject: (id: string) => Promise<{ ownerUserId: string; project: ProjectState } | null>;
   listProjects: (ownerUserId: string) => Promise<ProjectSummary[]>;
   listProjectRevisions: (ownerUserId: string, projectId: string) => Promise<ProjectRevisionSummary[]>;
   getProjectRevision: (ownerUserId: string, projectId: string, revision: number) => Promise<ProjectState | null>;
@@ -203,6 +206,13 @@ export async function getProject(ownerUserId: string, id: string): Promise<Proje
   return document ? normalizeProject({ ...document.state, revision: document.revision ?? document.state.revision ?? 0 }) : null;
 }
 
+export async function getSharedProject(id: string): Promise<{ ownerUserId: string; project: ProjectState } | null> {
+  const document = await projects().then((collection) => collection.findOne({ _id: id }));
+  return document
+    ? { ownerUserId: document.ownerUserId, project: normalizeProject({ ...document.state, revision: document.revision ?? document.state.revision ?? 0 }) }
+    : null;
+}
+
 export async function listProjects(ownerUserId: string): Promise<ProjectSummary[]> {
   const documents = await projects().then((collection) => collection
     .find({ ownerUserId }, { projection: { _id: 1, name: 1, updatedAt: 1 } })
@@ -283,7 +293,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
         { $set: {
           name: artifacts.state.name,
           state: artifacts.state,
-          schemaVersion: 2,
+          schemaVersion: 3,
           revision: artifacts.summary.revision,
           contentHash: artifacts.summary.contentHash,
           updatedAt: artifacts.state.updatedAt,
@@ -296,7 +306,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
         ownerUserId,
         name: artifacts.state.name,
         state: artifacts.state,
-        schemaVersion: 2,
+        schemaVersion: 3,
         revision: artifacts.summary.revision,
         contentHash: artifacts.summary.contentHash,
         createdAt: artifacts.state.createdAt,
@@ -362,6 +372,7 @@ function userFromDocument(document: UserDocument): GrowupUser {
 function normalizeProject(project: ProjectState): ProjectState {
   const countryCode = project.siteProfile?.location.countryCode ?? '';
   const designConfiguration = normalizeDesignConfiguration(project.designConfiguration);
+  const stableTimestamp = project.updatedAt || project.createdAt || new Date(0).toISOString();
   return {
     ...project,
     site: normalizeSiteBoundary(project.site),
@@ -372,6 +383,16 @@ function normalizeProject(project: ProjectState): ProjectState {
     }),
     irrigationConfiguration: normalizeIrrigationConfiguration(project.irrigationConfiguration),
     economicConfiguration: normalizeEconomicConfiguration(project.economicConfiguration, countryCode),
+    fireOperations: normalizeFireOperationsPlan(project.fireOperations, stableTimestamp),
+    collaboration: normalizeProjectCollaboration(project.collaboration ?? {
+      share: {
+        enabled: false,
+        mode: 'view',
+        tokenVersion: `project-${project.id}`,
+        createdAt: null,
+        expiresAt: null,
+      },
+    }),
   };
 }
 

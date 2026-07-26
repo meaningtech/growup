@@ -919,11 +919,74 @@ export type ProjectState = {
   timelineYear: number;
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
+  fireOperations: FireOperationsPlan;
+  collaboration: ProjectCollaboration;
   revision?: number;
   revisionId?: string | null;
   calculationRunId?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type FireMaintenanceTaskStatus = 'due' | 'scheduled' | 'complete' | 'not-applicable';
+
+export type FireMaintenanceTask = {
+  id: 'surface-fuels' | 'vehicle-access' | 'pipe-crossings' | 'cut-biomass' | 'authority-review';
+  status: FireMaintenanceTaskStatus;
+  dueAt: string | null;
+  completedAt: string | null;
+  notes: string;
+};
+
+export type FireOperationsPlan = {
+  reviewedAt: string | null;
+  nextInspectionAt: string | null;
+  notes: string;
+  tasks: FireMaintenanceTask[];
+  sourceSnapshot: {
+    provider: 'EFFIS';
+    layer: 'ecmwf.fwi';
+    forecastDate: string;
+    sourceUrl: string;
+    resolutionKm: 8;
+    observedAt: string;
+  };
+};
+
+export type ProjectCommentTarget = 'general' | 'tree' | 'firebreak' | 'water';
+
+export type ProjectComment = {
+  id: string;
+  authorName: string;
+  message: string;
+  coordinate: Coordinate | null;
+  target: ProjectCommentTarget;
+  targetId: string | null;
+  revision: number;
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
+export type ProjectReviewStatus = 'pending' | 'approved' | 'changes-requested';
+
+export type ProjectReview = {
+  status: ProjectReviewStatus;
+  reviewerName: string;
+  note: string;
+  revision: number;
+  updatedAt: string;
+};
+
+export type ProjectCollaboration = {
+  share: {
+    enabled: boolean;
+    mode: 'view' | 'review';
+    tokenVersion: string;
+    createdAt: string | null;
+    expiresAt: string | null;
+  };
+  comments: ProjectComment[];
+  review: ProjectReview | null;
 };
 
 export type ProjectRevisionSummary = {

@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   Clock3,
   CircleDollarSign,
   CircleOff,
@@ -35,6 +36,7 @@ import {
   ScanLine,
   Search,
   Send,
+  Share2,
   ShieldCheck,
   Sparkles,
   Sprout,
@@ -53,6 +55,8 @@ import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './
 import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope } from './data/firebreak';
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
 import { disabledFirebreakPlan } from './lib/firebreak';
+import { defaultFireOperationsPlan, effisFireWeatherTile, normalizeFireOperationsPlan } from './lib/fireOperations';
+import { defaultProjectCollaboration, normalizeProjectCollaboration } from './lib/collaboration';
 import { growthState } from './lib/growth';
 import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
@@ -97,6 +101,9 @@ import type {
   LayoutVariant,
   LocationSearchResult,
   ProjectState,
+  ProjectCollaboration,
+  FireOperationsPlan,
+  FireMaintenanceTask,
   ProjectRevisionSummary,
   SiteBoundary,
   SiteProfile,
@@ -123,6 +130,7 @@ type AppConfig = {
   modelVersion: string;
   assistant: { configured: boolean; interface: 'openai-compatible' };
   auth: { configured: boolean; googleClientId: string };
+  sharing: { configured: boolean };
 };
 
 type AuthUser = {
@@ -136,6 +144,13 @@ type AuthUser = {
 
 type AuthSession = { authenticated: boolean; configured: boolean; user: AuthUser | null };
 type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
+type ShareResponse = {
+  enabled: boolean;
+  mode?: 'view' | 'review';
+  expiresAt?: string | null;
+  path?: string;
+  project: ProjectState;
+};
 type SaveStatus = 'idle' | 'local' | 'unsaved' | 'saving' | 'saved' | 'conflict';
 
 type CatalogueStats = {
@@ -168,6 +183,159 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
 ];
 
 export default function App() {
+  const sharedToken = window.location.pathname.match(/^\/shared\/([^/]+)$/)?.[1] ?? null;
+  return sharedToken ? <SharedProjectPage token={sharedToken} /> : <WorkspaceApp />;
+}
+
+function SharedProjectPage({ token }: { token: string }) {
+  const { t, locale } = useI18n();
+  const [project, setProject] = useState<ProjectState | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reviewerName, setReviewerName] = useState('');
+  const [message, setMessage] = useState('');
+  const [reviewNote, setReviewNote] = useState('');
+  const [commentCoordinate, setCommentCoordinate] = useState<Coordinate | null>(null);
+  const mapElementRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const overlaysRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    Promise.all([api<AppConfig>('/api/config'), api<ProjectState>(`/api/shared/projects/${token}`)])
+      .then(([appConfig, sharedProject]) => {
+        setConfig(appConfig);
+        setProject(sharedProject);
+      })
+      .catch((loadError) => setError(messageOf(loadError)));
+  }, [token]);
+
+  useEffect(() => {
+    if (!config || !project || !mapElementRef.current) return;
+    let cancelled = false;
+    loadGoogleMaps(config.googleMapsApiKey).then((maps) => {
+      if (cancelled || !mapElementRef.current) return;
+      const map = new maps.Map(mapElementRef.current, {
+        mapTypeId: 'satellite',
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        gestureHandling: 'greedy',
+      });
+      mapRef.current = map;
+      overlaysRef.current.push(new maps.Polygon({
+        map,
+        paths: project.site.polygon,
+        strokeColor: '#f7f2df',
+        strokeOpacity: 1,
+        strokeWeight: 3,
+        fillColor: '#96aa49',
+        fillOpacity: 0.16,
+      }));
+      const variant = project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0];
+      for (const tree of variant?.trees ?? []) {
+        const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+        if (!species) continue;
+        overlaysRef.current.push(new maps.Circle({
+          map,
+          center: tree.coordinate,
+          radius: 1.2,
+          strokeColor: '#ffffff',
+          strokeOpacity: 0.8,
+          strokeWeight: 1,
+          fillColor: species.color,
+          fillOpacity: 0.82,
+          clickable: false,
+        }));
+      }
+      for (const line of variant?.firebreak?.lines ?? []) {
+        overlaysRef.current.push(new maps.Polygon({
+          map,
+          paths: corridorSegmentPolygon(line.points[0], line.points[line.points.length - 1], line.widthM),
+          strokeColor: '#ffb15c',
+          strokeOpacity: 0.95,
+          strokeWeight: 2,
+          fillColor: '#ef6a3b',
+          fillOpacity: 0.42,
+          clickable: false,
+        }));
+      }
+      for (const comment of project.collaboration.comments.filter((item) => item.coordinate)) {
+        overlaysRef.current.push(new maps.Marker({
+          map,
+          position: comment.coordinate,
+          title: `${comment.authorName}: ${comment.message}`,
+          label: { text: '●', color: '#ffffff', fontSize: '11px' },
+        }));
+      }
+      map.fitBounds(sitePreviewBounds(project.site.polygon));
+      if (project.collaboration.share.mode === 'review') {
+        map.addListener('click', (event: any) => event.latLng && setCommentCoordinate(coordinateFromLatLng(event.latLng)));
+      }
+    }).catch((mapError) => setError(messageOf(mapError)));
+    return () => {
+      cancelled = true;
+      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+      overlaysRef.current = [];
+    };
+  }, [config, project]);
+
+  async function submitComment() {
+    if (!reviewerName.trim() || !message.trim()) return;
+    setBusy(true);
+    try {
+      const updated = await api<ProjectState>(`/api/shared/projects/${token}/comments`, post({
+        authorName: reviewerName,
+        message,
+        coordinate: commentCoordinate,
+        target: commentCoordinate ? 'general' : 'general',
+      }));
+      setProject(updated);
+      setMessage('');
+      setCommentCoordinate(null);
+    } catch (submitError) {
+      setError(messageOf(submitError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitReview(status: 'approved' | 'changes-requested') {
+    if (!reviewerName.trim()) return;
+    setBusy(true);
+    try {
+      setProject(await api<ProjectState>(`/api/shared/projects/${token}/review`, post({ status, reviewerName, note: reviewNote })));
+    } catch (submitError) {
+      setError(messageOf(submitError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error && !project) return <main className="shared-error"><Sprout size={28} /><h1>{t('shared.unavailable')}</h1><p>{error}</p></main>;
+  if (!project) return <main className="shared-loading"><LoaderCircle className="spin" size={26} /><span>{t('busy.loading')}</span></main>;
+  const variant = project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0] ?? null;
+  const canReview = project.collaboration.share.mode === 'review';
+  return <main className="shared-project">
+    <header><span className="brand-mark"><Sprout size={21} /></span><span><small>{t('shared.eyebrow')}</small><strong>{project.name}</strong></span><i>r{project.revision ?? 0}</i></header>
+    <section className="shared-map"><div ref={mapElementRef} /><span><MousePointer2 size={14} />{canReview ? t('shared.mapHint') : t('shared.readOnly')}</span></section>
+    <aside>
+      <div className="shared-summary"><small>{t('shared.summary')}</small><h1>{project.site.name}</h1><p>{project.siteProfile?.location.displayName ?? t('shared.locationUnavailable')}</p><div><span><strong>{variant?.trees.length ?? 0}</strong><small>{t('shared.plants')}</small></span><span><strong>{variant?.firebreak?.enabled ? `${formatNumber(variant.firebreak.plannedWidthM, 1)} m` : '—'}</strong><small>{t('shared.firebreak')}</small></span><span><strong>{project.timelineYear}</strong><small>{t('timeline.year')}</small></span></div></div>
+      {project.collaboration.review && <div className={`shared-decision ${project.collaboration.review.status}`}><ClipboardCheck size={18} /><span><small>{t('sharing.reviewStatus')}</small><strong>{t(`sharing.status.${project.collaboration.review.status}`)}</strong><p>{project.collaboration.review.reviewerName} · {shortDate(project.collaboration.review.updatedAt, locale)}</p></span></div>}
+      <div className="shared-comments"><header><strong>{t('sharing.comments')}</strong><small>{project.collaboration.comments.length}</small></header>{project.collaboration.comments.map((comment) => <article key={comment.id}><span><strong>{comment.authorName}</strong><small>r{comment.revision} · {shortDate(comment.createdAt, locale)}</small></span><p>{comment.message}</p>{comment.coordinate && <i><MapIcon size={12} />{t('shared.pinned')}</i>}</article>)}</div>
+      {canReview && <div className="shared-review-form">
+        <label><span>{t('shared.yourName')}</span><input maxLength={100} value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} /></label>
+        <label><span>{t('shared.comment')}</span><textarea maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} /></label>
+        {commentCoordinate && <small className="shared-pin"><LocateFixed size={13} />{t('shared.pinReady')}</small>}
+        <button disabled={busy || !reviewerName.trim() || !message.trim()} onClick={() => void submitComment()}><Send size={14} />{t('shared.addComment')}</button>
+        <label><span>{t('shared.reviewNote')}</span><textarea maxLength={2000} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label>
+        <div><button className="request" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('changes-requested')}>{t('sharing.requestChanges')}</button><button className="approve" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('approved')}><Check size={14} />{t('sharing.approve')}</button></div>
+      </div>}
+    </aside>
+  </main>;
+}
+
+function WorkspaceApp() {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [catalogueStats, setCatalogueStats] = useState<CatalogueStats | null>(null);
@@ -188,10 +356,13 @@ export default function App() {
   const [irrigationConfiguration, setIrrigationConfiguration] = useState<IrrigationConfiguration>(DEFAULT_IRRIGATION_CONFIGURATION);
   const [economicConfiguration, setEconomicConfiguration] = useState<EconomicConfiguration>(() => defaultEconomicConfiguration(''));
   const [costs, setCosts] = useState<EstablishmentCost | null>(null);
+  const [fireOperations, setFireOperations] = useState<FireOperationsPlan>(() => defaultFireOperationsPlan());
+  const [collaboration, setCollaboration] = useState<ProjectCollaboration>(() => defaultProjectCollaboration());
   const [section, setSection] = useState<WorkspaceSection>('site');
   const [drawMode, setDrawMode] = useState<DrawMode>('idle');
   const [draftPoints, setDraftPoints] = useState<Coordinate[]>([]);
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
+  const [selectedTreeIds, setSelectedTreeIds] = useState<string[]>([]);
   const [treeSpeciesId, setTreeSpeciesId] = useState<string>('');
   const [showNdmi, setShowNdmi] = useState(false);
   const [showWaterSamples, setShowWaterSamples] = useState(false);
@@ -205,6 +376,7 @@ export default function App() {
   const [showPlannedTrees, setShowPlannedTrees] = useState(true);
   const [showMachinery, setShowMachinery] = useState(true);
   const [showFirebreaks, setShowFirebreaks] = useState(true);
+  const [showFireWeather, setShowFireWeather] = useState(false);
   const [showWind, setShowWind] = useState(true);
   const [showIrrigation, setShowIrrigation] = useState(true);
   const [editingIrrigation, setEditingIrrigation] = useState(false);
@@ -233,6 +405,10 @@ export default function App() {
   const [revisions, setRevisions] = useState<ProjectRevisionSummary[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [fireOperationsOpen, setFireOperationsOpen] = useState(false);
+  const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [sharePath, setSharePath] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<ProjectState | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingPreference | null>(() => readOnboardingPreference(window.localStorage) ?? newOnboardingPreference());
@@ -252,6 +428,7 @@ export default function App() {
   const treeOverlaysRef = useRef<any[]>([]);
   const machineryOverlaysRef = useRef<any[]>([]);
   const firebreakOverlaysRef = useRef<any[]>([]);
+  const fireWeatherOverlayRef = useRef<any>(null);
   const windOverlaysRef = useRef<any[]>([]);
   const waterOverlaysRef = useRef<any[]>([]);
   const irrigationNetworkOverlaysRef = useRef<any[]>([]);
@@ -342,7 +519,7 @@ export default function App() {
       if (authUser) queueProjectSave(snapshot, serial);
     }, 1_200);
     return () => window.clearTimeout(timer);
-  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, authUser]);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, collaboration, authUser]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -760,6 +937,22 @@ export default function App() {
   useEffect(() => {
     const map = mapRef.current;
     const maps = window.google?.maps;
+    fireWeatherOverlayRef.current?.setMap(null);
+    fireWeatherOverlayRef.current = null;
+    if (!map || !maps || !site || !showFireWeather) return;
+    const tile = effisFireWeatherTile(site, fireOperations.sourceSnapshot.forecastDate);
+    fireWeatherOverlayRef.current = new maps.GroundOverlay(
+      tile.url,
+      tile.bounds,
+      { opacity: 0.58, clickable: false },
+    );
+    fireWeatherOverlayRef.current.setMap(map);
+    return () => fireWeatherOverlayRef.current?.setMap(null);
+  }, [site, showFireWeather, fireOperations.sourceSnapshot.forecastDate]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
     if (!map || !maps) return;
     windOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     windOverlaysRef.current = [];
@@ -818,7 +1011,7 @@ export default function App() {
       if (!species) continue;
       const state = growthState(species, tree, timelineYear);
       if (!state.active) continue;
-      const selected = tree.id === selectedTreeId;
+      const selected = tree.id === selectedTreeId || selectedTreeIds.includes(tree.id);
       const crown = new maps.Circle({
         map,
         center: tree.coordinate,
@@ -831,14 +1024,17 @@ export default function App() {
         clickable: true,
         zIndex: selected ? 45 : 20 + stratumOrder(species.stratum),
       });
-      crown.addListener('click', () => {
+      crown.addListener('click', (event: any) => {
         setSelectedTreeId(tree.id);
+        setSelectedTreeIds((ids) => event?.domEvent?.shiftKey
+          ? ids.includes(tree.id) ? ids.filter((id) => id !== tree.id) : [...ids, tree.id]
+          : [tree.id]);
         setTreeSpeciesId(tree.speciesId);
       });
       treeOverlaysRef.current.push(crown);
     }
     return () => treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [selectedVariant, timelineYear, selectedTreeId, showPlannedTrees]);
+  }, [selectedVariant, timelineYear, selectedTreeId, selectedTreeIds, showPlannedTrees]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1075,6 +1271,7 @@ export default function App() {
     setSelectedSpeciesIds([]);
     setTreeSpeciesId('');
     setSelectedTreeId(null);
+    setSelectedTreeIds([]);
     setDrawMode('idle');
     setDraftPoints([]);
     setShowNdmi(false);
@@ -1083,6 +1280,9 @@ export default function App() {
     setProjectRevision(0);
     projectRevisionRef.current = 0;
     setRevisions([]);
+    setFireOperations(defaultFireOperationsPlan());
+    setCollaboration(defaultProjectCollaboration());
+    setSharePath(null);
     setSaveStatus('idle');
     window.localStorage.removeItem('growup:draft:v2');
     projectNameEditedRef.current = false;
@@ -1457,6 +1657,8 @@ export default function App() {
       timelineYear,
       irrigation,
       costs,
+      fireOperations,
+      collaboration,
       revision: projectRevisionRef.current,
       revisionId: revisions[0]?.revisionId ?? null,
       calculationRunId: null,
@@ -1541,7 +1743,11 @@ export default function App() {
     setTimelineYear(project.timelineYear);
     setIrrigation(project.irrigation);
     setCosts(project.costs);
+    setFireOperations(normalizeFireOperationsPlan(project.fireOperations, project.updatedAt));
+    setCollaboration(normalizeProjectCollaboration(project.collaboration));
     setSelectedTreeId(null);
+    setSelectedTreeIds([]);
+    setSharePath(null);
     fittedSiteRef.current = null;
     setSection(project.costs ? 'costs' : project.irrigation ? 'water' : normalizedVariants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
     setSaveStatus(status);
@@ -1727,7 +1933,7 @@ export default function App() {
     setVariants((items) => items.map((item) => item.id === selectedVariant.id ? {
       ...item,
       trees: nextTrees,
-      metrics: { ...item.metrics, totalTrees: nextTrees.length },
+      metrics: { ...item.metrics, totalTrees: nextTrees.length, speciesCount: new Set(nextTrees.map((tree) => tree.speciesId)).size },
     } : item));
     setIrrigation(null);
     setCosts(null);
@@ -1751,11 +1957,161 @@ export default function App() {
     if (!selectedVariant || !selectedTree) return;
     commitTrees(selectedVariant.trees.filter((tree) => tree.id !== selectedTree.id));
     setSelectedTreeId(null);
+    setSelectedTreeIds((ids) => ids.filter((id) => id !== selectedTree.id));
   }
 
   function toggleTreeLock() {
     if (!selectedVariant || !selectedTree) return;
     commitTrees(selectedVariant.trees.map((tree) => tree.id === selectedTree.id ? { ...tree, locked: !tree.locked } : tree));
+  }
+
+  function selectTree(id: string | null) {
+    setSelectedTreeId(id);
+    setSelectedTreeIds(id ? [id] : []);
+    if (id && selectedVariant) {
+      const tree = selectedVariant.trees.find((candidate) => candidate.id === id);
+      if (tree) setTreeSpeciesId(tree.speciesId);
+    }
+  }
+
+  function selectTreeGroup(group: 'row' | 'species' | 'all') {
+    if (!selectedVariant) return;
+    const anchor = selectedTree ?? selectedVariant.trees.find((tree) => selectedTreeIds.includes(tree.id));
+    const ids = group === 'all'
+      ? selectedVariant.trees.map((tree) => tree.id)
+      : anchor
+        ? selectedVariant.trees.filter((tree) => group === 'row' ? tree.rowIndex === anchor.rowIndex : tree.speciesId === anchor.speciesId).map((tree) => tree.id)
+        : [];
+    setSelectedTreeIds(ids);
+    if (!selectedTreeId && ids[0]) setSelectedTreeId(ids[0]);
+  }
+
+  function replaceSelectedTrees(speciesId: string) {
+    if (!selectedVariant || !selectedTreeIds.length || !DESIGN_SPECIES_BY_ID.has(speciesId)) return;
+    const ids = new Set(selectedTreeIds);
+    commitTrees(selectedVariant.trees.map((tree) => ids.has(tree.id) ? { ...tree, speciesId } : tree));
+    setTreeSpeciesId(speciesId);
+  }
+
+  function lockSelectedTrees(locked: boolean) {
+    if (!selectedVariant || !selectedTreeIds.length) return;
+    const ids = new Set(selectedTreeIds);
+    commitTrees(selectedVariant.trees.map((tree) => ids.has(tree.id) ? { ...tree, locked } : tree));
+  }
+
+  function deleteSelectedTrees() {
+    if (!selectedVariant || !selectedTreeIds.length) return;
+    const ids = new Set(selectedTreeIds);
+    commitTrees(selectedVariant.trees.filter((tree) => !ids.has(tree.id)));
+    setSelectedTreeId(null);
+    setSelectedTreeIds([]);
+  }
+
+  function alignSelectedTrees(evenSpacing: boolean) {
+    if (!selectedVariant || !site || selectedTreeIds.length < 2) return;
+    const ids = new Set(selectedTreeIds);
+    const selected = selectedVariant.trees.filter((tree) => ids.has(tree.id));
+    const projection = createLocalProjection(polygonCentroid(site.polygon));
+    const projected = selected.map((tree) => ({ tree, point: projection.project(tree.coordinate) }));
+    const center = {
+      x: projected.reduce((sum, item) => sum + item.point.x, 0) / projected.length,
+      y: projected.reduce((sum, item) => sum + item.point.y, 0) / projected.length,
+    };
+    const radians = selectedVariant.directionDegrees * Math.PI / 180;
+    const direction = { x: Math.sin(radians), y: Math.cos(radians) };
+    const ordered = projected.map((item) => ({
+      ...item,
+      offset: (item.point.x - center.x) * direction.x + (item.point.y - center.y) * direction.y,
+    })).sort((a, b) => a.offset - b.offset);
+    const minimum = ordered[0].offset;
+    const maximum = ordered[ordered.length - 1].offset;
+    const coordinates = new Map(ordered.map((item, index) => {
+      const offset = evenSpacing && ordered.length > 1
+        ? minimum + (maximum - minimum) * index / (ordered.length - 1)
+        : item.offset;
+      return [item.tree.id, projection.unproject({ x: center.x + direction.x * offset, y: center.y + direction.y * offset })];
+    }));
+    const invalid = selected.find((tree) => {
+      const coordinate = coordinates.get(tree.id)!;
+      return Boolean(plantingRestriction(coordinate, site, siteProfile, selectedVariant.firebreak, t));
+    });
+    if (invalid) {
+      setError(t('layout.bulkConstraint'));
+      return;
+    }
+    commitTrees(selectedVariant.trees.map((tree) => coordinates.has(tree.id) ? { ...tree, coordinate: coordinates.get(tree.id)! } : tree));
+  }
+
+  function updateFireTask(id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) {
+    const now = new Date().toISOString();
+    setFireOperations((plan) => normalizeFireOperationsPlan({
+      ...plan,
+      reviewedAt: now,
+      tasks: plan.tasks.map((task) => task.id === id
+        ? {
+          ...task,
+          ...patch,
+          completedAt: patch.status === 'complete' ? task.completedAt ?? now : patch.status ? null : task.completedAt,
+        }
+        : task),
+    }, now));
+  }
+
+  async function openCollaboration() {
+    setCollaborationOpen(true);
+    if (!authUser || projectRevisionRef.current < 1) return;
+    setShareBusy(true);
+    try {
+      const response = await api<ShareResponse>(`/api/projects/${projectId}/share`);
+      setSharePath(response.path ?? null);
+      setCollaboration(normalizeProjectCollaboration(response.project.collaboration));
+    } catch (shareError) {
+      setError(messageOf(shareError));
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function enableProjectSharing(mode: 'view' | 'review', expiresAt: string | null) {
+    if (!site) return;
+    if (!authUser) {
+      setAuthOpen(true);
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const snapshot = currentProjectState(new Date().toISOString());
+      if (snapshot) await queueProjectSave(snapshot, dirtySerialRef.current);
+      const response = await api<ShareResponse>(`/api/projects/${projectId}/share`, post({ mode, expiresAt }));
+      applySharedProjectResponse(response);
+      setNotice(t('sharing.linkReady'));
+    } catch (shareError) {
+      setError(messageOf(shareError));
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function disableProjectSharing() {
+    setShareBusy(true);
+    try {
+      const response = await api<ShareResponse>(`/api/projects/${projectId}/share`, { method: 'DELETE' });
+      applySharedProjectResponse(response);
+      setNotice(t('sharing.linkDisabled'));
+    } catch (shareError) {
+      setError(messageOf(shareError));
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  function applySharedProjectResponse(response: ShareResponse) {
+    const revision = response.project.revision ?? projectRevisionRef.current;
+    projectRevisionRef.current = revision;
+    setProjectRevision(revision);
+    setCollaboration(normalizeProjectCollaboration(response.project.collaboration));
+    setSharePath(response.path ?? null);
+    void refreshProjects(projectId).catch((refreshError) => setError(messageOf(refreshError)));
   }
 
   function showBoundaryGuidance() {
@@ -1837,6 +2193,8 @@ export default function App() {
             <button onClick={() => { setMobileMenuOpen(false); setInfoOpen(true); }}><span><Info size={17} />{t('info.open')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); void saveProject(); }} disabled={!site || Boolean(busy)}><span><Save size={17} />{t('actions.save')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); setHistoryOpen(true); }} disabled={!authUser || projectRevision < 1}><span><Database size={17} />{t('auth.history')}</span><ChevronRight size={16} /></button>
+            <button onClick={() => { setMobileMenuOpen(false); setFireOperationsOpen(true); }} disabled={!site}><span><Flame size={17} />{t('fireOperations.open')}</span><ChevronRight size={16} /></button>
+            <button onClick={() => { setMobileMenuOpen(false); void openCollaboration(); }} disabled={!site}><span><Share2 size={17} />{t('sharing.open')}</span><ChevronRight size={16} /></button>
           </nav>
           <div className="mobile-export-actions">
             <a className={!selectedVariant || !authUser ? 'disabled' : ''} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined} onClick={() => setMobileMenuOpen(false)}><Download size={15} />GeoJSON</a>
@@ -1904,6 +2262,7 @@ export default function App() {
             <MapLayerToggle icon={Flame} tone="firebreak" active={showFirebreaks} disabled={!selectedVariant?.firebreak?.enabled} label={t('map.layerFirebreak')} hint={t('map.layerFirebreakHint')} toggleLabel={t('map.toggleFirebreak')} onToggle={() => setShowFirebreaks((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="irrigation" active={showIrrigation} disabled={!irrigation} label={t('map.layerIrrigation')} hint={t('map.layerIrrigationHint')} toggleLabel={t('map.toggleIrrigation')} onToggle={() => { const next = !showIrrigation; setShowIrrigation(next); if (!next) setEditingIrrigation(false); }} />
             <small>{t('map.evidenceLayers')}</small>
+            <MapLayerToggle icon={Flame} tone="risk" active={showFireWeather} disabled={!site} label={t('map.layerFireWeather')} hint={t('map.layerFireWeatherHint')} toggleLabel={t('map.toggleFireWeather')} onToggle={() => setShowFireWeather((value) => !value)} />
             <MapLayerToggle icon={WindIcon} tone="wind" active={showWind} disabled={siteProfile?.solar.status !== 'available'} label={t('map.layerWind')} hint={t('map.layerWindHint')} toggleLabel={t('map.toggleWind')} onToggle={() => setShowWind((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="vegetation" active={showExistingVegetation} disabled={!siteProfile?.satellite.existingVegetation.patches.length} label={t('map.layerVegetation')} hint={t('map.layerVegetationHint')} toggleLabel={t('map.toggleVegetation')} onToggle={() => setShowExistingVegetation((value) => !value)} />
             <MapLayerToggle icon={Waves} tone="ndmi" active={showNdmi} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} label={t('map.layerNdmi')} hint={t('map.layerNdmiHint')} toggleLabel={t('map.toggleNdmi')} onToggle={() => setShowNdmi((value) => !value)} />
@@ -1965,7 +2324,7 @@ export default function App() {
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
-          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={setSelectedVariantId} selectedTree={selectedTree} onTreeSelect={setSelectedTreeId} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} />}
+          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setFireOperationsOpen(true)} />}
           {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
           {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
         </section>
@@ -2017,7 +2376,31 @@ export default function App() {
 
       {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
 
-      {historyOpen && <ProjectHistoryPanel revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <ProjectHistoryPanel projectId={projectId} revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
+
+      {fireOperationsOpen && <FireOperationsPanel
+        plan={fireOperations}
+        onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
+        onTask={updateFireTask}
+        onShowLayer={() => setShowFireWeather(true)}
+        onClose={() => setFireOperationsOpen(false)}
+      />}
+
+      {collaborationOpen && config && <CollaborationPanel
+        authenticated={Boolean(authUser)}
+        configured={config.sharing.configured}
+        collaboration={collaboration}
+        sharePath={sharePath}
+        busy={shareBusy}
+        onEnable={enableProjectSharing}
+        onDisable={disableProjectSharing}
+        onSignIn={() => setAuthOpen(true)}
+        onResolve={(id) => setCollaboration((value) => ({
+          ...value,
+          comments: value.comments.map((comment) => comment.id === id ? { ...comment, resolvedAt: comment.resolvedAt ? null : new Date().toISOString() } : comment),
+        }))}
+        onClose={() => setCollaborationOpen(false)}
+      />}
 
       {scheduleOpen && site && siteProfile && selectedVariant && irrigation && costs && <OperationalSchedulePanel
         projectName={projectName}
@@ -2133,7 +2516,7 @@ function OnboardingTour({
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
   icon: typeof Layers3;
-  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'firebreak' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
   active: boolean;
   disabled: boolean;
   label: string;
@@ -2451,16 +2834,112 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function ProjectHistoryPanel({ revisions, onRestore, onClose }: { revisions: ProjectRevisionSummary[]; onRestore: (revision: number) => Promise<void>; onClose: () => void }) {
+function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer, onClose }: {
+  plan: FireOperationsPlan;
+  onPlan: (plan: FireOperationsPlan) => void;
+  onTask: (id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) => void;
+  onShowLayer: () => void;
+  onClose: () => void;
+}) {
   const { t, locale } = useI18n();
+  const complete = plan.tasks.filter((task) => task.status === 'complete' || task.status === 'not-applicable').length;
+  return <div className="modal-backdrop" role="presentation"><section className="operations-panel" role="dialog" aria-modal="true" aria-labelledby="fire-operations-title" data-testid="fire-operations-panel">
+    <header><span><small>{t('fireOperations.eyebrow')}</small><h2 id="fire-operations-title">{t('fireOperations.title')}</h2></span><button aria-label={t('actions.close')} onClick={onClose}><X size={18} /></button></header>
+    <p>{t('fireOperations.body')}</p>
+    <div className="fire-source-card">
+      <span><Flame size={18} /><i><small>{t('fireOperations.source')}</small><strong>EFFIS · FWI</strong></i></span>
+      <b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b>
+      <p>{t('fireOperations.sourceBody')}</p>
+      <div><label><span>{t('fireOperations.forecastDate')}</span><input type="date" value={plan.sourceSnapshot.forecastDate} onChange={(event) => onPlan({ ...plan, sourceSnapshot: { ...plan.sourceSnapshot, forecastDate: event.target.value, observedAt: new Date().toISOString() } })} /></label><button onClick={onShowLayer}><Layers3 size={14} />{t('fireOperations.showLayer')}</button></div>
+      <a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a>
+    </div>
+    <div className="operations-progress"><span><strong>{t('fireOperations.readiness')}</strong><small>{t('fireOperations.completed', { complete, total: plan.tasks.length })}</small></span><div><i style={{ width: `${complete / plan.tasks.length * 100}%` }} /></div></div>
+    <label className="operations-date"><span>{t('fireOperations.nextInspection')}</span><input type="date" value={plan.nextInspectionAt?.slice(0, 10) ?? ''} onChange={(event) => onPlan({ ...plan, nextInspectionAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
+    <div className="fire-task-list">{plan.tasks.map((task) => <article key={task.id} className={task.status}>
+      <span><i>{task.status === 'complete' ? <Check size={14} /> : <Flame size={14} />}</i><strong>{t(`fireOperations.task.${task.id}`)}</strong></span>
+      <select aria-label={t(`fireOperations.task.${task.id}`)} value={task.status} onChange={(event) => onTask(task.id, { status: event.target.value as FireMaintenanceTask['status'] })}>
+        {(['due', 'scheduled', 'complete', 'not-applicable'] as const).map((status) => <option key={status} value={status}>{t(`fireOperations.status.${status}`)}</option>)}
+      </select>
+      <label><span>{t('fireOperations.due')}</span><input type="date" value={task.dueAt?.slice(0, 10) ?? ''} onChange={(event) => onTask(task.id, { dueAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
+      <input aria-label={t('fireOperations.taskNotes')} placeholder={t('fireOperations.taskNotes')} value={task.notes} onChange={(event) => onTask(task.id, { notes: event.target.value })} />
+    </article>)}</div>
+    <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
+    <footer><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small><button className="button primary" onClick={onClose}>{t('actions.done')}</button></footer>
+  </section></div>;
+}
+
+function CollaborationPanel({ authenticated, configured, collaboration, sharePath, busy, onEnable, onDisable, onSignIn, onResolve, onClose }: {
+  authenticated: boolean;
+  configured: boolean;
+  collaboration: ProjectCollaboration;
+  sharePath: string | null;
+  busy: boolean;
+  onEnable: (mode: 'view' | 'review', expiresAt: string | null) => Promise<void>;
+  onDisable: () => Promise<void>;
+  onSignIn: () => void;
+  onResolve: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { t, locale } = useI18n();
+  const [mode, setMode] = useState<'view' | 'review'>(collaboration.share.mode);
+  const [expiryDays, setExpiryDays] = useState('30');
+  const shareUrl = sharePath ? `${window.location.origin}${sharePath}` : '';
+  const expiresAt = new Date(Date.now() + Number(expiryDays) * 24 * 60 * 60_000).toISOString();
+  return <div className="modal-backdrop" role="presentation"><section className="collaboration-panel" role="dialog" aria-modal="true" aria-labelledby="collaboration-title" data-testid="collaboration-panel">
+    <header><span><small>{t('sharing.eyebrow')}</small><h2 id="collaboration-title">{t('sharing.title')}</h2></span><button aria-label={t('actions.close')} onClick={onClose}><X size={18} /></button></header>
+    <p>{t('sharing.body')}</p>
+    {!authenticated ? <div className="sharing-gate"><ShieldCheck size={22} /><strong>{t('sharing.signInTitle')}</strong><p>{t('sharing.signInBody')}</p><button className="button primary" onClick={onSignIn}>{t('auth.signIn')}</button></div> : !configured ? <div className="sharing-gate"><ShieldCheck size={22} /><strong>{t('sharing.unavailableTitle')}</strong><p>{t('sharing.unavailableBody')}</p></div> : <>
+      <div className="share-controls">
+        <label><span>{t('sharing.permission')}</span><select value={mode} onChange={(event) => setMode(event.target.value as 'view' | 'review')}><option value="view">{t('sharing.viewOnly')}</option><option value="review">{t('sharing.canReview')}</option></select></label>
+        <label><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
+        <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt)}>{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
+      </div>
+      {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+      <div className="review-summary">
+        <span><ClipboardCheck size={18} /><i><small>{t('sharing.reviewStatus')}</small><strong>{collaboration.review ? t(`sharing.status.${collaboration.review.status}`) : t('sharing.status.pending')}</strong></i></span>
+        {collaboration.review && <p><strong>{collaboration.review.reviewerName}</strong> · {shortDate(collaboration.review.updatedAt, locale)}<br />{collaboration.review.note}</p>}
+      </div>
+      <div className="owner-comments"><header><strong>{t('sharing.comments')}</strong><small>{collaboration.comments.filter((comment) => !comment.resolvedAt).length} {t('sharing.openComments')}</small></header>{collaboration.comments.length ? collaboration.comments.map((comment) => <article key={comment.id} className={comment.resolvedAt ? 'resolved' : ''}><span><strong>{comment.authorName}</strong><small>r{comment.revision} · {shortDate(comment.createdAt, locale)}</small></span><p>{comment.message}</p><button onClick={() => onResolve(comment.id)}>{t(comment.resolvedAt ? 'sharing.reopen' : 'sharing.resolve')}</button></article>) : <p className="inline-empty">{t('sharing.noComments')}</p>}</div>
+    </>}
+  </section></div>;
+}
+
+function ProjectHistoryPanel({ projectId, revisions, onRestore, onClose }: { projectId: string; revisions: ProjectRevisionSummary[]; onRestore: (revision: number) => Promise<void>; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const [comparison, setComparison] = useState<{ revision: number; rows: Array<{ label: string; previous: string; current: string }> } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function compare(revision: number) {
+    setBusy(true);
+    try {
+      const [previous, current] = await Promise.all([
+        api<ProjectState>(`/api/projects/${projectId}/revisions/${revision}`),
+        api<ProjectState>(`/api/projects/${projectId}`),
+      ]);
+      const previousVariant = previous.variants.find((item) => item.id === previous.selectedVariantId) ?? previous.variants[0];
+      const currentVariant = current.variants.find((item) => item.id === current.selectedVariantId) ?? current.variants[0];
+      setComparison({
+        revision,
+        rows: [
+          { label: t('historyCompare.plants'), previous: String(previousVariant?.trees.length ?? 0), current: String(currentVariant?.trees.length ?? 0) },
+          { label: t('historyCompare.species'), previous: String(new Set(previousVariant?.trees.map((tree) => tree.speciesId) ?? []).size), current: String(new Set(currentVariant?.trees.map((tree) => tree.speciesId) ?? []).size) },
+          { label: t('historyCompare.fireTasks'), previous: String(previous.fireOperations.tasks.filter((task) => task.status === 'complete').length), current: String(current.fireOperations.tasks.filter((task) => task.status === 'complete').length) },
+          { label: t('historyCompare.comments'), previous: String(previous.collaboration.comments.length), current: String(current.collaboration.comments.length) },
+          { label: t('historyCompare.water'), previous: previous.irrigation ? `${formatNumber(previous.irrigation.annualWaterM3, 0)} m³` : '—', current: current.irrigation ? `${formatNumber(current.irrigation.annualWaterM3, 0)} m³` : '—' },
+        ],
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   return <div className="modal-backdrop" role="presentation"><section className="history-panel" role="dialog" aria-modal="true" aria-labelledby="history-title">
     <header><span><small>{t('auth.historyEyebrow')}</small><h2 id="history-title">{t('auth.historyTitle')}</h2></span><button aria-label={t('auth.closeHistory')} onClick={onClose}><X size={18} /></button></header>
     <p>{t('auth.historyBody')}</p>
     <div className="revision-list">{revisions.map((revision, index) => <article key={revision.revisionId}>
       <span className="revision-number">r{revision.revision}</span>
       <span><strong>{revision.name}</strong><small>{shortDate(revision.createdAt, locale)} · {t('auth.revisionTrees', { count: revision.treeCount })}{revision.calculationRunId ? ` · ${t('auth.calculationCaptured')}` : ''}</small><code>{revision.contentHash.slice(0, 12)}</code></span>
-      <button disabled={index === 0} onClick={() => void onRestore(revision.revision)}>{index === 0 ? t('auth.currentRevision') : t('auth.restoreRevision')}</button>
+      <span className="revision-actions"><button disabled={busy || index === 0} onClick={() => void compare(revision.revision)}>{t('historyCompare.compare')}</button><button disabled={index === 0} onClick={() => void onRestore(revision.revision)}>{index === 0 ? t('auth.currentRevision') : t('auth.restoreRevision')}</button></span>
     </article>)}</div>
+    {comparison && <div className="revision-comparison"><header><span><small>{t('historyCompare.eyebrow')}</small><strong>{t('historyCompare.title', { revision: comparison.revision })}</strong></span><button aria-label={t('actions.close')} onClick={() => setComparison(null)}><X size={15} /></button></header><div><span><b>{t('historyCompare.metric')}</b><b>r{comparison.revision}</b><b>{t('historyCompare.current')}</b></span>{comparison.rows.map((row) => <span key={row.label}><strong>{row.label}</strong><i>{row.previous}</i><i>{row.current}</i></span>)}</div></div>}
   </section></div>;
 }
 
@@ -2923,7 +3402,36 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   );
 }
 
-function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, onTreeSelect, selectedSpecies, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies }: { variants: LayoutVariant[]; selectedVariant: LayoutVariant | null; onSelect: (id: string) => void; selectedTree: TreeInstance | null; onTreeSelect: (id: string | null) => void; selectedSpecies: DesignSpecies[]; treeSpeciesId: string; onTreeSpecies: (id: string) => void; drawMode: DrawMode; onMode: (mode: DrawMode) => void; onDelete: () => void; onLock: () => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onRegenerate: () => void; onCalculate: () => void; onOpenSpecies: () => void }) {
+function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedTreeIds, onTreeSelect, onSelectGroup, onClearSelection, onReplaceSelected, onLockSelected, onDeleteSelected, onAlignSelected, onSpaceSelected, selectedSpecies, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies, onFireOperations }: {
+  variants: LayoutVariant[];
+  selectedVariant: LayoutVariant | null;
+  onSelect: (id: string) => void;
+  selectedTree: TreeInstance | null;
+  selectedTreeIds: string[];
+  onTreeSelect: (id: string | null) => void;
+  onSelectGroup: (group: 'row' | 'species' | 'all') => void;
+  onClearSelection: () => void;
+  onReplaceSelected: (speciesId: string) => void;
+  onLockSelected: (locked: boolean) => void;
+  onDeleteSelected: () => void;
+  onAlignSelected: () => void;
+  onSpaceSelected: () => void;
+  selectedSpecies: DesignSpecies[];
+  treeSpeciesId: string;
+  onTreeSpecies: (id: string) => void;
+  drawMode: DrawMode;
+  onMode: (mode: DrawMode) => void;
+  onDelete: () => void;
+  onLock: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onRegenerate: () => void;
+  onCalculate: () => void;
+  onOpenSpecies: () => void;
+  onFireOperations: () => void;
+}) {
   const { t } = useI18n();
   if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
   const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
@@ -2972,10 +3480,30 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, onTree
         <div className="firebreak-result"><span><small>{t('firebreak.plannedWidth')}</small><strong>{formatNumber(selectedVariant.firebreak.plannedWidthM, 1)} m</strong></span><span><small>{t('firebreak.totalLength')}</small><strong>{formatNumber(selectedVariant.firebreak.totalLengthM, 0)} m</strong></span><span><small>{t('firebreak.reservedArea')}</small><strong>{formatNumber(selectedVariant.firebreak.reservedAreaM2, 0)} m²</strong></span></div>
         <p>{t('firebreak.planBody', { width: formatNumber(selectedVariant.firebreak.plannedWidthM, 1), minimum: formatNumber(selectedVariant.firebreak.minimumPlanningWidthM, 1), treatment: t(`firebreak.treatment.${selectedVariant.firebreak.treatment === 'low-fuel-vegetation' ? 'lowFuel' : selectedVariant.firebreak.treatment === 'bare-ground' ? 'bareGround' : 'mown'}`) })}</p>
         <small className="firebreak-review">{t('firebreak.localReview')}</small>
+        <button className="text-button fire-operations-link" onClick={onFireOperations}>{t('fireOperations.open')} <ChevronRight size={14} /></button>
       </div>}
       <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
       <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
       <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{selectedVariant.trees.map((tree) => <option key={tree.id} value={tree.id}>{tree.id}</option>)}</select></label>
+      <div className={`bulk-editor ${selectedTreeIds.length ? 'active' : ''}`} data-testid="bulk-editor">
+        <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.bulkEyebrow')}</small><strong>{t('layout.bulkSelected', { count: selectedTreeIds.length })}</strong></span></div>{selectedTreeIds.length > 0 && <button className="bulk-clear" onClick={onClearSelection}>{t('actions.clear')}</button>}</div>
+        <p>{t('layout.bulkHint')}</p>
+        <div className="bulk-groups">
+          <button disabled={!selectedTree} onClick={() => onSelectGroup('row')}>{t('layout.selectRow')}</button>
+          <button disabled={!selectedTree} onClick={() => onSelectGroup('species')}>{t('layout.selectSpeciesGroup')}</button>
+          <button onClick={() => onSelectGroup('all')}>{t('layout.selectAll')}</button>
+        </div>
+        {selectedTreeIds.length > 0 && <>
+          <label className="select-label"><span>{t('layout.replaceSpecies')}</span><select aria-label={t('layout.replaceSpecies')} value={treeSpeciesId} onChange={(event) => onReplaceSelected(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)}</option>)}</select></label>
+          <div className="bulk-actions">
+            <button disabled={selectedTreeIds.length < 2} onClick={onAlignSelected}>{t('layout.alignRow')}</button>
+            <button disabled={selectedTreeIds.length < 2} onClick={onSpaceSelected}>{t('layout.equalSpacing')}</button>
+            <button onClick={() => onLockSelected(true)}>{t('actions.lock')}</button>
+            <button onClick={() => onLockSelected(false)}>{t('actions.unlock')}</button>
+            <button className="danger" onClick={onDeleteSelected}><Trash2 size={13} />{t('actions.remove')}</button>
+          </div>
+        </>}
+      </div>
       {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span>{t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
       {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
       <button className="button primary wide calculate-design-action" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>

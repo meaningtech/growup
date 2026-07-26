@@ -6,12 +6,15 @@ import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
 import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation.js';
 import { defaultEconomicConfiguration } from '../src/data/economicProfiles.js';
+import { defaultProjectCollaboration } from '../src/lib/collaboration.js';
+import { defaultFireOperationsPlan } from '../src/lib/fireOperations.js';
 import type { ProjectState } from '../src/types.js';
 import { createApp } from './app.js';
 import { geometryMetrics } from './db.js';
 import {
   assertMongoIndexesReady,
   getProject,
+  getSharedProject,
   getProjectRevision,
   getCalculationRun,
   getUser,
@@ -47,10 +50,12 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       timelineYear: 5,
       irrigation: null,
       costs: null,
+      fireOperations: defaultFireOperationsPlan(),
+      collaboration: defaultProjectCollaboration(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, updateUserOnboarding, getProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
+    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, updateUserOnboarding, getProject, getSharedProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
     const app = createApp({
       database,
       skipDatabaseMigration: true,
