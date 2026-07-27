@@ -3,6 +3,7 @@ import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
 test('uses the configured AI provider to propose and apply a confirmed species change', async ({ page }) => {
+  test.setTimeout(180_000);
   const configResponse = await page.request.get('/api/config');
   const config = await configResponse.json();
   test.skip(!config.assistant?.configured, 'The AI assistant is not configured on this server.');
@@ -35,4 +36,11 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await page.getByTestId('step-costs').click();
   await expect(page.getByText('Establishment total')).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
+
+  await page.getByTestId('step-analysis').click();
+  await page.getByRole('button', { name: 'Run formal review' }).click();
+  const report = page.getByTestId('formal-review-report');
+  await expect(report).toBeVisible({ timeout: 90_000 });
+  await expect(report.locator('.review-dimensions article')).toHaveCount(8);
+  await expect(report.locator('.review-verdict')).toContainText(/Ready for planning use|Revision required|Incomplete/);
 });
