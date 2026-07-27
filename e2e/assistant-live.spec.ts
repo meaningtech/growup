@@ -31,7 +31,7 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await expect(page.getByText('AI proposal validated and applied to the Growup project.')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('assistant-proposal')).toHaveCount(0);
   await page.getByTestId('step-species').click();
-  await expect(page.getByText('10 species selected across strata and succession phases.')).toBeVisible();
+  await expect(page.getByText('10 species selected. Configure plants, fire access and working equipment in one place.')).toBeVisible();
   await page.getByTestId('step-costs').click();
   await expect(page.getByText('Establishment total')).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
