@@ -4,7 +4,7 @@ import { defaultEconomicConfiguration } from '../src/data/economicProfiles';
 import { firebreakConfigurationFromFuelModel } from '../src/data/firebreak';
 import { defaultProjectCollaboration } from '../src/lib/collaboration';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
-import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
+import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
 import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from '../src/lib/layout';
 import type { ProjectState } from '../src/types';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
@@ -20,6 +20,7 @@ function projectFixture(): ProjectState {
     firebreak: { ...firebreakConfigurationFromFuelModel('shrub-edge'), enabled: true },
   };
   const variants = generateLayoutVariants(TEMPERATE_OPEN_FIELD_FIXTURE, profile, species, design);
+  const economics = defaultEconomicConfiguration(profile.location.countryCode ?? '');
   return {
     id: 'operations-browser-project',
     name: 'Operations browser project',
@@ -28,11 +29,11 @@ function projectFixture(): ProjectState {
     selectedSpeciesIds: species.map((item) => item.id),
     designConfiguration: design,
     irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
-    economicConfiguration: defaultEconomicConfiguration(profile.location.countryCode ?? ''),
+    economicConfiguration: economics,
     variants,
     selectedVariantId: variants[0].id,
     timelineYear: 5,
-    irrigation: null,
+    irrigation: calculateIrrigation(variants[0], species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5, DEFAULT_IRRIGATION_CONFIGURATION, economics),
     costs: null,
     fireOperations: defaultFireOperationsPlan(observedAt),
     collaboration: defaultProjectCollaboration(),
@@ -84,12 +85,12 @@ async function mockBase(page: Page, authenticated = false) {
   }));
 }
 
-async function loadRecoveryDraft(page: Page, project: ProjectState) {
+async function loadRecoveryDraft(page: Page, project: ProjectState, recoveryLabel = 'Recover') {
   await page.addInitScript((value) => {
     if (!window.localStorage.getItem('growup:draft:v2')) window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
   }, project);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Recover' }).click();
+  await page.getByRole('button', { name: recoveryLabel }).click();
 }
 
 test('persists fire operations and advanced group edits through local recovery', async ({ page }) => {
@@ -119,7 +120,6 @@ test('persists fire operations and advanced group edits through local recovery',
   await operations.getByLabel('Next field inspection').fill('2026-08-15');
   await page.screenshot({ path: '/private/tmp/growup-fire-operations-checklist.png', fullPage: false });
   await operations.getByRole('button', { name: 'Show on map' }).click();
-  await operations.getByRole('button', { name: 'Done' }).click();
 
   await page.getByRole('button', { name: 'Map layers' }).click();
   const fireWeather = page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide EFFIS fire weather' });
@@ -282,14 +282,61 @@ test('keeps the fire checklist usable on a mobile viewport', async ({ page }) =>
   const project = projectFixture();
   await mockBase(page);
   await loadRecoveryDraft(page, project);
+  await page.locator('.toast button').click();
   const fireStep = page.getByTestId('step-fire');
   await expect(fireStep).toBeVisible();
   await expect(fireStep).toContainText('Fire');
   await fireStep.click();
-  await expect(fireStep).toHaveAttribute('aria-expanded', 'true');
+  await expect(fireStep).toHaveClass(/active/);
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toBeVisible();
   await expect(operations.getByText('EFFIS · FWI')).toBeVisible();
   await expect(operations.locator('.fire-task-list article')).toHaveCount(5);
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Inspect, maintain and record' })).toHaveCount(0);
+  const [operationsBox, inspectorBox] = await Promise.all([
+    operations.boundingBox(),
+    page.locator('.inspector').boundingBox(),
+  ]);
+  expect(operationsBox).not.toBeNull();
+  expect(inspectorBox).not.toBeNull();
+  expect(operationsBox!.x).toBeGreaterThanOrEqual(inspectorBox!.x);
+  expect(operationsBox!.x + operationsBox!.width).toBeLessThanOrEqual(inspectorBox!.x + inspectorBox!.width);
   await page.screenshot({ path: '/private/tmp/growup-fire-operations-mobile.png', fullPage: false });
+});
+
+test('keeps the populated water page locked to the mobile viewport', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => window.localStorage.setItem('growup.locale', 'it'));
+  const project = projectFixture();
+  await mockBase(page);
+  await loadRecoveryDraft(page, project, 'Recupera bozza');
+  await page.locator('.toast button').click();
+  await page.getByTestId('step-water').click();
+  await expect(page.getByTestId('system-water-model')).toBeVisible();
+  const timeline = page.locator('.timeline-control');
+  const [timelineBox, mapBox] = await Promise.all([
+    timeline.boundingBox(),
+    page.locator('.map-stage').boundingBox(),
+  ]);
+  expect(timelineBox).not.toBeNull();
+  expect(mapBox).not.toBeNull();
+  expect(await timeline.evaluate((element) => getComputedStyle(element).position)).toBe('absolute');
+  expect(timelineBox!.y).toBeGreaterThanOrEqual(mapBox!.y);
+  expect(timelineBox!.y + timelineBox!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height);
+
+  const overflow = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+    scrollX: window.scrollX,
+    widest: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .map((element) => ({ tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right, width: element.getBoundingClientRect().width }))
+      .filter((item) => item.right > document.documentElement.clientWidth + 1)
+      .sort((left, right) => right.right - left.right)
+      .slice(0, 5),
+  }));
+  expect(overflow.widest, JSON.stringify(overflow.widest)).toEqual([]);
+  expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
+  expect(overflow.scrollX).toBe(0);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-water-locked.png'), fullPage: false });
 });

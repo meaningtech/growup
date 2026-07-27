@@ -1038,7 +1038,7 @@ export type AssistantProjectContext = {
   timelineYear: number;
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
-  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'costs';
+  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs';
 };
 
 export type AssistantAction =

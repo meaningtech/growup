@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('submits the assistant request with Enter and keeps Shift+Enter as a line break', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.route('**/api/config', async (route) => {
     await route.fulfill({
       status: 200,
@@ -45,8 +46,15 @@ test('submits the assistant request with Enter and keeps Shift+Enter as a line b
   await expect(page.getByRole('button', { name: 'Add a productive species suited to the site and regenerate the design.' })).toHaveCount(0);
   await expect(page.locator('.assistant-body')).toHaveCount(0);
   const compactPanelBox = await page.getByRole('complementary', { name: 'Growup AI assistant' }).boundingBox();
+  const workflowBox = await page.locator('.step-rail').boundingBox();
+  const composerBox = await page.getByRole('textbox', { name: 'Ask' }).boundingBox();
   expect(compactPanelBox).not.toBeNull();
-  expect(compactPanelBox!.height).toBeLessThan(200);
+  expect(workflowBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(compactPanelBox!.height).toBeLessThanOrEqual(140);
+  expect(compactPanelBox!.y + compactPanelBox!.height).toBeLessThanOrEqual(workflowBox!.y - 8);
+  expect(composerBox!.height).toBeLessThanOrEqual(48);
+  await expect(page.locator('.assistant-panel > header small')).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath('growup-assistant-compact.png'), fullPage: false });
   const composer = page.getByRole('textbox', { name: 'Ask' });
   await composer.fill('First line');

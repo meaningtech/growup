@@ -118,7 +118,7 @@ import type {
   WindClimatologyPeriod,
 } from './types';
 
-type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'costs';
+type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs';
 type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'path' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
 
 type AppConfig = {
@@ -180,6 +180,7 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'species', label: 'Species', icon: Leaf },
   { id: 'layout', label: 'Design', icon: TreePine },
   { id: 'water', label: 'Water', icon: Droplets },
+  { id: 'fire', label: 'Fire', icon: Flame },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
 ];
 
@@ -407,7 +408,6 @@ function WorkspaceApp() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [fireOperationsOpen, setFireOperationsOpen] = useState(false);
   const [collaborationOpen, setCollaborationOpen] = useState(false);
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
@@ -2142,9 +2142,9 @@ function WorkspaceApp() {
     species: selectedSpeciesIds.length >= 3,
     layout: Boolean(selectedVariant),
     water: Boolean(irrigation),
+    fire: fireOperations.tasks.every((task) => task.status === 'complete' || task.status === 'not-applicable'),
     costs: Boolean(costs),
   };
-  const fireOperationsComplete = fireOperations.tasks.every((task) => task.status === 'complete' || task.status === 'not-applicable');
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
   const renderStepButton = (step: (typeof STEPS)[number], index: number) => {
     const Icon = step.icon;
@@ -2219,21 +2219,7 @@ function WorkspaceApp() {
       {recoveryDraft && !site && <div className="recovery-banner" role="status"><span><Save size={16} /><strong>{t('auth.recoveryTitle')}</strong><small>{t('auth.recoveryBody', { name: recoveryDraft.name })}</small></span><button onClick={recoverLocalDraft}>{t('auth.recover')}</button><button onClick={discardLocalDraft}>{t('auth.discard')}</button></div>}
 
       <aside className="step-rail" aria-label={t('nav.workflow')}>
-        {STEPS.slice(0, -1).map(renderStepButton)}
-        <button
-          type="button"
-          data-testid="step-fire"
-          className={fireOperationsOpen ? 'active' : ''}
-          aria-haspopup="dialog"
-          aria-expanded={fireOperationsOpen}
-          disabled={!site}
-          onClick={() => setFireOperationsOpen(true)}
-        >
-          <span className="step-number">{fireOperationsComplete ? <Check size={12} /> : <Clock3 size={10} />}</span>
-          <Flame size={18} />
-          <span>{t('fireOperations.nav')}</span>
-        </button>
-        {STEPS.slice(-1).map((step) => renderStepButton(step, STEPS.length - 1))}
+        {STEPS.map(renderStepButton)}
         <div className="rail-data">
           <Database size={16} />
           <strong>{catalogueStats ? compactNumber(catalogueStats.total) : '—'}</strong>
@@ -2338,8 +2324,14 @@ function WorkspaceApp() {
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
-          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setFireOperationsOpen(true)} />}
+          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} />}
           {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
+          {section === 'fire' && <FireOperationsPanel
+            plan={fireOperations}
+            onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
+            onTask={updateFireTask}
+            onShowLayer={() => setShowFireWeather(true)}
+          />}
           {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
         </section>
       </main>
@@ -2398,14 +2390,6 @@ function WorkspaceApp() {
       />}
 
       {historyOpen && <ProjectHistoryPanel projectId={projectId} revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
-
-      {fireOperationsOpen && <FireOperationsPanel
-        plan={fireOperations}
-        onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
-        onTask={updateFireTask}
-        onShowLayer={() => setShowFireWeather(true)}
-        onClose={() => setFireOperationsOpen(false)}
-      />}
 
       {collaborationOpen && config && <CollaborationPanel
         authenticated={Boolean(authUser)}
@@ -2864,18 +2848,20 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer, onClose }: {
+function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer }: {
   plan: FireOperationsPlan;
   onPlan: (plan: FireOperationsPlan) => void;
   onTask: (id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) => void;
   onShowLayer: () => void;
-  onClose: () => void;
 }) {
   const { t, locale } = useI18n();
   const complete = plan.tasks.filter((task) => task.status === 'complete' || task.status === 'not-applicable').length;
-  return <div className="modal-backdrop" role="presentation"><section className="operations-panel" role="dialog" aria-modal="true" aria-labelledby="fire-operations-title" data-testid="fire-operations-panel">
-    <header><span><small>{t('fireOperations.eyebrow')}</small><h2 id="fire-operations-title">{t('fireOperations.title')}</h2></span><button aria-label={t('actions.close')} onClick={onClose}><X size={18} /></button></header>
-    <p>{t('fireOperations.body')}</p>
+  return <div className="panel-body fire-operations-page" data-testid="fire-operations-panel">
+    <div className="panel-intro compact fire-operations-intro">
+      <span className="eyebrow">{t('fireOperations.eyebrow')}</span>
+      <h1 id="fire-operations-title">{t('fireOperations.title')}</h1>
+      <p>{t('fireOperations.body')}</p>
+    </div>
     <div className="fire-source-card">
       <span><Flame size={18} /><i><small>{t('fireOperations.source')}</small><strong>EFFIS · FWI</strong></i></span>
       <b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b>
@@ -2894,8 +2880,8 @@ function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer, onClose }: {
       <input aria-label={t('fireOperations.taskNotes')} placeholder={t('fireOperations.taskNotes')} value={task.notes} onChange={(event) => onTask(task.id, { notes: event.target.value })} />
     </article>)}</div>
     <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
-    <footer><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small><button className="button primary" onClick={onClose}>{t('actions.done')}</button></footer>
-  </section></div>;
+    <footer className="fire-operations-footer"><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small></footer>
+  </div>;
 }
 
 function ProjectsPage({ projects, activeProjectId, onOpen, onClose }: {

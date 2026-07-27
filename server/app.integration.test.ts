@@ -840,6 +840,7 @@ describe('Growup API integration', () => {
               { type: 'add_species', speciesIds: ['Olea europaea'] },
               { type: 'regenerate_layout' },
               { type: 'recalculate_water_and_costs' },
+              { type: 'navigate', section: 'fire' },
             ],
           }) } }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -871,6 +872,7 @@ describe('Growup API integration', () => {
       { type: 'add_species', speciesIds: ['olea-europaea'] },
       { type: 'regenerate_layout' },
       { type: 'recalculate_water_and_costs' },
+      { type: 'navigate', section: 'fire' },
     ]);
   });
 
