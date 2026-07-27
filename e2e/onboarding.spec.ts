@@ -51,6 +51,17 @@ test('keeps the tour usable on a narrow mobile viewport', async ({ page }, testI
 });
 
 test('covers fire, costs, formal review and completion as explicit checkpoints', async ({ page }) => {
+  await page.route('**/api/config', async (route) => {
+    const response = await route.fetch();
+    const config = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...config,
+        assistant: { ...config.assistant, configured: false },
+      },
+    });
+  });
   await page.evaluate(() => window.localStorage.setItem('growup:onboarding:v1', JSON.stringify({
     status: 'active',
     step: 'fire',

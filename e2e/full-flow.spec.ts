@@ -57,20 +57,22 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-ipad-succession.png', fullPage: false });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#root').evaluate((element) => { element.scrollTop = 900; });
-  const [mobileTimelineBox, mobileRailBox] = await Promise.all([
+  const [mobileTimelineBox, mobileHeaderBox, mobileRailBox] = await Promise.all([
     successionTimeline.boundingBox(),
+    page.locator('.inspector-header').boundingBox(),
     page.locator('.step-rail').boundingBox(),
   ]);
   expect(mobileTimelineBox).not.toBeNull();
+  expect(mobileHeaderBox).not.toBeNull();
   expect(mobileRailBox).not.toBeNull();
-  expect(mobileTimelineBox!.y).toBeGreaterThanOrEqual(0);
-  expect(mobileTimelineBox!.y + mobileTimelineBox!.height).toBeLessThan(mobileRailBox!.y);
+  expect(await successionTimeline.evaluate((element) => getComputedStyle(element).position)).toBe('absolute');
+  expect(mobileTimelineBox!.y + mobileTimelineBox!.height).toBeLessThanOrEqual(mobileHeaderBox!.y);
   const mobileActionBarBox = await page.locator('.panel-action-bar').boundingBox();
   expect(mobileActionBarBox).not.toBeNull();
   expect(mobileActionBarBox!.y + mobileActionBarBox!.height).toBeLessThanOrEqual(mobileRailBox!.y);
   const mobileToastBox = await page.locator('.toast').boundingBox();
   expect(mobileToastBox).not.toBeNull();
-  expect(mobileToastBox!.y + mobileToastBox!.height).toBeLessThan(mobileTimelineBox!.y);
+  expect(mobileToastBox!.y + mobileToastBox!.height).toBeLessThanOrEqual(mobileActionBarBox!.y);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-mobile-succession.png', fullPage: false });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('#root').evaluate((element) => { element.scrollTop = 0; });

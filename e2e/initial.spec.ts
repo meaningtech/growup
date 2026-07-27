@@ -22,7 +22,10 @@ test('starts with an empty editable workspace and no bundled local field', async
   await expect(page.locator('.gm-style')).toBeVisible();
   await expect(page.getByText('Oops! Something went wrong.')).toHaveCount(0);
   await expect(page.locator('.topbar')).toHaveCSS('height', '60px');
-  await expect(page.locator('.top-actions > button')).toHaveCount(2);
+  await expect(page.locator('.top-actions > button')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Ask' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open menu' })).toBeVisible();
   const menuBox = await page.getByRole('button', { name: 'Open menu' }).boundingBox();
   expect(menuBox).not.toBeNull();
   expect(1440 - (menuBox!.x + menuBox!.width)).toBeLessThanOrEqual(10);
