@@ -37,6 +37,7 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await expect(page.getByText('Establishment total')).toBeVisible();
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Close assistant' }).click();
   await page.getByTestId('step-analysis').click();
   await page.getByRole('button', { name: 'Run formal review' }).click();
   const report = page.getByTestId('formal-review-report');

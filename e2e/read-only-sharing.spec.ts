@@ -105,7 +105,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(dialog).toContainText('cannot edit, comment, approve, save or overwrite');
   await dialog.getByRole('button', { name: 'Create read-only link' }).click();
   expect(submittedMode).toBe('view');
-  await expect(dialog.getByRole('textbox', { name: 'Active share link' })).toHaveValue('http://127.0.0.1:52174/shared/read-only-token');
+  await expect(dialog.getByRole('textbox', { name: 'Active share link' })).toHaveValue(`${new URL(page.url()).origin}/shared/read-only-token`);
   await expect(dialog).toContainText('View only');
 
   await page.goto('/shared/read-only-token');
