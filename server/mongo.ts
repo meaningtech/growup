@@ -26,7 +26,7 @@ export type GoogleIdentity = {
 
 export type OnboardingPreference = {
   status: 'active' | 'skipped' | 'completed';
-  step: 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'complete';
+  step: 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'water' | 'fire' | 'costs' | 'review' | 'complete';
   updatedAt: string;
   projectName?: string;
 };
@@ -47,7 +47,7 @@ export type GrowupUser = {
   preferences: GrowupUserPreferences;
 };
 
-export type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
+export type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'> & { archivedAt: string | null };
 
 export type GrowupDatabase = {
   health: () => Promise<boolean>;
@@ -58,6 +58,7 @@ export type GrowupDatabase = {
   getProject: (ownerUserId: string, id: string) => Promise<ProjectState | null>;
   getSharedProject: (id: string) => Promise<{ ownerUserId: string; project: ProjectState } | null>;
   listProjects: (ownerUserId: string) => Promise<ProjectSummary[]>;
+  setProjectArchived: (ownerUserId: string, id: string, archivedAt: string | null) => Promise<ProjectSummary>;
   listProjectRevisions: (ownerUserId: string, projectId: string) => Promise<ProjectRevisionSummary[]>;
   getProjectRevision: (ownerUserId: string, projectId: string, revision: number) => Promise<ProjectState | null>;
   getCalculationRun: (ownerUserId: string, projectId: string, calculationRunId: string) => Promise<CalculationSnapshot | null>;
@@ -73,6 +74,7 @@ type ProjectDocument = {
   schemaVersion: number;
   revision: number;
   contentHash: string;
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -215,11 +217,21 @@ export async function getSharedProject(id: string): Promise<{ ownerUserId: strin
 
 export async function listProjects(ownerUserId: string): Promise<ProjectSummary[]> {
   const documents = await projects().then((collection) => collection
-    .find({ ownerUserId }, { projection: { _id: 1, name: 1, updatedAt: 1 } })
+    .find({ ownerUserId }, { projection: { _id: 1, name: 1, updatedAt: 1, archivedAt: 1 } })
     .sort({ updatedAt: -1 })
     .limit(100)
     .toArray());
-  return documents.map((document) => ({ id: document._id, name: document.name, updatedAt: document.updatedAt }));
+  return documents.map((document) => ({ id: document._id, name: document.name, updatedAt: document.updatedAt, archivedAt: document.archivedAt ?? null }));
+}
+
+export async function setProjectArchived(ownerUserId: string, id: string, archivedAt: string | null): Promise<ProjectSummary> {
+  const document = await projects().then((collection) => collection.findOneAndUpdate(
+    { _id: id, ownerUserId },
+    { $set: { archivedAt } },
+    { returnDocument: 'after', projection: { _id: 1, name: 1, updatedAt: 1, archivedAt: 1 } },
+  ));
+  if (!document) throw databaseError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+  return { id: document._id, name: document.name, updatedAt: document.updatedAt, archivedAt: document.archivedAt ?? null };
 }
 
 export async function listProjectRevisions(ownerUserId: string, projectId: string): Promise<ProjectRevisionSummary[]> {
@@ -309,6 +321,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
         schemaVersion: 3,
         revision: artifacts.summary.revision,
         contentHash: artifacts.summary.contentHash,
+        archivedAt: null,
         createdAt: artifacts.state.createdAt,
         updatedAt: artifacts.state.updatedAt,
       });

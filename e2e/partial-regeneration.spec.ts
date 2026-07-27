@@ -32,7 +32,7 @@ test('preserves locked trees and exposes deterministic growth uncertainty during
   expect(regenerated.variant.trees.find((tree) => tree.id === originalTree.id)).toEqual({ ...originalTree, locked: true });
 
   await expect(page.getByTestId('generation-audit')).toContainText('Partial deterministic regeneration');
-  await expect(page.getByTestId('generation-audit')).toContainText('growup-layout-1.2.0');
+  await expect(page.getByTestId('generation-audit')).toContainText('growup-layout-1.3.0');
   await expect(page.getByTestId('generation-audit')).toContainText('1');
   await expect.poll(async () => Number(await page.locator('.map-canvas').getAttribute('data-zoom'))).toBeGreaterThan(15);
   await page.getByTestId('generation-audit').scrollIntoViewIfNeeded();

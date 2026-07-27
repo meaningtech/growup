@@ -12,7 +12,7 @@ import { defaultFireOperationsPlan } from '../src/lib/fireOperations.js';
 import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation.js';
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
 import { distanceToSiteBoundaryM, siteContainsCoordinate } from '../src/lib/siteGeometry.js';
-import type { Evidence, ProjectState, SiteProfile } from '../src/types.js';
+import type { DesignConfiguration, Evidence, ProjectState, SiteProfile } from '../src/types.js';
 import { createApp, type GrowupAppConfig } from './app.js';
 import type { GrowupUser } from './mongo.js';
 import { buildRevisionArtifacts } from './revisions.js';
@@ -399,6 +399,7 @@ describe('Growup API integration', () => {
 
   it('generates a protected layout, calculates costs, persists it and exports evidence geometry', async () => {
     let stored: ProjectState | null = null;
+    let storedArchivedAt: string | null = null;
     let storedUser = testUser;
     const revisionStates: ProjectState[] = [];
     const calculationRuns = new Map<string, ReturnType<typeof buildRevisionArtifacts>['calculation']>();
@@ -414,7 +415,12 @@ describe('Growup API integration', () => {
       },
       getProject: async (ownerUserId, id) => ownerUserId === testUser.id && stored?.id === id ? stored : null,
       getSharedProject: async (id) => stored?.id === id ? { ownerUserId: testUser.id, project: stored } : null,
-      listProjects: async (ownerUserId) => ownerUserId === testUser.id && stored ? [{ id: stored.id, name: stored.name, updatedAt: stored.updatedAt }] : [],
+      listProjects: async (ownerUserId) => ownerUserId === testUser.id && stored ? [{ id: stored.id, name: stored.name, updatedAt: stored.updatedAt, archivedAt: storedArchivedAt }] : [],
+      setProjectArchived: async (ownerUserId, id, archivedAt) => {
+        if (ownerUserId !== testUser.id || id !== stored?.id) throw { code: 404, status: 'PROJECT_NOT_FOUND', message: 'Project not found' };
+        storedArchivedAt = archivedAt;
+        return { id, name: stored.name, updatedAt: stored.updatedAt, archivedAt };
+      },
       listProjectRevisions: async (ownerUserId, projectId) => ownerUserId === testUser.id && projectId === stored?.id
         ? revisionStates.map((state) => buildRevisionArtifacts(testUser.id, state, state.revision ?? 0).summary).reverse()
         : [],
@@ -453,7 +459,7 @@ describe('Growup API integration', () => {
     expect(login.body.user.email).toBe(testUser.email);
     const session = await request(app).get('/api/auth/session').set('Cookie', sessionCookie).expect(200);
     expect(session.body).toEqual(expect.objectContaining({ authenticated: true, user: expect.objectContaining({ id: testUser.id }) }));
-    const onboardingPreference = { status: 'active', step: 'boundary', updatedAt: '2026-07-22T09:00:00.000Z' };
+    const onboardingPreference = { status: 'active', step: 'review', updatedAt: '2026-07-22T09:00:00.000Z' };
     const onboarding = await request(app).put('/api/user/preferences/onboarding').set('Cookie', sessionCookie).send(onboardingPreference).expect(200);
     expect(onboarding.body.preferences.onboarding).toEqual(onboardingPreference);
     const persistedOnboarding = await request(app).get('/api/auth/session').set('Cookie', sessionCookie).expect(200);
@@ -468,6 +474,13 @@ describe('Growup API integration', () => {
       .expect(200);
     const selectedSpeciesIds = recommendationResponse.body.palette.map((species: { id: string }) => species.id);
     expect(selectedSpeciesIds).toHaveLength(9);
+    const speciesMix: DesignConfiguration['speciesMix'] = Object.fromEntries(selectedSpeciesIds.map((id: string, index: number) => [
+      id,
+      {
+        targetPercent: index === 0 ? 50 : 6.25,
+        successionOverride: index === 0 ? 'placenta' : null,
+      },
+    ]));
 
     const layoutResponse = await request(app)
       .post('/api/layout/generate')
@@ -477,6 +490,7 @@ describe('Growup API integration', () => {
         selectedSpeciesIds,
         designConfiguration: {
           ...DEFAULT_DESIGN_CONFIGURATION,
+          speciesMix,
           machinery: { ...DEFAULT_DESIGN_CONFIGURATION.machinery, enabled: true },
           firebreak: {
             ...DEFAULT_DESIGN_CONFIGURATION.firebreak,
@@ -489,6 +503,9 @@ describe('Growup API integration', () => {
       .expect(200);
     expect(layoutResponse.body.variants).toHaveLength(3);
     const variant = layoutResponse.body.variants[0];
+    const pricedSpeciesId = variant.trees[0].speciesId;
+    const economicConfiguration = defaultEconomicConfiguration(profile.location.countryCode ?? '');
+    economicConfiguration.plantUnitCostOverrides[pricedSpeciesId] = 42.35;
     expect(variant.trees.length).toBeGreaterThan(20);
     expect(variant.solar.status).toBe('available');
     expect(variant.solar.cropSolarAccessPercent).toBeGreaterThan(0);
@@ -509,6 +526,16 @@ describe('Growup API integration', () => {
       ]),
     }));
     expect(variant.firebreak.lines).toHaveLength(TEMPERATE_OPEN_FIELD_FIXTURE.polygon.length);
+    expect(variant.machinery.perimeterLoops).toEqual([
+      expect.objectContaining({ closed: true, clearanceSatisfied: true, lengthM: expect.any(Number) }),
+    ]);
+    expect(variant.machinery.manoeuvreRoutes).toEqual([
+      expect.objectContaining({
+        closed: false,
+        clearanceSatisfied: true,
+        connectedCorridorIds: variant.machinery.corridors.map((corridor: { id: string }) => corridor.id),
+      }),
+    ]);
     expect(variant.trees.every((tree: { coordinate: { lat: number; lng: number } }) => (
       distanceToSiteBoundaryM(TEMPERATE_OPEN_FIELD_FIXTURE, tree.coordinate) >= 4.95
     ))).toBe(true);
@@ -578,7 +605,7 @@ describe('Growup API integration', () => {
 
     const costsResponse = await request(app)
       .post('/api/costs/calculate')
-      .send({ variant, site: TEMPERATE_OPEN_FIELD_FIXTURE, siteProfile: profile, selectedSpeciesIds, designYear: 5 })
+      .send({ variant, site: TEMPERATE_OPEN_FIELD_FIXTURE, siteProfile: profile, selectedSpeciesIds, designYear: 5, economicConfiguration })
       .expect(200);
     expect(costsResponse.body.irrigation.annualWaterM3).toBeGreaterThan(0);
     expect(costsResponse.body.irrigation.installation.laborHours).toBeGreaterThan(0);
@@ -589,6 +616,7 @@ describe('Growup API integration', () => {
     expect(costsResponse.body.irrigation.network.totalPurchasePipeM).toBeGreaterThanOrEqual(costsResponse.body.irrigation.network.totalMeasuredPipeM);
     expect(costsResponse.body.establishment.plantingLaborHours).toBeGreaterThan(0);
     expect(costsResponse.body.establishment.totalCost).toBeGreaterThan(0);
+    expect(costsResponse.body.establishment.bySpecies.find((item: { speciesId: string }) => item.speciesId === pricedSpeciesId).unitPlantCost).toBe(42.35);
 
     const fireOperations = defaultFireOperationsPlan(observedAt);
     fireOperations.reviewedAt = observedAt;
@@ -648,6 +676,11 @@ describe('Growup API integration', () => {
     expect(saved.body).toEqual(expect.objectContaining({ revision: 1, revisionId: expect.any(String), calculationRunId: expect.any(String) }));
     const storedResponse = await request(app).get(`/api/projects/${project.id}`).set('Cookie', sessionCookie).expect(200);
     expect(storedResponse.body).toEqual(expect.objectContaining({ id: project.id, revision: 1 }));
+    expect(storedResponse.body.designConfiguration.speciesMix[selectedSpeciesIds[0]]).toEqual({
+      targetPercent: 50,
+      successionOverride: 'placenta',
+    });
+    expect(storedResponse.body.economicConfiguration.plantUnitCostOverrides).toEqual({ [pricedSpeciesId]: 42.35 });
     expect(storedResponse.body.fireOperations).toEqual(expect.objectContaining({
       reviewedAt: observedAt,
       nextInspectionAt: '2026-08-01T08:00:00.000Z',
@@ -669,6 +702,13 @@ describe('Growup API integration', () => {
         message: 'Keep the western firebreak accessible.',
       }),
     ]);
+    const archived = await request(app).patch(`/api/projects/${project.id}/archive`).set('Cookie', sessionCookie).send({ archived: true }).expect(200);
+    expect(archived.body).toEqual(expect.objectContaining({ id: project.id, archivedAt: expect.any(String) }));
+    const archivedList = await request(app).get('/api/projects').set('Cookie', sessionCookie).expect(200);
+    expect(archivedList.body).toEqual([expect.objectContaining({ id: project.id, archivedAt: archived.body.archivedAt })]);
+    const restoredFromArchive = await request(app).patch(`/api/projects/${project.id}/archive`).set('Cookie', sessionCookie).send({ archived: false }).expect(200);
+    expect(restoredFromArchive.body.archivedAt).toBeNull();
+    await request(app).patch(`/api/projects/${project.id}/archive`).set('Cookie', sessionCookie).send({ archived: 'yes' }).expect(400);
     const revisions = await request(app).get(`/api/projects/${project.id}/revisions`).set('Cookie', sessionCookie).expect(200);
     expect(revisions.body).toEqual([expect.objectContaining({ revision: 1, treeCount: variant.trees.length })]);
     const historical = await request(app).get(`/api/projects/${project.id}/revisions/1`).set('Cookie', sessionCookie).expect(200);
@@ -694,6 +734,8 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'existing_woody_vegetation')).toBe(true);
     expect(exportResponse.body.features.filter((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree')).toHaveLength(variant.trees.length);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_corridor')).toBe(true);
+    expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_perimeter_loop')).toBe(true);
+    expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'machinery_manoeuvre_route')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'firebreak')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'review_comment')).toBe(true);
     expect(exportResponse.body.features.some((feature: { properties: { kind: string } }) => feature.properties.kind === 'irrigation_line')).toBe(true);
@@ -701,6 +743,7 @@ describe('Growup API integration', () => {
     expect(exportResponse.body.commentCount).toBe(1);
     expect(exportResponse.body.maintenance).toEqual(expect.objectContaining({ modelVersion: 'growup-maintenance-1.1.0', totalHours: expect.any(Number), totalCost: expect.any(Number) }));
     expect(exportResponse.body.features.find((feature: { properties: { kind: string } }) => feature.properties.kind === 'tree').properties).toEqual(expect.objectContaining({
+      plantCode: expect.stringMatching(/^[A-Z]+\d+$/),
       heightLowM: expect.any(Number),
       heightM: expect.any(Number),
       heightHighM: expect.any(Number),
@@ -715,6 +758,7 @@ describe('Growup API integration', () => {
     expect(csvResponse.headers['content-disposition']).toContain(`${project.id}.csv`);
     const csvLines = csvResponse.text.trim().split('\n');
     expect(csvLines).toHaveLength(variant.trees.length + 1);
+    expect(csvLines[0]).toContain('tree_id,plant_code,species_id');
     expect(csvLines[0]).toContain('unit_purchase_cost,planting_labor_hours,planting_labor_cost');
     expect(csvLines[0]).toContain('height_low_m,height_base_m,height_high_m');
     expect(csvLines[0]).toContain('maintenance_year,maintenance_model,maintenance_phase,maintenance_hours,maintenance_labor_cost');
@@ -806,6 +850,7 @@ describe('Growup API integration', () => {
         getProject: async () => null,
         getSharedProject: async () => null,
         listProjects: async () => [],
+        setProjectArchived: async (_ownerUserId, id, archivedAt) => ({ id, name: 'Project', updatedAt: observedAt, archivedAt }),
         listProjectRevisions: async () => [],
         getProjectRevision: async () => null,
         getCalculationRun: async () => null,
@@ -900,10 +945,12 @@ describe('Growup API integration', () => {
 
   it('runs a structured formal AI review grounded in the complete project context', async () => {
     const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    let formalReviewCalls = 0;
     const app = createApp({
       skipDatabaseMigration: true,
       aiProviderApiKey: 'server-only-test-key',
       fetchImpl: async (_input, init) => {
+        formalReviewCalls += 1;
         const body = JSON.parse(String(init?.body));
         expect(body.messages[0].content).toContain('independent senior agroforestry project reviewer');
         expect(body.messages[0].content).toContain('EFFIS FWI is a regional weather-danger forecast');
@@ -914,33 +961,42 @@ describe('Growup API integration', () => {
         expect(body.messages[1].content).toContain('"irrigationConfiguration"');
         expect(body.messages[1].content).toContain('"waterPointCount"');
         expect(body.max_tokens).toBe(5_000);
+        if (formalReviewCalls === 1) {
+          expect(body.response_format).toEqual({ type: 'json_object' });
+          return new Response(JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: '' } }],
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        expect(body.response_format).toBeUndefined();
+        expect(body.messages.at(-1).content).toContain('previous JSON-mode response was empty');
+        const formalReview = {
+          verdict: 'revise',
+          overallScore: 78,
+          executiveSummary: 'Il progetto è coerente, ma richiede una verifica operativa antincendio.',
+          dimensions: [
+            { id: 'evidence', score: 82, status: 'pass', summary: 'Fonti tracciate.' },
+            { id: 'species', score: 80, status: 'pass', summary: 'Palette compatibile.' },
+            { id: 'design', score: 79, status: 'pass', summary: 'Geometria coerente.' },
+            { id: 'water', score: 76, status: 'attention', summary: 'Confermare la fonte.' },
+            { id: 'fire', score: 62, status: 'attention', summary: 'Serve verifica locale.' },
+            { id: 'operations', score: 68, status: 'attention', summary: 'Checklist aperta.' },
+            { id: 'economics', score: 75, status: 'pass', summary: 'Costi tracciati.' },
+            { id: 'coherence', score: 81, status: 'pass', summary: 'Nessuna contraddizione bloccante.' },
+          ],
+          findings: [{
+            id: 'fire-local-review',
+            severity: 'major',
+            area: 'fire',
+            title: 'Verifica antincendio locale aperta',
+            explanation: 'La fascia è un output progettuale e non prova la realizzazione sul campo.',
+            evidence: ['project.fireOperations.tasks.authority-review', 'selectedVariant.firebreak.localReviewRequired'],
+            recommendation: 'Confermare requisiti AIB e condizioni del combustibile sul campo.',
+          }],
+          assumptions: ['La sorgente irrigua resta disponibile nella stagione secca.'],
+          limitations: ['La revisione AI non costituisce certificazione legale o antincendio.'],
+        };
         return new Response(JSON.stringify({
-          choices: [{ message: { content: JSON.stringify({
-            verdict: 'revise',
-            overallScore: 78,
-            executiveSummary: 'Il progetto è coerente, ma richiede una verifica operativa antincendio.',
-            dimensions: [
-              { id: 'evidence', score: 82, status: 'pass', summary: 'Fonti tracciate.' },
-              { id: 'species', score: 80, status: 'pass', summary: 'Palette compatibile.' },
-              { id: 'design', score: 79, status: 'pass', summary: 'Geometria coerente.' },
-              { id: 'water', score: 76, status: 'attention', summary: 'Confermare la fonte.' },
-              { id: 'fire', score: 62, status: 'attention', summary: 'Serve verifica locale.' },
-              { id: 'operations', score: 68, status: 'attention', summary: 'Checklist aperta.' },
-              { id: 'economics', score: 75, status: 'pass', summary: 'Costi tracciati.' },
-              { id: 'coherence', score: 81, status: 'pass', summary: 'Nessuna contraddizione bloccante.' },
-            ],
-            findings: [{
-              id: 'fire-local-review',
-              severity: 'major',
-              area: 'fire',
-              title: 'Verifica antincendio locale aperta',
-              explanation: 'La fascia è un output progettuale e non prova la realizzazione sul campo.',
-              evidence: ['project.fireOperations.tasks.authority-review', 'selectedVariant.firebreak.localReviewRequired'],
-              recommendation: 'Confermare requisiti AIB e condizioni del combustibile sul campo.',
-            }],
-            assumptions: ['La sorgente irrigua resta disponibile nella stagione secca.'],
-            limitations: ['La revisione AI non costituisce certificazione legale o antincendio.'],
-          }) } }],
+          choices: [{ finish_reason: 'stop', message: { content: `\`\`\`json\n${JSON.stringify(formalReview)}\n\`\`\`` } }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       },
     });
@@ -975,6 +1031,7 @@ describe('Growup API integration', () => {
       severity: 'major',
       area: 'fire',
     }));
+    expect(formalReviewCalls).toBe(2);
   });
 
   it('retries only transient AI-provider failures and classifies provider timeouts', async () => {
@@ -1024,10 +1081,13 @@ describe('Growup API integration', () => {
         expect(body.thinking).toEqual({ type: 'disabled' });
         expect(body.max_tokens).toBeGreaterThanOrEqual(2_500);
         if (emptyJsonCalls === 1) {
+          expect(body.response_format).toEqual({ type: 'json_object' });
           return new Response(JSON.stringify({
             choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'internal reasoning omitted' } }],
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
+        expect(body.response_format).toBeUndefined();
+        expect(body.messages.at(-1).content).toContain('previous JSON-mode response was empty');
         return new Response(JSON.stringify({
           choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: 'No changes required.', rationale: 'The current project remains valid.', warnings: [], actions: [] }) } }],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });

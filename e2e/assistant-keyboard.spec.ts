@@ -34,8 +34,8 @@ test('submits the assistant request with Enter and keeps Shift+Enter as a line b
         summary: 'Keyboard request received',
         rationale: 'The request was submitted from the composer.',
         warnings: [],
-        actions: [],
-        requiresConfirmation: false,
+        actions: [{ type: 'set_timeline_year', year: 10 }],
+        requiresConfirmation: true,
       },
     });
   });
@@ -66,4 +66,13 @@ test('submits the assistant request with Enter and keeps Shift+Enter as a line b
   await composer.press('Enter');
   await expect(page.getByTestId('assistant-proposal')).toContainText('Keyboard request received');
   expect(submittedMessage).toBe('First line\nSecond line');
+  await expect(page.locator('.assistant-user-message')).toContainText('First line');
+  await expect(composer).toHaveValue('');
+
+  await Promise.all([
+    expect(page.getByTestId('assistant-apply-progress')).toContainText('Applying changes'),
+    page.getByRole('button', { name: 'Apply validated changes' }).click(),
+  ]);
+  await expect(page.getByTestId('assistant-proposal')).toContainText('Changes applied to the project');
+  await expect(page.getByTestId('assistant-proposal')).toContainText('Keyboard request received');
 });

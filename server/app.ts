@@ -36,6 +36,7 @@ import {
   getUser,
   listProjectRevisions,
   listProjects,
+  setProjectArchived,
   mongoHealth,
   saveProject,
   updateUserOnboarding,
@@ -66,6 +67,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     getProject,
     getSharedProject,
     listProjects,
+    setProjectArchived,
     listProjectRevisions,
     getProjectRevision,
     getCalculationRun,
@@ -308,6 +310,14 @@ export function createApp(config: GrowupAppConfig = {}) {
       const project = await database.getProject(user.id, paramValue(req.params.id));
       if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
       return project;
+    });
+  });
+
+  app.patch('/api/projects/:id/archive', async (req: Request, res: Response) => {
+    await handle(res, async () => {
+      const user = await requireAuthenticatedUser(req, database, config);
+      if (typeof req.body?.archived !== 'boolean') throw httpError(400, 'INVALID_ARCHIVE_STATE', 'archived must be a boolean');
+      return database.setProjectArchived(user.id, paramValue(req.params.id), req.body.archived ? new Date().toISOString() : null);
     });
   });
 
@@ -619,7 +629,7 @@ function requireOnboardingPreference(value: unknown): OnboardingPreference {
   if (!value || typeof value !== 'object') throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'An onboarding preference is required.');
   const preference = value as Partial<OnboardingPreference>;
   const statuses = ['active', 'skipped', 'completed'];
-  const steps = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'complete'];
+  const steps = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'complete'];
   if (!statuses.includes(String(preference.status)) || !steps.includes(String(preference.step)) || Number.isNaN(Date.parse(String(preference.updatedAt)))) {
     throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'The onboarding preference is invalid.');
   }

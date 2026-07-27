@@ -1,4 +1,6 @@
-export type OnboardingStep = 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'complete';
+export const ONBOARDING_STEPS = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'complete'] as const;
+
+export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 
 export type OnboardingPreference = {
   status: 'active' | 'skipped' | 'completed';
@@ -46,8 +48,7 @@ export function normalizeOnboardingPreference(value: unknown): OnboardingPrefere
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<OnboardingPreference>;
   const statuses: OnboardingPreference['status'][] = ['active', 'skipped', 'completed'];
-  const steps: OnboardingStep[] = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'complete'];
-  if (!statuses.includes(candidate.status as OnboardingPreference['status']) || !steps.includes(candidate.step as OnboardingStep) || Number.isNaN(Date.parse(String(candidate.updatedAt)))) return null;
+  if (!statuses.includes(candidate.status as OnboardingPreference['status']) || !ONBOARDING_STEPS.includes(candidate.step as OnboardingStep) || Number.isNaN(Date.parse(String(candidate.updatedAt)))) return null;
   if (candidate.projectName !== undefined && (typeof candidate.projectName !== 'string' || candidate.projectName.length > 120)) return null;
   return { status: candidate.status!, step: candidate.step!, updatedAt: candidate.updatedAt!, ...(candidate.projectName ? { projectName: candidate.projectName } : {}) };
 }

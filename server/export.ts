@@ -1,5 +1,6 @@
 import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies.js';
 import { growthState } from '../src/lib/growth.js';
+import { plantPositionCode } from '../src/lib/plantIdentity.js';
 import type { Coordinate, LayoutVariant, ProjectState } from '../src/types.js';
 
 type GeoJsonGeometry =
@@ -107,7 +108,7 @@ export function exportProjectCsv(project: ProjectState): string {
   const variant = selectedVariant(project);
   const headers = [
     'project_id', 'project_name', 'variant_id', 'generation_mode', 'generation_seed', 'growth_year',
-    'tree_id', 'species_id', 'scientific_name', 'common_name', 'latitude', 'longitude', 'row_index',
+    'tree_id', 'plant_code', 'species_id', 'scientific_name', 'common_name', 'latitude', 'longitude', 'row_index',
     'position_index', 'planted_year', 'removed_year', 'locked', 'active', 'height_low_m', 'height_base_m',
     'height_high_m', 'crown_low_m', 'crown_base_m', 'crown_high_m', 'growth_model', 'growth_confidence',
     'currency_code', 'unit_purchase_cost', 'planting_labor_hours', 'planting_labor_cost',
@@ -137,6 +138,7 @@ export function exportProjectCsv(project: ProjectState): string {
         variant.generation.seed,
         year,
         tree.id,
+        plantPositionCode(tree),
         tree.speciesId,
         species?.scientificName ?? '',
         species?.commonName ?? '',
@@ -187,6 +189,7 @@ function appendVariantFeatures(features: GeoJsonFeature[], variant: LayoutVarian
       features.push(pointFeature(tree.coordinate, {
         kind: 'tree',
         id: tree.id,
+        plantCode: plantPositionCode(tree),
         speciesId: tree.speciesId,
         scientificName: species?.scientificName ?? null,
         commonName: species?.commonName ?? null,
@@ -215,6 +218,30 @@ function appendVariantFeatures(features: GeoJsonFeature[], variant: LayoutVarian
   [...variant.machinery.turningAreas].sort(byId).forEach((area) => features.push(pointFeature(area.center, {
     kind: 'machinery_turning_area', id: area.id, radiusM: area.radiusM, rowIndexes: area.rowIndexes,
   })));
+  [...(variant.machinery.perimeterLoops ?? [])].sort(byId).forEach((route) => features.push({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: route.points.map(coordinatePair) },
+    properties: {
+      kind: 'machinery_perimeter_loop',
+      id: route.id,
+      widthM: route.widthM,
+      lengthM: route.lengthM,
+      closed: route.closed,
+      clearanceSatisfied: route.clearanceSatisfied,
+    },
+  }));
+  [...(variant.machinery.manoeuvreRoutes ?? [])].sort(byId).forEach((route) => features.push({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: route.points.map(coordinatePair) },
+    properties: {
+      kind: 'machinery_manoeuvre_route',
+      id: route.id,
+      widthM: route.widthM,
+      lengthM: route.lengthM,
+      connectedCorridorIds: route.connectedCorridorIds,
+      clearanceSatisfied: route.clearanceSatisfied,
+    },
+  }));
   [...(variant.firebreak?.lines ?? [])].sort(byId).forEach((line) => features.push({
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: line.points.map(coordinatePair) },

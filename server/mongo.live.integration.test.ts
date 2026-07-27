@@ -20,6 +20,7 @@ import {
   getUser,
   listProjectRevisions,
   listProjects,
+  setProjectArchived,
   mongoDatabase,
   mongoHealth,
   saveProject,
@@ -55,7 +56,7 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, updateUserOnboarding, getProject, getSharedProject, listProjects, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
+    const database = { health: mongoHealth, geometryMetrics, getUser, upsertUser, updateUserOnboarding, getProject, getSharedProject, listProjects, setProjectArchived, listProjectRevisions, getProjectRevision, getCalculationRun, saveProject };
     const app = createApp({
       database,
       skipDatabaseMigration: true,

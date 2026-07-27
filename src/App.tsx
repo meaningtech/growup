@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   ArrowRight,
   Ban,
@@ -14,6 +16,8 @@ import {
   Database,
   Download,
   Droplets,
+  Eye,
+  EyeOff,
   Flame,
   FlaskConical,
   FolderOpen,
@@ -64,6 +68,9 @@ import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } fr
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration } from './lib/layout';
+import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
+import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
+import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
 import { projectAnalysisFingerprint } from './lib/projectAnalysis';
 import {
@@ -83,6 +90,7 @@ import {
   latestOnboardingPreference,
   newOnboardingPreference,
   normalizeOnboardingPreference,
+  ONBOARDING_STEPS,
   readOnboardingPreference,
   writeOnboardingPreference,
   type OnboardingPreference,
@@ -123,6 +131,15 @@ import type {
 
 type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
 type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'path' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
+type AssistantTurnStatus = 'pending' | 'applied' | 'dismissed' | 'replaced';
+type AssistantActivity = 'asking' | 'applying' | null;
+type AssistantApplyStage = 'preparing' | 'layout' | 'calculations' | 'finalizing';
+type AssistantConversationTurn = {
+  id: string;
+  prompt: string;
+  proposal: AssistantProposal;
+  status: AssistantTurnStatus;
+};
 
 type AppConfig = {
   googleMapsApiKey: string;
@@ -147,13 +164,18 @@ type AuthUser = {
 };
 
 type AuthSession = { authenticated: boolean; configured: boolean; user: AuthUser | null };
-type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'>;
+type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'> & { archivedAt: string | null };
 type ShareResponse = {
   enabled: boolean;
   mode?: 'view' | 'review';
   expiresAt?: string | null;
   path?: string;
   project: ProjectState;
+};
+type ProjectShareTarget = {
+  id: string;
+  name: string;
+  response: ShareResponse | null;
 };
 type SaveStatus = 'idle' | 'local' | 'unsaved' | 'saving' | 'saved' | 'conflict';
 
@@ -187,6 +209,18 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'analysis', label: 'Analysis', icon: ClipboardCheck },
 ];
+
+function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | null {
+  if (step === 'location' || step === 'boundary') return 'site';
+  if (step === 'analysis') return 'profile';
+  if (step === 'species') return 'species';
+  if (step === 'design') return 'layout';
+  if (step === 'water') return 'water';
+  if (step === 'fire') return 'fire';
+  if (step === 'costs') return 'costs';
+  if (step === 'review' || step === 'complete') return 'analysis';
+  return null;
+}
 
 export default function App() {
   const sharedToken = window.location.pathname.match(/^\/shared\/([^/]+)$/)?.[1] ?? null;
@@ -242,6 +276,8 @@ function SharedProjectPage({ token }: { token: string }) {
       for (const tree of variant?.trees ?? []) {
         const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
         if (!species) continue;
+        const displayName = speciesDisplayName(species, t);
+        const plantCode = plantPositionCode(tree);
         overlaysRef.current.push(new maps.Circle({
           map,
           center: tree.coordinate,
@@ -252,6 +288,29 @@ function SharedProjectPage({ token }: { token: string }) {
           fillColor: species.color,
           fillOpacity: 0.82,
           clickable: false,
+        }));
+        overlaysRef.current.push(new maps.Marker({
+          map,
+          position: tree.coordinate,
+          clickable: false,
+          title: `${plantCode} · ${displayName} · ${species.scientificName}`,
+          label: {
+            text: plantSpeciesInitials(displayName, locale),
+            color: plantMarkerLabelColor(species.color),
+            fontFamily: 'DM Mono, monospace',
+            fontSize: '9px',
+            fontWeight: '800',
+          },
+          icon: {
+            path: maps.SymbolPath.CIRCLE,
+            scale: 9,
+            fillColor: species.color,
+            fillOpacity: 0.96,
+            strokeColor: '#ffffff',
+            strokeOpacity: 0.95,
+            strokeWeight: 1.5,
+          },
+          zIndex: 32,
         }));
       }
       for (const line of variant?.firebreak?.lines ?? []) {
@@ -284,7 +343,7 @@ function SharedProjectPage({ token }: { token: string }) {
       overlaysRef.current.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
     };
-  }, [config, project]);
+  }, [config, locale, project, t]);
 
   async function submitComment() {
     if (!reviewerName.trim() || !message.trim()) return;
@@ -383,11 +442,17 @@ function WorkspaceApp() {
   const [showInfrastructure, setShowInfrastructure] = useState(true);
   const [showObservedTrees, setShowObservedTrees] = useState(true);
   const [showPlannedTrees, setShowPlannedTrees] = useState(true);
+  const [hiddenPlannedSpeciesIds, setHiddenPlannedSpeciesIds] = useState<string[]>([]);
   const [showMachinery, setShowMachinery] = useState(true);
   const [showFirebreaks, setShowFirebreaks] = useState(true);
   const [showFireWeather, setShowFireWeather] = useState(false);
   const [showWind, setShowWind] = useState(true);
+  const [showSolarExposure, setShowSolarExposure] = useState(false);
+  const [solarMonth, setSolarMonth] = useState(7);
+  const [solarHour, setSolarHour] = useState(12);
   const [showIrrigation, setShowIrrigation] = useState(true);
+  const [showSupplyPipes, setShowSupplyPipes] = useState(true);
+  const [showDripLaterals, setShowDripLaterals] = useState(true);
   const [editingIrrigation, setEditingIrrigation] = useState(false);
   const [busy, setBusy] = useState<string | null>(() => t('busy.loading'));
   const [error, setError] = useState<string | null>(null);
@@ -400,7 +465,10 @@ function WorkspaceApp() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantInput, setAssistantInput] = useState('');
   const [assistantProposal, setAssistantProposal] = useState<AssistantProposal | null>(null);
-  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantTurns, setAssistantTurns] = useState<AssistantConversationTurn[]>([]);
+  const [assistantPendingPrompt, setAssistantPendingPrompt] = useState<string | null>(null);
+  const [assistantActivity, setAssistantActivity] = useState<AssistantActivity>(null);
+  const [assistantApplyStage, setAssistantApplyStage] = useState<AssistantApplyStage>('preparing');
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -413,11 +481,14 @@ function WorkspaceApp() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [revisions, setRevisions] = useState<ProjectRevisionSummary[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(() => window.location.pathname === '/projects');
+  const [projectArchiveBusyId, setProjectArchiveBusyId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [collaborationOpen, setCollaborationOpen] = useState(false);
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
+  const [projectShareTarget, setProjectShareTarget] = useState<ProjectShareTarget | null>(null);
+  const [projectShareBusy, setProjectShareBusy] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<ProjectState | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingPreference | null>(() => readOnboardingPreference(window.localStorage) ?? newOnboardingPreference());
@@ -439,6 +510,7 @@ function WorkspaceApp() {
   const firebreakOverlaysRef = useRef<any[]>([]);
   const fireWeatherOverlayRef = useRef<any>(null);
   const windOverlaysRef = useRef<any[]>([]);
+  const solarOverlaysRef = useRef<any[]>([]);
   const waterOverlaysRef = useRef<any[]>([]);
   const irrigationNetworkOverlaysRef = useRef<any[]>([]);
   const ndmiOverlayRef = useRef<any>(null);
@@ -457,6 +529,16 @@ function WorkspaceApp() {
   const selectedSpecies = useMemo(
     () => selectedSpeciesIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item)),
     [selectedSpeciesIds],
+  );
+  const dailySolarExposure = useMemo(
+    () => siteProfile && selectedVariant
+      ? simulateDailyPlantExposure(siteProfile, selectedVariant, selectedSpecies, solarMonth, timelineYear)
+      : null,
+    [selectedSpecies, selectedVariant, siteProfile, solarMonth, timelineYear],
+  );
+  const selectedSolarExposureHour = useMemo(
+    () => dailySolarExposure?.hours.find((hour) => hour.localSolarHour === solarHour) ?? null,
+    [dailySolarExposure, solarHour],
   );
   const selectedTree = selectedVariant?.trees.find((tree) => tree.id === selectedTreeId) ?? null;
 
@@ -544,6 +626,12 @@ function WorkspaceApp() {
   }, [mobileMenuOpen]);
 
   useEffect(() => {
+    const syncProjectsRoute = () => setProjectsOpen(window.location.pathname === '/projects');
+    window.addEventListener('popstate', syncProjectsRoute);
+    return () => window.removeEventListener('popstate', syncProjectsRoute);
+  }, []);
+
+  useEffect(() => {
     const viewport = window.visualViewport;
     const updateViewportHeight = () => {
       document.documentElement.style.setProperty('--growup-viewport-height', `${Math.round(viewport?.height ?? window.innerHeight)}px`);
@@ -578,22 +666,18 @@ function WorkspaceApp() {
     if (onboarding?.status !== 'active') return;
     if (onboarding.step === 'boundary' && site) {
       updateOnboarding('active', 'analysis');
-      setSection('site');
     } else if (onboarding.step === 'analysis' && siteProfile) {
       updateOnboarding('active', 'species');
-      setSection('species');
     } else if (onboarding.step === 'species' && selectedVariant) {
       updateOnboarding('active', 'design');
-      setSection('layout');
-    } else if (onboarding.step === 'design' && irrigation && costs) {
-      updateOnboarding('active', 'complete');
-      setSection('costs');
     }
-  }, [onboarding?.status, onboarding?.step, site, siteProfile, selectedVariant, irrigation, costs]);
+  }, [onboarding?.status, onboarding?.step, site, siteProfile, selectedVariant]);
 
   useEffect(() => {
-    if (onboarding?.status !== 'active' || onboarding.step !== 'location') return;
-    setSection('site');
+    if (onboarding?.status !== 'active') return;
+    const target = onboardingWorkspaceSection(onboarding.step);
+    if (target) setSection(target);
+    if (onboarding.step !== 'location') return;
     const timer = window.setTimeout(() => {
       document.querySelector('.location-search')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 120);
@@ -867,6 +951,31 @@ function WorkspaceApp() {
     machineryOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     machineryOverlaysRef.current = [];
     if (!selectedVariant?.machinery.enabled || !showMachinery) return;
+    for (const loop of selectedVariant.machinery.perimeterLoops ?? []) {
+      for (let index = 0; index < loop.points.length - 1; index += 1) {
+        machineryOverlaysRef.current.push(new maps.Polygon({
+          map,
+          paths: corridorSegmentPolygon(loop.points[index], loop.points[index + 1], loop.widthM),
+          strokeColor: loop.clearanceSatisfied ? '#7c481d' : '#9f2f22',
+          strokeOpacity: 0.9,
+          strokeWeight: 1,
+          fillColor: loop.clearanceSatisfied ? '#f0c36b' : '#e36d54',
+          fillOpacity: 0.38,
+          clickable: false,
+          zIndex: 16,
+        }));
+      }
+      machineryOverlaysRef.current.push(new maps.Polyline({
+        map,
+        path: loop.points,
+        strokeColor: '#5c3517',
+        strokeOpacity: 0.88,
+        strokeWeight: 2,
+        icons: [{ icon: { path: 'M -2,-1 0,1 2,-1', strokeColor: '#fff2c2', strokeOpacity: 1, strokeWeight: 1.5, scale: 1.6 }, offset: '12px', repeat: '28px' }],
+        clickable: false,
+        zIndex: 19,
+      }));
+    }
     for (const corridor of selectedVariant.machinery.corridors) {
       for (let index = 0; index < corridor.points.length - 1; index += 1) {
         machineryOverlaysRef.current.push(new maps.Polygon({
@@ -904,6 +1013,18 @@ function WorkspaceApp() {
         fillOpacity: 0.48,
         clickable: false,
         zIndex: 18,
+      }));
+    }
+    for (const route of selectedVariant.machinery.manoeuvreRoutes ?? []) {
+      machineryOverlaysRef.current.push(new maps.Polyline({
+        map,
+        path: route.points,
+        strokeColor: route.clearanceSatisfied ? '#c7e36f' : '#ffcab8',
+        strokeOpacity: 0.96,
+        strokeWeight: 4,
+        icons: [{ icon: { path: 'M -2,-1 0,1 2,-1', strokeColor: '#10281e', strokeOpacity: 1, strokeWeight: 1.6, scale: 1.55 }, offset: '14px', repeat: '34px' }],
+        clickable: false,
+        zIndex: 21,
       }));
     }
     return () => machineryOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
@@ -1011,39 +1132,141 @@ function WorkspaceApp() {
   useEffect(() => {
     const map = mapRef.current;
     const maps = window.google?.maps;
+    solarOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    solarOverlaysRef.current = [];
+    if (!map || !maps || !showSolarExposure || !selectedSolarExposureHour || !siteProfile) return;
+    if (selectedSolarExposureHour.elevationDegrees <= 0 || selectedSolarExposureHour.estimatedHorizontalWm2 < 5) return;
+
+    for (const plant of selectedSolarExposureHour.plants) {
+      if (plant.shadowPolygon.length >= 3) {
+        solarOverlaysRef.current.push(new maps.Polygon({
+          map,
+          paths: plant.shadowPolygon,
+          strokeColor: '#183242',
+          strokeOpacity: 0.34,
+          strokeWeight: 1,
+          fillColor: '#1b2b3a',
+          fillOpacity: plant.status === 'shaded' ? 0.23 : 0.15,
+          clickable: false,
+          zIndex: 14,
+          growupLayer: 'solar-shadow',
+        }));
+      }
+      const tree = selectedVariant?.trees.find((candidate) => candidate.id === plant.treeId);
+      if (!tree) continue;
+      solarOverlaysRef.current.push(new maps.Circle({
+        map,
+        center: tree.coordinate,
+        radius: plant.status === 'shaded' ? 1.25 : 0.95,
+        strokeColor: plant.status === 'shaded' ? '#9fd8ed' : '#fff2a8',
+        strokeOpacity: 1,
+        strokeWeight: 2,
+        fillColor: plant.status === 'shaded' ? '#2a708d' : '#f3bd42',
+        fillOpacity: 0.72,
+        clickable: false,
+        zIndex: 34,
+        growupLayer: 'solar-plant-status',
+      }));
+    }
+
+    const [sunward, groundward] = windVectorCoordinates(
+      siteProfile.centroid,
+      selectedSolarExposureHour.azimuthDegrees,
+      Math.max(30, Math.sqrt(siteProfile.areaM2) * 0.55),
+    );
+    solarOverlaysRef.current.push(new maps.Polyline({
+      map,
+      path: [sunward, groundward],
+      strokeColor: '#f6c64f',
+      strokeOpacity: 0.92,
+      strokeWeight: 3,
+      icons: [{
+        icon: {
+          path: maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          fillColor: '#fff2a8',
+          fillOpacity: 1,
+          strokeColor: '#674b0b',
+          strokeOpacity: 1,
+          strokeWeight: 1,
+          scale: 4,
+        },
+        offset: '100%',
+      }],
+      clickable: false,
+      zIndex: 18,
+      growupLayer: 'solar-direction',
+    }));
+
+    return () => solarOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [selectedSolarExposureHour, selectedVariant, showSolarExposure, siteProfile]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
     if (!map || !maps) return;
     treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     treeOverlaysRef.current = [];
     if (!selectedVariant || !showPlannedTrees) return;
+    const visibleSpeciesIds = new Set(selectedVariant.trees.map((tree) => tree.speciesId).filter((speciesId) => !hiddenPlannedSpeciesIds.includes(speciesId)));
+    const focusedSpeciesId = visibleSpeciesIds.size === 1 ? [...visibleSpeciesIds][0] : null;
     for (const tree of selectedVariant.trees) {
       const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
-      if (!species) continue;
+      if (!species || hiddenPlannedSpeciesIds.includes(tree.speciesId)) continue;
       const state = growthState(species, tree, timelineYear);
       if (!state.active) continue;
       const selected = tree.id === selectedTreeId || selectedTreeIds.includes(tree.id);
-      const crown = new maps.Circle({
-        map,
-        center: tree.coordinate,
-        radius: Math.max(0.35, state.crownDiameterM / 2),
-        strokeColor: selected ? '#ffffff' : species.color,
-        strokeOpacity: selected ? 1 : 0.82,
-        strokeWeight: selected ? 3 : tree.locked ? 2 : 1,
-        fillColor: species.color,
-        fillOpacity: selected ? 0.78 : 0.5,
-        clickable: true,
-        zIndex: selected ? 45 : 20 + stratumOrder(species.stratum),
-      });
-      crown.addListener('click', (event: any) => {
+      const focused = focusedSpeciesId === tree.speciesId;
+      const displayName = speciesDisplayName(species, t);
+      const plantCode = plantPositionCode(tree);
+      const selectMapTree = (event: any) => {
         setSelectedTreeId(tree.id);
         setSelectedTreeIds((ids) => event?.domEvent?.shiftKey
           ? ids.includes(tree.id) ? ids.filter((id) => id !== tree.id) : [...ids, tree.id]
           : [tree.id]);
         setTreeSpeciesId(tree.speciesId);
+        setSection('layout');
+      };
+      const crown = new maps.Circle({
+        map,
+        center: tree.coordinate,
+        radius: Math.max(0.35, state.crownDiameterM / 2),
+        strokeColor: selected ? '#ffffff' : focused ? '#d7ff83' : species.color,
+        strokeOpacity: selected || focused ? 1 : 0.82,
+        strokeWeight: selected ? 3 : focused ? 2.5 : tree.locked ? 2 : 1,
+        fillColor: species.color,
+        fillOpacity: selected || focused ? 0.78 : 0.5,
+        clickable: true,
+        zIndex: selected ? 45 : 20 + stratumOrder(species.stratum),
       });
-      treeOverlaysRef.current.push(crown);
+      crown.addListener('click', selectMapTree);
+      const point = new maps.Marker({
+        map,
+        position: tree.coordinate,
+        clickable: true,
+        title: `${plantCode} · ${displayName} · ${species.scientificName}`,
+        label: {
+          text: plantSpeciesInitials(displayName, locale),
+          color: plantMarkerLabelColor(species.color),
+          fontFamily: 'DM Mono, monospace',
+          fontSize: selected ? '10px' : '9px',
+          fontWeight: '800',
+        },
+        icon: {
+          path: maps.SymbolPath.CIRCLE,
+          scale: selected ? 11 : 9,
+          fillColor: species.color,
+          fillOpacity: 0.98,
+          strokeColor: selected ? '#ffffff' : focused ? '#d7ff83' : '#17351f',
+          strokeOpacity: 1,
+          strokeWeight: selected ? 3 : focused ? 2.5 : 1.5,
+        },
+        zIndex: selected ? 65 : 35 + stratumOrder(species.stratum),
+      });
+      point.addListener('click', selectMapTree);
+      treeOverlaysRef.current.push(crown, point);
     }
     return () => treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [selectedVariant, timelineYear, selectedTreeId, selectedTreeIds, showPlannedTrees]);
+  }, [hiddenPlannedSpeciesIds, locale, selectedVariant, timelineYear, selectedTreeId, selectedTreeIds, showPlannedTrees, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1053,6 +1276,8 @@ function WorkspaceApp() {
     irrigationNetworkOverlaysRef.current = [];
     if (!irrigation || !showIrrigation) return;
     for (const line of irrigation.network.lines) {
+      const supplyLine = line.kind !== 'lateral';
+      if ((supplyLine && !showSupplyPipes) || (!supplyLine && !showDripLaterals)) continue;
       const blocked = line.routingStatus === 'blocked';
       const color = blocked ? '#d24f3d' : line.kind === 'mainline' ? '#1c5f88' : line.kind === 'submain' ? '#278c9e' : line.kind === 'protected-crossing' ? '#f0a536' : '#61b9c7';
       const editable = editingIrrigation && line.kind !== 'protected-crossing';
@@ -1074,30 +1299,32 @@ function WorkspaceApp() {
       });
       irrigationNetworkOverlaysRef.current.push(overlay);
     }
-    const sourceMarker = new maps.Marker({
-      map,
-      position: irrigation.network.source.coordinate,
-      draggable: true,
-      clickable: true,
-      cursor: 'grab',
-      title: t('map.dragWaterSource'),
-      label: { text: 'S', color: '#ffffff', fontFamily: 'DM Mono, monospace', fontSize: '10px', fontWeight: '700' },
-      icon: { path: maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#15557a', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
-      zIndex: 38,
-    });
-    sourceMarker.addListener('dragend', (event: any) => {
-      if (!event.latLng || !site) return;
-      const coordinate = coordinateFromLatLng(event.latLng);
-      if (!siteContainsCoordinate(site, coordinate)) {
-        sourceMarker.setPosition(irrigation.network.source.coordinate);
-        showBoundaryGuidance();
-        return;
-      }
-      void relocateWaterSource(coordinate);
-    });
-    irrigationNetworkOverlaysRef.current.push(sourceMarker);
+    if (showSupplyPipes) {
+      const sourceMarker = new maps.Marker({
+        map,
+        position: irrigation.network.source.coordinate,
+        draggable: editingIrrigation,
+        clickable: editingIrrigation,
+        cursor: editingIrrigation ? 'grab' : 'default',
+        title: editingIrrigation ? t('map.dragWaterSource') : t('map.waterSource'),
+        label: { text: 'S', color: '#ffffff', fontFamily: 'DM Mono, monospace', fontSize: '10px', fontWeight: '700' },
+        icon: { path: maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#15557a', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
+        zIndex: 38,
+      });
+      if (editingIrrigation) sourceMarker.addListener('dragend', (event: any) => {
+        if (!event.latLng || !site) return;
+        const coordinate = coordinateFromLatLng(event.latLng);
+        if (!siteContainsCoordinate(site, coordinate)) {
+          sourceMarker.setPosition(irrigation.network.source.coordinate);
+          showBoundaryGuidance();
+          return;
+        }
+        void relocateWaterSource(coordinate);
+      });
+      irrigationNetworkOverlaysRef.current.push(sourceMarker);
+    }
     return () => irrigationNetworkOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [editingIrrigation, irrigation, showIrrigation, site, t]);
+  }, [editingIrrigation, irrigation, showDripLaterals, showIrrigation, showSupplyPipes, site, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1347,6 +1574,10 @@ function WorkspaceApp() {
       setEconomicConfiguration(economics);
       setRecommendations(result.recommendations);
       const palette = result.palette.map((species) => species.id);
+      setDesignConfiguration((configuration) => normalizeDesignConfiguration({
+        ...configuration,
+        speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, palette, configuration.speciesMix),
+      }));
       setSelectedSpeciesIds(palette);
       setTreeSpeciesId(palette[0] ?? '');
       setShowWaterSamples(false);
@@ -1384,6 +1615,7 @@ function WorkspaceApp() {
     await runBusy(t('busy.generatingDesigns'), async () => {
       const result = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds, designConfiguration }));
       setVariants(result.variants);
+      setHiddenPlannedSpeciesIds([]);
       setSelectedVariantId(result.variants[0]?.id ?? null);
       setSection('layout');
       setTimelineYear(5);
@@ -1435,18 +1667,29 @@ function WorkspaceApp() {
   }
 
   async function recalculateWaterAndCosts(activeSite: SiteBoundary, activeConfiguration: IrrigationConfiguration, designYear: number, successNotice: string) {
-    await runBusy(t('busy.sizingWaterCosts'), async () => {
+    return Boolean(await runBusy(t('busy.sizingWaterCosts'), async () => {
       const result = await requestWaterAndCosts(activeSite, activeConfiguration, designYear);
       setIrrigation(result.irrigation);
       setCosts(result.establishment);
       setNotice(successNotice);
-    });
+      return true;
+    }));
   }
 
   async function calculateWaterAndCosts() {
     if (!selectedVariant || !site || !siteProfile) return setError(t('errors.generateLayoutFirst'));
-    await recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.waterCostsReady'));
+    const calculated = await recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.waterCostsReady'));
+    if (calculated && onboarding?.status === 'active' && onboarding.step === 'water') {
+      updateOnboarding('active', 'fire');
+      return;
+    }
     setSection('water');
+  }
+
+  async function recalculateCosts() {
+    if (!selectedVariant || !site || !siteProfile) return setError(t('errors.generateLayoutFirst'));
+    const calculated = await recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.waterCostsReady'));
+    if (calculated) setSection('costs');
   }
 
   async function relocateWaterSource(coordinate: Coordinate, requestedPointId?: string) {
@@ -1540,17 +1783,24 @@ function WorkspaceApp() {
   async function askAssistant(prompt = assistantInput) {
     const message = prompt.trim();
     if (!message) return;
-    setAssistantBusy(true);
+    if (assistantProposal) {
+      setAssistantTurns((turns) => turns.map((turn) => turn.id === assistantProposal.id ? { ...turn, status: 'replaced' } : turn));
+      setAssistantProposal(null);
+    }
+    setAssistantActivity('asking');
+    setAssistantPendingPrompt(message);
+    setAssistantInput('');
     setAssistantError(null);
-    setAssistantProposal(null);
     try {
       const proposal = await api<AssistantProposal>('/api/assistant/plan', post({ message, context: currentAssistantContext() }));
       setAssistantProposal(proposal);
-      setAssistantInput(message);
+      setAssistantTurns((turns) => [...turns, { id: proposal.id, prompt: message, proposal, status: 'pending' }]);
     } catch (assistantRequestError) {
       setAssistantError(messageOf(assistantRequestError));
+      setAssistantInput(message);
     } finally {
-      setAssistantBusy(false);
+      setAssistantPendingPrompt(null);
+      setAssistantActivity(null);
     }
   }
 
@@ -1564,6 +1814,7 @@ function WorkspaceApp() {
         context: currentAssistantContext(),
       }));
       setProjectAnalysis(report);
+      if (onboarding?.status === 'active' && onboarding.step === 'review') updateOnboarding('active', 'complete');
     } catch (reviewError) {
       setAnalysisError(messageOf(reviewError));
     } finally {
@@ -1573,7 +1824,10 @@ function WorkspaceApp() {
 
   async function applyAssistantProposal() {
     if (!assistantProposal) return;
-    setAssistantBusy(true);
+    const proposalId = assistantProposal.id;
+    const applyingStartedAt = Date.now();
+    setAssistantActivity('applying');
+    setAssistantApplyStage('preparing');
     setAssistantError(null);
     try {
       const actions = assistantProposal.actions;
@@ -1591,9 +1845,15 @@ function WorkspaceApp() {
         if (action.type === 'select_variant') nextVariantId = action.variantId;
         if (action.type === 'navigate') nextSection = action.section;
       }
-      const minimumSpecies = designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2;
-      if (nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
       const speciesChanged = nextSpeciesIds.join('|') !== selectedSpeciesIds.join('|');
+      const nextDesignConfiguration = speciesChanged
+        ? normalizeDesignConfiguration({
+          ...designConfiguration,
+          speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, designConfiguration.speciesMix),
+        })
+        : designConfiguration;
+      const minimumSpecies = nextDesignConfiguration.system === 'syntropic' ? 3 : nextDesignConfiguration.system === 'monoculture' ? 1 : 2;
+      if (speciesChanged && nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
       const regenerate = actions.some((action) => action.type === 'regenerate_layout');
       const recalculate = actions.some((action) => action.type === 'recalculate_water_and_costs');
       if (speciesChanged && !regenerate) {
@@ -1603,14 +1863,16 @@ function WorkspaceApp() {
         nextCosts = null;
       }
       if (regenerate) {
+        setAssistantApplyStage('layout');
         if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeRegenerate'));
-        const layoutResult = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds: nextSpeciesIds, designConfiguration }));
+        const layoutResult = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds: nextSpeciesIds, designConfiguration: nextDesignConfiguration }));
         nextVariants = layoutResult.variants;
         nextVariantId = nextVariants.some((variant) => variant.id === nextVariantId) ? nextVariantId : nextVariants[0]?.id ?? null;
         nextIrrigation = null;
         nextCosts = null;
       }
       if (recalculate) {
+        setAssistantApplyStage('calculations');
         if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeCosts'));
         const chosenVariant = nextVariants.find((variant) => variant.id === nextVariantId) ?? nextVariants[0];
         if (!chosenVariant) throw new Error(t('errors.layoutBeforeCosts'));
@@ -1626,7 +1888,11 @@ function WorkspaceApp() {
         nextIrrigation = costResult.irrigation;
         nextCosts = costResult.establishment;
       }
+      setAssistantApplyStage('finalizing');
+      const remainingFeedbackMs = 350 - (Date.now() - applyingStartedAt);
+      if (remainingFeedbackMs > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingFeedbackMs));
       setSelectedSpeciesIds(nextSpeciesIds);
+      setDesignConfiguration(nextDesignConfiguration);
       setTreeSpeciesId(nextSpeciesIds[0] ?? '');
       setVariants(nextVariants);
       setSelectedVariantId(nextVariantId);
@@ -1634,14 +1900,22 @@ function WorkspaceApp() {
       setIrrigation(nextIrrigation);
       setCosts(nextCosts);
       setSection(nextSection);
+      setAssistantTurns((turns) => turns.map((turn) => turn.id === proposalId ? { ...turn, status: 'applied' } : turn));
       setAssistantProposal(null);
-      setAssistantInput('');
       setNotice(t('notices.aiApplied'));
     } catch (assistantApplyError) {
       setAssistantError(messageOf(assistantApplyError));
     } finally {
-      setAssistantBusy(false);
+      setAssistantActivity(null);
     }
+  }
+
+  function dismissAssistantProposal() {
+    if (assistantProposal) {
+      setAssistantTurns((turns) => turns.map((turn) => turn.id === assistantProposal.id ? { ...turn, status: 'dismissed' } : turn));
+    }
+    setAssistantProposal(null);
+    setAssistantError(null);
   }
 
   function updateOnboarding(status: OnboardingPreference['status'], step: OnboardingStep, syncUser = authUser, projectNameOverride = projectName) {
@@ -1659,6 +1933,12 @@ function WorkspaceApp() {
     }
   }
 
+  function continueOnboarding(step: OnboardingStep) {
+    updateOnboarding('active', step);
+    const target = onboardingWorkspaceSection(step);
+    if (target) setSection(target);
+  }
+
   function startOnboarding(name: string) {
     const nextName = name.trim() || t('project.newTitle');
     projectNameEditedRef.current = true;
@@ -1671,9 +1951,12 @@ function WorkspaceApp() {
           ? 'species'
           : !irrigation || !costs
             ? 'design'
-            : 'complete';
+            : !projectAnalysis
+              ? 'fire'
+              : 'complete';
     updateOnboarding('active', nextStep, authUser, nextName);
-    setSection(nextStep === 'species' ? 'species' : nextStep === 'design' ? 'layout' : nextStep === 'complete' ? 'costs' : 'site');
+    const target = onboardingWorkspaceSection(nextStep);
+    if (target) setSection(target);
   }
 
   function beginOnboardingBoundary() {
@@ -1795,6 +2078,7 @@ function WorkspaceApp() {
     setCollaboration(normalizeProjectCollaboration(project.collaboration));
     setSelectedTreeId(null);
     setSelectedTreeIds([]);
+    setHiddenPlannedSpeciesIds([]);
     setSharePath(null);
     fittedSiteRef.current = null;
     setSection(project.costs ? 'costs' : project.irrigation ? 'water' : normalizedVariants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
@@ -1816,6 +2100,84 @@ function WorkspaceApp() {
       setRevisions(await api<ProjectRevisionSummary[]>(`/api/projects/${id}/revisions`));
       setNotice(t('auth.opened', { revision: project.revision ?? 0 }));
     });
+  }
+
+  function openProjectsPage() {
+    setMobileMenuOpen(false);
+    setProjectsOpen(true);
+    if (window.location.pathname !== '/projects') window.history.pushState({}, '', '/projects');
+  }
+
+  function closeProjectsPage() {
+    setProjectsOpen(false);
+    if (window.location.pathname === '/projects') window.history.pushState({}, '', '/');
+  }
+
+  async function toggleProjectArchive(id: string, archived: boolean) {
+    setProjectArchiveBusyId(id);
+    try {
+      const summary = await api<ProjectSummary>(`/api/projects/${id}/archive`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived }),
+      });
+      setProjects((items) => items.map((item) => item.id === id ? summary : item));
+      setNotice(t(archived ? 'projects.archivedNotice' : 'projects.restoredNotice'));
+    } catch (archiveError) {
+      setError(messageOf(archiveError));
+    } finally {
+      setProjectArchiveBusyId(null);
+    }
+  }
+
+  async function openProjectReadOnlyShare(id: string, name: string) {
+    setProjectShareTarget({ id, name, response: null });
+    setProjectShareBusy(true);
+    try {
+      if (id === projectId && site) {
+        const snapshot = currentProjectState(new Date().toISOString());
+        if (snapshot) await queueProjectSave(snapshot, dirtySerialRef.current);
+      }
+      const response = await api<ShareResponse>(`/api/projects/${id}/share`);
+      setProjectShareTarget({ id, name, response });
+    } catch (shareError) {
+      setProjectShareTarget(null);
+      setError(messageOf(shareError));
+    } finally {
+      setProjectShareBusy(false);
+    }
+  }
+
+  async function createProjectReadOnlyShare(expiresAt: string | null) {
+    if (!projectShareTarget) return;
+    setProjectShareBusy(true);
+    try {
+      const response = await api<ShareResponse>(`/api/projects/${projectShareTarget.id}/share`, post({ mode: 'view', expiresAt }));
+      setProjectShareTarget((target) => target ? { ...target, response } : null);
+      if (projectShareTarget.id === projectId) applySharedProjectResponse(response);
+      else await refreshProjects();
+      setNotice(t('sharing.readOnlyReady'));
+    } catch (shareError) {
+      setError(messageOf(shareError));
+    } finally {
+      setProjectShareBusy(false);
+    }
+  }
+
+  async function disableProjectReadOnlyShare() {
+    if (!projectShareTarget) return;
+    setProjectShareBusy(true);
+    try {
+      const response = await api<ShareResponse>(`/api/projects/${projectShareTarget.id}/share`, { method: 'DELETE' });
+      setProjectShareTarget((target) => target ? { ...target, response } : null);
+      if (projectShareTarget.id === projectId) applySharedProjectResponse(response);
+      else await refreshProjects();
+      setNotice(t('sharing.linkDisabled'));
+    } catch (shareError) {
+      setError(messageOf(shareError));
+    } finally {
+      setProjectShareBusy(false);
+    }
   }
 
   async function restoreRevision(revision: number) {
@@ -1957,7 +2319,12 @@ function WorkspaceApp() {
   }
 
   function toggleSpecies(id: string) {
-    setSelectedSpeciesIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+    const nextSpeciesIds = selectedSpeciesIds.includes(id) ? selectedSpeciesIds.filter((item) => item !== id) : [...selectedSpeciesIds, id];
+    setSelectedSpeciesIds(nextSpeciesIds);
+    setDesignConfiguration((configuration) => normalizeDesignConfiguration({
+      ...configuration,
+      speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, configuration.speciesMix),
+    }));
     setVariants([]);
     setSelectedVariantId(null);
     setIrrigation(null);
@@ -2193,6 +2560,7 @@ function WorkspaceApp() {
     analysis: Boolean(projectAnalysis && projectAnalysis.contextFingerprint === projectAnalysisFingerprint(currentAssistantContext())),
   };
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
+  const activeWorkspaceTask = busy ?? (analysisBusy ? t('busy.formalReview') : null);
   const renderStepButton = (step: (typeof STEPS)[number], index: number) => {
     const Icon = step.icon;
     return <button key={step.id} data-testid={`step-${step.id}`} className={section === step.id ? 'active' : ''} onClick={() => setSection(step.id)}>
@@ -2231,7 +2599,21 @@ function WorkspaceApp() {
           <button className="button ai-trigger mobile-top-action mobile-ai-trigger" aria-label={t('actions.ask')} title={t('actions.ask')} onClick={() => setAssistantOpen(true)}>
             <Sparkles size={16} />
           </button>
-          {authUser && <button className="mobile-top-action projects-trigger" aria-label={t('projects.open')} title={t('projects.open')} aria-expanded={projectsOpen} onClick={() => { setMobileMenuOpen(false); setProjectsOpen(true); }}><FolderOpen size={17} /></button>}
+          {authUser && <button className="mobile-top-action projects-trigger" aria-label={t('projects.open')} title={t('projects.open')} aria-expanded={projectsOpen} onClick={openProjectsPage}><FolderOpen size={17} /></button>}
+          <button
+            className={`mobile-top-action account-trigger ${authUser ? 'signed-in' : 'signed-out'}`}
+            data-testid="topbar-account"
+            aria-label={authUser ? t('auth.signedInAs', { name: authUser.name }) : t('auth.signIn')}
+            title={authUser ? t('auth.signedInAs', { name: authUser.name }) : t('auth.signIn')}
+            aria-expanded={authUser ? mobileMenuOpen : undefined}
+            onClick={() => authUser ? setMobileMenuOpen((value) => !value) : setAuthOpen(true)}
+          >
+            {authUser?.pictureUrl
+              ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" />
+              : authUser
+                ? <span>{authUser.name.slice(0, 1).toUpperCase()}</span>
+                : <LogIn size={17} />}
+          </button>
           <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
         </div>
       </header>
@@ -2240,7 +2622,7 @@ function WorkspaceApp() {
         <button className="mobile-menu-backdrop" aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)} />
         <aside id="mobile-product-menu" className="mobile-product-menu" role="dialog" aria-modal="true" aria-label={t('mobile.menu')}>
           <header><span><strong>{t('mobile.menu')}</strong><small>{projectName}</small></span><button aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)}><X size={18} /></button></header>
-          {site && <div className={`mobile-save-status ${saveStatus}`} data-testid="save-status"><i /><span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
+          {site && <div className={`mobile-save-status ${saveStatus}`} data-testid="save-status">{saveStatus === 'saving' ? <LoaderCircle className="spin" size={12} /> : <i />}<span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
           <div className="mobile-language-picker" role="group" aria-label={t('language.label')}>
             <span>{t('language.label')}</span>
             <div>{SUPPORTED_LOCALES.map((item) => <button key={item.code} aria-label={item.label} aria-pressed={locale === item.code} className={locale === item.code ? 'active' : ''} onClick={() => { setLocale(item.code); setMobileMenuOpen(false); }}><b aria-hidden="true">{item.flag}</b><small>{item.shortLabel}</small></button>)}</div>
@@ -2305,6 +2687,7 @@ function WorkspaceApp() {
             <MapLayerToggle icon={LocateFixed} tone="infrastructure" active={showInfrastructure} disabled={!site || (!site.accessPoints.length && !site.waterPoints.length)} label={t('map.layerInfrastructure')} hint={t('map.layerInfrastructureHint')} toggleLabel={t('map.toggleInfrastructure')} onToggle={() => setShowInfrastructure((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="observed" active={showObservedTrees} disabled={!site?.existingTrees.length} label={t('map.layerObservedTrees')} hint={t('map.layerObservedTreesHint')} toggleLabel={t('map.toggleObservedTrees')} onToggle={() => setShowObservedTrees((value) => !value)} />
             <MapLayerToggle icon={Sprout} tone="trees" active={showPlannedTrees} disabled={!selectedVariant} label={t('map.layerTrees')} hint={t('map.layerTreesHint')} toggleLabel={t('map.toggleTrees')} onToggle={() => setShowPlannedTrees((value) => !value)} />
+            <MapLayerToggle icon={CloudSun} tone="solar" active={showSolarExposure} disabled={dailySolarExposure?.status !== 'available'} label={t('map.layerSolarExposure')} hint={t('map.layerSolarExposureHint')} toggleLabel={t('map.toggleSolarExposure')} onToggle={() => setShowSolarExposure((value) => !value)} />
             <MapLayerToggle icon={Tractor} tone="machinery" active={showMachinery} disabled={!selectedVariant?.machinery.enabled} label={t('map.layerMachinery')} hint={t('map.layerMachineryHint')} toggleLabel={t('map.toggleMachinery')} onToggle={() => setShowMachinery((value) => !value)} />
             <MapLayerToggle icon={Flame} tone="firebreak" active={showFirebreaks} disabled={!selectedVariant?.firebreak?.enabled} label={t('map.layerFirebreak')} hint={t('map.layerFirebreakHint')} toggleLabel={t('map.toggleFirebreak')} onToggle={() => setShowFirebreaks((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="irrigation" active={showIrrigation} disabled={!irrigation} label={t('map.layerIrrigation')} hint={t('map.layerIrrigationHint')} toggleLabel={t('map.toggleIrrigation')} onToggle={() => { const next = !showIrrigation; setShowIrrigation(next); if (!next) setEditingIrrigation(false); }} />
@@ -2343,6 +2726,15 @@ function WorkspaceApp() {
               <span><small>{t('wind.mapEyebrow')}</small><strong>{t('wind.fromDirection', { direction: siteProfile.solar.prevailingWindDirectionLabel ?? '—' })}</strong><b>{t('wind.mapSpeed', { mean: formatNumber(siteProfile.solar.meanWindSpeedMs ?? 0, 1), p90: formatNumber(siteProfile.solar.windSpeedP90Ms ?? 0, 1) })}</b></span>
             </div>
           )}
+          {showSolarExposure && selectedSolarExposureHour && (
+            <div className={`solar-map-legend ${selectedSolarExposureHour.elevationDegrees <= 0 || selectedSolarExposureHour.estimatedHorizontalWm2 < 5 ? 'night' : ''}`} data-testid="solar-map-legend">
+              <CloudSun size={20} />
+              <span><small>{t('solar.mapEyebrow')}</small><strong>{t('solar.localTime', { hour: String(selectedSolarExposureHour.localSolarHour).padStart(2, '0') })}</strong><b>{selectedSolarExposureHour.elevationDegrees > 0
+                && selectedSolarExposureHour.estimatedHorizontalWm2 >= 5
+                ? t('solar.mapSummary', { elevation: formatNumber(selectedSolarExposureHour.elevationDegrees, 0), sunlit: selectedSolarExposureHour.sunlitCount, shaded: selectedSolarExposureHour.shadedCount })
+                : t('solar.night')}</b></span>
+            </div>
+          )}
         </section>
 
         <section className="inspector">
@@ -2371,8 +2763,36 @@ function WorkspaceApp() {
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
-          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} />}
-          {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
+          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
+          {section === 'water' && <WaterPanel
+            site={site}
+            irrigation={irrigation}
+            configuration={irrigationConfiguration}
+            onConfiguration={setIrrigationConfiguration}
+            profile={siteProfile}
+            canCalculate={Boolean(selectedVariant && siteProfile)}
+            onCalculate={calculateWaterAndCosts}
+            onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
+            onCosts={() => setSection('costs')}
+            onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }}
+            editingIrrigation={editingIrrigation}
+            showSupplyPipes={showSupplyPipes}
+            showDripLaterals={showDripLaterals}
+            onShowSupplyPipes={(visible) => {
+              setShowIrrigation(true);
+              setShowSupplyPipes(visible);
+              if (!visible && !showDripLaterals) setEditingIrrigation(false);
+            }}
+            onShowDripLaterals={(visible) => {
+              setShowIrrigation(true);
+              setShowDripLaterals(visible);
+              if (!visible && !showSupplyPipes) setEditingIrrigation(false);
+            }}
+            onEditIrrigation={() => {
+              setShowIrrigation(true);
+              setEditingIrrigation((value) => value ? false : showSupplyPipes || showDripLaterals);
+            }}
+          />}
           {section === 'fire' && <FireOperationsPanel
             profile={siteProfile}
             variant={selectedVariant}
@@ -2381,7 +2801,7 @@ function WorkspaceApp() {
             onTask={updateFireTask}
             onShowLayer={() => setShowFireWeather(true)}
           />}
-          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
+          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode))} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={recalculateCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
           {section === 'analysis' && <ProjectAnalysisPanel
             configured={Boolean(config?.assistant.configured)}
             context={currentAssistantContext()}
@@ -2393,6 +2813,8 @@ function WorkspaceApp() {
           />}
         </section>
       </main>
+
+      {activeWorkspaceTask && <WorkspaceLoader label={activeWorkspaceTask} />}
 
       {onboarding?.status === 'active' && <OnboardingTour
         preference={onboarding}
@@ -2409,8 +2831,16 @@ function WorkspaceApp() {
         onFinishBoundary={finishDraft}
         onAnalyse={analyzeSite}
         onGenerate={generateDesign}
+        onContinueWater={() => continueOnboarding('water')}
         onCalculate={calculateWaterAndCosts}
-        onViewCosts={() => setSection('costs')}
+        onContinueCosts={() => continueOnboarding('costs')}
+        onContinueReview={() => continueOnboarding('review')}
+        onContinueComplete={() => continueOnboarding('complete')}
+        reviewConfigured={Boolean(config?.assistant.configured)}
+        reviewReady={Boolean(site && siteProfile && selectedVariant)}
+        reviewBusy={analysisBusy}
+        onReview={runProjectAnalysis}
+        onViewAnalysis={() => setSection('analysis')}
         onSkip={() => updateOnboarding('skipped', onboarding.step)}
         onComplete={() => updateOnboarding('completed', 'complete')}
       />}
@@ -2420,11 +2850,14 @@ function WorkspaceApp() {
         input={assistantInput}
         onInput={setAssistantInput}
         proposal={assistantProposal}
-        busy={assistantBusy}
+        turns={assistantTurns}
+        pendingPrompt={assistantPendingPrompt}
+        activity={assistantActivity}
+        applyStage={assistantApplyStage}
         error={assistantError}
         onAsk={askAssistant}
         onApply={applyAssistantProposal}
-        onDismiss={() => { setAssistantProposal(null); setAssistantError(null); }}
+        onDismiss={dismissAssistantProposal}
         onClose={() => setAssistantOpen(false)}
       />}
 
@@ -2443,8 +2876,21 @@ function WorkspaceApp() {
       {projectsOpen && authUser && <ProjectsPage
         projects={projects}
         activeProjectId={projectId}
-        onOpen={(id) => { setProjectsOpen(false); void openProject(id); }}
-        onClose={() => setProjectsOpen(false)}
+        archiveBusyId={projectArchiveBusyId}
+        onOpen={(id) => { closeProjectsPage(); void openProject(id); }}
+        onArchive={(id, archived) => void toggleProjectArchive(id, archived)}
+        onShare={(id, name) => void openProjectReadOnlyShare(id, name)}
+        onClose={closeProjectsPage}
+      />}
+
+      {projectShareTarget && config && <ProjectReadOnlyShareDialog
+        projectName={projectShareTarget.name}
+        configured={config.sharing.configured}
+        response={projectShareTarget.response}
+        busy={projectShareBusy}
+        onCreate={createProjectReadOnlyShare}
+        onDisable={disableProjectReadOnlyShare}
+        onClose={() => setProjectShareTarget(null)}
       />}
 
       {historyOpen && <ProjectHistoryPanel projectId={projectId} revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
@@ -2478,15 +2924,28 @@ function WorkspaceApp() {
         onClose={() => setScheduleOpen(false)}
       />}
 
-      {(busy || error || guidance || notice) && (
+      {(error || guidance || notice) && (
         <div className={`toast ${error ? 'error' : guidance ? 'guidance' : notice ? 'success' : ''}`} role="status">
-          {busy ? <LoaderCircle className="spin" size={18} /> : error ? <span className="toast-symbol">!</span> : guidance ? <Info size={18} /> : <Check size={18} />}
-          <span>{busy ?? error ?? guidance ?? notice}</span>
-          {!busy && <button aria-label={t('actions.close')} onClick={() => { setError(null); setGuidance(null); setNotice(null); }}>×</button>}
+          {error ? <span className="toast-symbol">!</span> : guidance ? <Info size={18} /> : <Check size={18} />}
+          <span>{error ?? guidance ?? notice}</span>
+          <button aria-label={t('actions.close')} onClick={() => { setError(null); setGuidance(null); setNotice(null); }}>×</button>
         </div>
       )}
     </div>
   );
+}
+
+function WorkspaceLoader({ label }: { label: string }) {
+  const { t } = useI18n();
+  return <div className="workspace-loader-backdrop" data-testid="workspace-loader" role="status" aria-live="assertive" aria-busy="true">
+    <section className="workspace-loader-card">
+      <span className="workspace-loader-mark"><LoaderCircle className="spin" size={28} /><i /></span>
+      <small>{t('busy.title')}</small>
+      <strong>{label}</strong>
+      <p>{t('busy.detail')}</p>
+      <div aria-hidden="true"><i /><i /><i /></div>
+    </section>
+  </div>;
 }
 
 function OnboardingTour({
@@ -2504,8 +2963,16 @@ function OnboardingTour({
   onFinishBoundary,
   onAnalyse,
   onGenerate,
+  onContinueWater,
   onCalculate,
-  onViewCosts,
+  onContinueCosts,
+  onContinueReview,
+  onContinueComplete,
+  reviewConfigured,
+  reviewReady,
+  reviewBusy,
+  onReview,
+  onViewAnalysis,
   onSkip,
   onComplete,
 }: {
@@ -2523,14 +2990,21 @@ function OnboardingTour({
   onFinishBoundary: () => void;
   onAnalyse: () => void;
   onGenerate: () => void;
+  onContinueWater: () => void;
   onCalculate: () => void;
-  onViewCosts: () => void;
+  onContinueCosts: () => void;
+  onContinueReview: () => void;
+  onContinueComplete: () => void;
+  reviewConfigured: boolean;
+  reviewReady: boolean;
+  reviewBusy: boolean;
+  onReview: () => void;
+  onViewAnalysis: () => void;
   onSkip: () => void;
   onComplete: () => void;
 }) {
   const { t } = useI18n();
-  const order: OnboardingStep[] = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'complete'];
-  const stepIndex = Math.max(0, order.indexOf(preference.step));
+  const stepIndex = Math.max(0, ONBOARDING_STEPS.indexOf(preference.step));
   const content = {
     welcome: { title: t('onboarding.welcomeTitle'), body: t('onboarding.welcomeBody') },
     location: { title: t('onboarding.locationTitle'), body: t('onboarding.locationBody') },
@@ -2538,6 +3012,10 @@ function OnboardingTour({
     analysis: { title: t('onboarding.analysisTitle'), body: t('onboarding.analysisBody') },
     species: { title: t('onboarding.speciesTitle'), body: t('onboarding.speciesBody') },
     design: { title: t('onboarding.designTitle'), body: t('onboarding.designBody') },
+    water: { title: t('onboarding.waterTitle'), body: t('onboarding.waterBody') },
+    fire: { title: t('onboarding.fireTitle'), body: t('onboarding.fireBody') },
+    costs: { title: t('onboarding.costsTitle'), body: t('onboarding.costsBody') },
+    review: { title: t('onboarding.reviewTitle'), body: t('onboarding.reviewBody') },
     complete: { title: t('onboarding.completeTitle'), body: t('onboarding.completeBody') },
   }[preference.step];
 
@@ -2557,8 +3035,8 @@ function OnboardingTour({
   }
 
   return <aside className={`onboarding-coach step-${preference.step}`} data-testid="onboarding-tour" role="dialog" aria-labelledby="onboarding-coach-title">
-    <header><span>{t('onboarding.progress', { current: stepIndex + 1, total: order.length })}</span><button aria-label={t('onboarding.skip')} onClick={onSkip}><X size={16} /></button></header>
-    <div className="onboarding-progress" aria-hidden="true"><i style={{ width: `${((stepIndex + 1) / order.length) * 100}%` }} /></div>
+    <header><span>{t('onboarding.progress', { current: stepIndex + 1, total: ONBOARDING_STEPS.length })}</span><button aria-label={t('onboarding.skip')} onClick={onSkip}><X size={16} /></button></header>
+    <div className="onboarding-progress" aria-hidden="true"><i style={{ width: `${((stepIndex + 1) / ONBOARDING_STEPS.length) * 100}%` }} /></div>
     <h2 id="onboarding-coach-title">{content.title}</h2>
     <p>{content.body}</p>
     {preference.step === 'location' && <>
@@ -2571,15 +3049,21 @@ function OnboardingTour({
     {preference.step === 'boundary' && <button className="onboarding-primary" disabled={draftPointCount < 3 && !siteReady} onClick={onFinishBoundary}>{siteReady ? t('onboarding.boundaryReady') : t('onboarding.finishBoundary', { count: draftPointCount })}<Check size={16} /></button>}
     {preference.step === 'analysis' && <button className="onboarding-primary" disabled={!analysisReady} onClick={onAnalyse}>{analysisReady ? t('onboarding.runAnalysis') : t('onboarding.validationPending')}<FlaskConical size={16} /></button>}
     {preference.step === 'species' && <button className="onboarding-primary" disabled={!designReady} onClick={onGenerate}>{t('onboarding.generateDesign')}<TreePine size={16} /></button>}
-    {preference.step === 'design' && <button className="onboarding-primary" onClick={onCalculate}>{t('onboarding.calculatePlan')}<Droplets size={16} /></button>}
-    {preference.step === 'complete' && <div className="onboarding-complete-actions"><button onClick={onViewCosts}>{t('onboarding.viewCosts')}</button><button className="onboarding-primary" onClick={onComplete}>{t('onboarding.finish')}<Check size={16} /></button></div>}
+    {preference.step === 'design' && <button className="onboarding-primary" onClick={onContinueWater}>{t('onboarding.continueWater')}<Droplets size={16} /></button>}
+    {preference.step === 'water' && <button className="onboarding-primary" onClick={onCalculate}>{t('onboarding.calculatePlan')}<Droplets size={16} /></button>}
+    {preference.step === 'fire' && <button className="onboarding-primary" onClick={onContinueCosts}>{t('onboarding.continueCosts')}<Flame size={16} /></button>}
+    {preference.step === 'costs' && <button className="onboarding-primary" onClick={onContinueReview}>{t('onboarding.continueReview')}<ClipboardCheck size={16} /></button>}
+    {preference.step === 'review' && (reviewConfigured
+      ? <button className="onboarding-primary" disabled={!reviewReady || reviewBusy} onClick={onReview}>{reviewBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{reviewBusy ? t('projectAnalysis.running') : t('onboarding.runReview')}</button>
+      : <button className="onboarding-primary" onClick={onContinueComplete}>{t('onboarding.finishWithoutAi')}<ChevronRight size={16} /></button>)}
+    {preference.step === 'complete' && <div className="onboarding-complete-actions"><button onClick={onViewAnalysis}>{t('onboarding.viewAnalysis')}</button><button className="onboarding-primary" onClick={onComplete}>{t('onboarding.finish')}<Check size={16} /></button></div>}
     <button className="onboarding-skip" onClick={onSkip}>{t('onboarding.skip')}</button>
   </aside>;
 }
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
   icon: typeof Layers3;
-  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'solar' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
   active: boolean;
   disabled: boolean;
   label: string;
@@ -2697,12 +3181,15 @@ function InspectorHeader({ section, onPrevious, onNext }: { section: WorkspaceSe
   );
 }
 
-function AssistantPanel({ configured, input, onInput, proposal, busy, error, onAsk, onApply, onDismiss, onClose }: {
+function AssistantPanel({ configured, input, onInput, proposal, turns, pendingPrompt, activity, applyStage, error, onAsk, onApply, onDismiss, onClose }: {
   configured: boolean;
   input: string;
   onInput: (value: string) => void;
   proposal: AssistantProposal | null;
-  busy: boolean;
+  turns: AssistantConversationTurn[];
+  pendingPrompt: string | null;
+  activity: AssistantActivity;
+  applyStage: AssistantApplyStage;
   error: string | null;
   onAsk: (prompt?: string) => void;
   onApply: () => void;
@@ -2710,7 +3197,12 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const hasBodyContent = !configured || busy || Boolean(error) || Boolean(proposal);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
+  const busy = activity !== null;
+  const hasBodyContent = !configured || busy || Boolean(error) || turns.length > 0;
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activity, error, pendingPrompt, turns]);
   return (
     <aside className={`assistant-panel${hasBodyContent ? ' has-content' : ''}`} aria-label={t('assistant.aria')}>
       <header>
@@ -2718,16 +3210,31 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
         <span><small>{t('assistant.internal')}</small><strong>{t('actions.ask')}</strong></span>
         <button aria-label={t('assistant.close')} onClick={onClose}><X size={17} /></button>
       </header>
-      {hasBodyContent && <div className="assistant-body">
+      {hasBodyContent && <div className="assistant-body" aria-live="polite">
         {!configured && <div className="assistant-warning">{t('assistant.unavailable')}</div>}
-        {busy && <div className="assistant-thinking"><LoaderCircle className="spin" size={20} /><span>{t('assistant.reading')}</span></div>}
-        {error && <div className="assistant-error"><strong>{t('assistant.notApplied')}</strong><span>{localizedDomainMessage(error, t)}</span></div>}
-        {proposal && <div className="assistant-proposal" data-testid="assistant-proposal">
-          <div className="assistant-answer"><small>{t('assistant.proposal')}</small><strong>{proposal.summary}</strong><p>{proposal.rationale}</p></div>
-          {proposal.actions.length > 0 && <div className="assistant-actions"><small>{t('assistant.awaitingConfirmation')}</small>{proposal.actions.map((action, index) => <span key={`${action.type}-${index}`}><i>{index + 1}</i>{assistantActionLabel(action, t)}</span>)}</div>}
-          {proposal.warnings.length > 0 && <div className="assistant-proposal-warnings">{proposal.warnings.map((warning) => <span key={warning}>• {warning}</span>)}</div>}
-          <div className="assistant-confirm"><button onClick={onDismiss}>{t('assistant.dismiss')}</button>{proposal.requiresConfirmation ? <button className="confirm" onClick={onApply} disabled={busy}><ShieldCheck size={15} /> {t('assistant.apply')}</button> : <button className="confirm" onClick={onDismiss}>{t('assistant.done')}</button>}</div>
-        </div>}
+        <div className="assistant-conversation">
+          {turns.map((turn) => {
+            const isCurrent = proposal?.id === turn.id && turn.status === 'pending';
+            const isApplying = isCurrent && activity === 'applying';
+            return <div className="assistant-turn" key={turn.id}>
+              <div className="assistant-user-message"><small>{t('assistant.you')}</small><p>{turn.prompt}</p></div>
+              <div className="assistant-proposal" data-testid="assistant-proposal">
+                <div className="assistant-answer"><small>{t('assistant.proposal')}</small><strong>{turn.proposal.summary}</strong><p>{turn.proposal.rationale}</p></div>
+                {turn.proposal.actions.length > 0 && <div className="assistant-actions"><small>{turn.status === 'pending' ? t('assistant.awaitingConfirmation') : t('assistant.proposedChanges')}</small>{turn.proposal.actions.map((action, index) => <span key={`${action.type}-${index}`}><i>{index + 1}</i>{assistantActionLabel(action, t)}</span>)}</div>}
+                {turn.proposal.warnings.length > 0 && <div className="assistant-proposal-warnings">{turn.proposal.warnings.map((warning) => <span key={warning}>• {warning}</span>)}</div>}
+                {isApplying && <div className="assistant-apply-progress" data-testid="assistant-apply-progress"><LoaderCircle className="spin" size={17} /><span><strong>{t('assistant.applying')}</strong><small>{assistantApplyStageLabel(applyStage, t)}</small></span></div>}
+                {isCurrent && <div className="assistant-confirm"><button onClick={onDismiss} disabled={busy}>{t('assistant.dismiss')}</button>{turn.proposal.requiresConfirmation ? <button className="confirm" onClick={onApply} disabled={busy}>{isApplying ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />} {isApplying ? t('assistant.applying') : t('assistant.apply')}</button> : <button className="confirm" onClick={onDismiss} disabled={busy}>{t('assistant.done')}</button>}</div>}
+                {turn.status !== 'pending' && <div className={`assistant-turn-status ${turn.status}`}>{turn.status === 'applied' && <Check size={15} />}{assistantTurnStatusLabel(turn.status, t)}</div>}
+              </div>
+            </div>;
+          })}
+          {pendingPrompt && <div className="assistant-turn pending">
+            <div className="assistant-user-message"><small>{t('assistant.you')}</small><p>{pendingPrompt}</p></div>
+            <div className="assistant-thinking"><LoaderCircle className="spin" size={20} /><span>{t('assistant.reading')}</span></div>
+          </div>}
+          {error && <div className="assistant-error"><strong>{t('assistant.notApplied')}</strong><span>{localizedDomainMessage(error, t)}</span></div>}
+          <div ref={conversationEndRef} />
+        </div>
       </div>}
       <form onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
         <textarea
@@ -2742,13 +3249,26 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
           placeholder={t('assistant.placeholder')}
           maxLength={2000}
         />
-        <button aria-label={t('assistant.send')} type="submit" disabled={!configured || busy || !input.trim()}><Send size={17} /></button>
+        <button aria-label={t('assistant.send')} type="submit" disabled={!configured || busy || !input.trim()}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button>
       </form>
     </aside>
   );
 }
 
-  function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
+function assistantApplyStageLabel(stage: AssistantApplyStage, t: (key: string) => string) {
+  if (stage === 'layout') return t('assistant.applyingLayout');
+  if (stage === 'calculations') return t('assistant.applyingCalculations');
+  if (stage === 'finalizing') return t('assistant.applyingFinalizing');
+  return t('assistant.applyingPreparing');
+}
+
+function assistantTurnStatusLabel(status: Exclude<AssistantTurnStatus, 'pending'>, t: (key: string) => string) {
+  if (status === 'applied') return t('assistant.applied');
+  if (status === 'replaced') return t('assistant.replaced');
+  return t('assistant.dismissed');
+}
+
+function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
   if (action.type === 'add_species') return t('assistant.actionAdd', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
   if (action.type === 'remove_species') return t('assistant.actionRemove', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
   if (action.type === 'select_variant') return t('assistant.actionSelect', { id: humanize(action.variantId) });
@@ -3111,37 +3631,89 @@ function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun,
   </div>;
 }
 
-function ProjectsPage({ projects, activeProjectId, onOpen, onClose }: {
+function ProjectsPage({ projects, activeProjectId, archiveBusyId, onOpen, onArchive, onShare, onClose }: {
   projects: ProjectSummary[];
   activeProjectId: string;
+  archiveBusyId: string | null;
   onOpen: (id: string) => void;
+  onArchive: (id: string, archived: boolean) => void;
+  onShare: (id: string, name: string) => void;
   onClose: () => void;
 }) {
   const { t, locale } = useI18n();
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState<'active' | 'archived'>('active');
+  const normalizedQuery = query.trim().toLocaleLowerCase(locale);
+  const activeCount = projects.filter((project) => !project.archivedAt).length;
+  const archivedCount = projects.length - activeCount;
+  const visibleProjects = projects.filter((project) => (
+    Boolean(project.archivedAt) === (view === 'archived')
+    && (!normalizedQuery || project.name.toLocaleLowerCase(locale).includes(normalizedQuery))
+  ));
   return <div className="projects-page-backdrop">
-    <section className="projects-page" role="dialog" aria-modal="true" aria-labelledby="projects-page-title" data-testid="projects-page">
+    <main className="projects-page" aria-labelledby="projects-page-title" data-testid="projects-page">
       <header>
         <span className="projects-page-mark"><FolderOpen size={22} /></span>
         <span><small>{t('projects.eyebrow')}</small><h2 id="projects-page-title">{t('projects.title')}</h2><p>{t('projects.body')}</p></span>
         <button aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>
       </header>
-      <div className="projects-page-count">{t('projects.count', { count: projects.length })}</div>
-      {projects.length > 0 ? <div className="projects-grid">
-        {projects.map((project) => {
+      <section className="projects-toolbar">
+        <label><Search size={17} /><input aria-label={t('projects.search')} placeholder={t('projects.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button aria-label={t('projects.clearSearch')} onClick={() => setQuery('')}><X size={14} /></button>}</label>
+        <div role="tablist" aria-label={t('projects.filter')}>
+          <button role="tab" aria-selected={view === 'active'} className={view === 'active' ? 'active' : ''} onClick={() => setView('active')}><FolderOpen size={15} />{t('projects.activeTab')}<b>{activeCount}</b></button>
+          <button role="tab" aria-selected={view === 'archived'} className={view === 'archived' ? 'active' : ''} onClick={() => setView('archived')}><Archive size={15} />{t('projects.archivedTab')}<b>{archivedCount}</b></button>
+        </div>
+      </section>
+      <div className="projects-page-count">{t('projects.visibleCount', { count: visibleProjects.length, total: projects.length })}</div>
+      {visibleProjects.length > 0 ? <div className="projects-grid">
+        {visibleProjects.map((project) => {
           const active = project.id === activeProjectId;
-          return <button
-            key={project.id}
-            className={`project-card${active ? ' active' : ''}`}
-            aria-label={t('projects.openProject', { name: project.name })}
-            aria-current={active ? 'page' : undefined}
-            onClick={() => onOpen(project.id)}
-          >
-            <span className="project-card-mark"><FolderOpen size={19} /></span>
-            <span><strong>{project.name}</strong><small>{t('projects.updated', { date: shortDate(project.updatedAt, locale) })}</small></span>
-            {active ? <b>{t('projects.active')}</b> : <ChevronRight size={17} />}
-          </button>;
+          const archived = Boolean(project.archivedAt);
+          const busy = archiveBusyId === project.id;
+          return <article key={project.id} className={`project-card${active ? ' active' : ''}${archived ? ' archived' : ''}`}>
+            <button className="project-card-open" aria-label={t('projects.openProject', { name: project.name })} aria-current={active ? 'page' : undefined} onClick={() => onOpen(project.id)}>
+              <span className="project-card-mark">{archived ? <Archive size={19} /> : <FolderOpen size={19} />}</span>
+              <span><strong>{project.name}</strong><small>{archived && project.archivedAt ? t('projects.archivedAt', { date: shortDate(project.archivedAt, locale) }) : t('projects.updated', { date: shortDate(project.updatedAt, locale) })}</small></span>
+              {active ? <b>{t('projects.active')}</b> : <ChevronRight size={17} />}
+            </button>
+            <div className="project-card-actions">
+              <button className="project-share-action" aria-label={t('projects.shareProject', { name: project.name })} onClick={() => onShare(project.id, project.name)}><Share2 size={15} /><span>{t('projects.share')}</span></button>
+              <button className="project-archive-action" disabled={busy} aria-label={t(archived ? 'projects.restoreProject' : 'projects.archiveProject', { name: project.name })} onClick={() => onArchive(project.id, !archived)}>
+                {busy ? <LoaderCircle className="spin" size={15} /> : archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+                <span>{t(archived ? 'projects.restore' : 'projects.archive')}</span>
+              </button>
+            </div>
+          </article>;
         })}
-      </div> : <div className="projects-empty"><FolderOpen size={28} /><strong>{t('projects.emptyTitle')}</strong><p>{t('projects.emptyBody')}</p></div>}
+      </div> : <div className="projects-empty">{view === 'archived' ? <Archive size={28} /> : <FolderOpen size={28} />}<strong>{t(query ? 'projects.noSearchTitle' : view === 'archived' ? 'projects.noArchivedTitle' : 'projects.emptyTitle')}</strong><p>{t(query ? 'projects.noSearchBody' : view === 'archived' ? 'projects.noArchivedBody' : 'projects.emptyBody')}</p></div>}
+    </main>
+  </div>;
+}
+
+function ProjectReadOnlyShareDialog({ projectName, configured, response, busy, onCreate, onDisable, onClose }: {
+  projectName: string;
+  configured: boolean;
+  response: ShareResponse | null;
+  busy: boolean;
+  onCreate: (expiresAt: string | null) => Promise<void>;
+  onDisable: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [expiryDays, setExpiryDays] = useState('30');
+  const expiresAt = new Date(Date.now() + Number(expiryDays) * 24 * 60 * 60_000).toISOString();
+  const shareUrl = response?.path ? `${window.location.origin}${response.path}` : '';
+  const readOnlyActive = response?.enabled && response.mode === 'view';
+  return <div className="project-share-backdrop" role="presentation">
+    <section className="project-share-dialog" role="dialog" aria-modal="true" aria-labelledby="project-read-only-share-title" data-testid="project-read-only-share">
+      <header><span className="project-share-mark"><Share2 size={20} /></span><span><small>{t('sharing.readOnlyEyebrow')}</small><h2 id="project-read-only-share-title">{t('sharing.readOnlyTitle')}</h2><p>{projectName}</p></span><button aria-label={t('actions.close')} onClick={onClose}><X size={18} /></button></header>
+      <div className="read-only-assurance"><ShieldCheck size={19} /><span><strong>{t('sharing.readOnlyAssurance')}</strong><small>{t('sharing.readOnlyAssuranceBody')}</small></span></div>
+      {!configured ? <div className="sharing-gate"><ShieldCheck size={22} /><strong>{t('sharing.unavailableTitle')}</strong><p>{t('sharing.unavailableBody')}</p></div> : <>
+        <label className="read-only-expiry"><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
+        {response?.enabled && response.mode === 'review' && <div className="read-only-warning"><Info size={16} />{t('sharing.reviewLinkWarning')}</div>}
+        <button className="button primary wide" disabled={busy} onClick={() => void onCreate(expiresAt)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Share2 size={15} />}{readOnlyActive ? t('sharing.refreshReadOnlyLink') : t('sharing.createReadOnlyLink')}</button>
+        {readOnlyActive && shareUrl && <div className="read-only-link"><span><small>{t('sharing.activeLink')}</small><strong>{t('sharing.viewOnly')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+      </>}
     </section>
   </div>;
 }
@@ -3170,7 +3742,7 @@ function CollaborationPanel({ authenticated, configured, collaboration, sharePat
       <div className="share-controls">
         <label><span>{t('sharing.permission')}</span><select value={mode} onChange={(event) => setMode(event.target.value as 'view' | 'review')}><option value="view">{t('sharing.viewOnly')}</option><option value="review">{t('sharing.canReview')}</option></select></label>
         <label><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
-        <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt)}>{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
+        <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt)}>{busy && <LoaderCircle className="spin" size={15} />}{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
       </div>
       {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
       <div className="review-summary">
@@ -3271,7 +3843,7 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
           : <span className="schedule-maintenance-autonomous"><strong>{t('costs.maintenanceAutonomousTitle')}</strong><small>{t('costs.maintenanceAutonomousBody')}</small></span>}</div>
       </div>
       <div className="schedule-management">{schedule.managementPhases.map((phase) => <article key={phase}><small>{t(`schedule.phase.${phase}.years`)}</small><strong>{t(`schedule.phase.${phase}.title`)}</strong><p>{t(`schedule.phase.${phase}.body`)}</p><em>{t(`schedule.management.system.${variant.design.system}`)}</em><span>□ {t('schedule.recordActuals')}</span></article>)}</div>
-      {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1) })}</small></span></div>}
+      {variant.machinery.enabled && <div className="schedule-machinery"><Tractor size={18} /><span><strong>{t('schedule.machineryTitle')}</strong><small>{t('schedule.machineryBody', { corridors: schedule.summary.machineryCorridorCount, area: formatNumber(schedule.summary.machineryReservedAreaM2, 0), headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1), perimeter: formatNumber(schedule.summary.machineryPerimeterLengthM, 0), route: formatNumber(schedule.summary.machineryManoeuvreLengthM, 0) })}</small></span></div>}
       {variant.firebreak?.enabled && <div className="schedule-machinery firebreak"><Flame size={18} /><span><strong>{t('schedule.firebreakTitle')}</strong><small>{t('schedule.firebreakBody', { length: formatNumber(schedule.summary.firebreakLengthM, 0), width: formatNumber(schedule.summary.firebreakWidthM, 1), area: formatNumber(schedule.summary.firebreakReservedAreaM2, 0) })}</small></span></div>}
     </ScheduleSection>
     <ScheduleSection number="05" title={t('schedule.evidenceTitle')} subtitle={t('schedule.evidenceBody')}>
@@ -3302,6 +3874,8 @@ function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, p
     corridors: schedule.summary.machineryCorridorCount,
     reserved: formatNumber(schedule.summary.machineryReservedAreaM2, 0),
     headland: formatNumber(schedule.summary.machineryHeadlandDepthM, 1),
+    perimeter: formatNumber(schedule.summary.machineryPerimeterLengthM, 0),
+    route: formatNumber(schedule.summary.machineryManoeuvreLengthM, 0),
     pipe: formatNumber(schedule.summary.purchasePipeM, 0),
     zones: schedule.summary.zones,
     flow: formatNumber(schedule.summary.requiredFlowM3Hour, 2),
@@ -3546,6 +4120,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? recommendations[0] ?? null;
   const minimumSpecies = design.system === 'syntropic' ? 3 : design.system === 'monoculture' ? 1 : 2;
   const selectedOptions = recommendations.map((item) => item.species).filter((item) => selectedIds.includes(item.id) && item.treeLike && item.productiveFromYear !== null);
+  const selectedSpecies = selectedIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item));
+  const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
   const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
   const updateFirebreak = (patch: Partial<DesignConfiguration['firebreak']>) => update({ firebreak: { ...design.firebreak, ...patch } });
@@ -3584,6 +4160,30 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
       {planningTab === 'species' && <>
       <div className="recommendation-basis" data-testid="recommendation-basis"><Database size={17} /><span><strong>{t('planning.speciesBasisTitle')}</strong><p>{t('planning.speciesBasisBody', { count: DESIGN_SPECIES_BY_ID.size })}</p></span></div>
       {recommendations.length > 0 && <div className="safety-gate" data-testid="species-safety-gate"><ShieldCheck size={18} /><span><small>{t('species.safetyEyebrow')}</small><strong>{t('species.safetyCount', { blocked: blocked.length, monitored: monitored.length })}</strong><p>{t('species.safetyBody')}</p></span>{blocked.length > 0 && <button onClick={() => setInspectedId(blocked[0].species.id)}>{t('actions.inspect')}</button>}</div>}
+      {selectedSpecies.length > 0 && <div className="species-mix-config" data-testid="species-mix-config">
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.mixEyebrow')}</small><strong>{t('species.mixTitle')}</strong></span></div><output>{t('species.mixTotal', { total: formatNumber(Object.values(selectedMix).reduce((sum, item) => sum + item.targetPercent, 0), 1) })}</output></div>
+        <p>{t('species.mixBody')}</p>
+        <div className="species-mix-rows">
+          {selectedSpecies.map((species) => {
+            const entry = selectedMix[species.id];
+            const displayName = speciesDisplayName(species, t);
+            return <article key={species.id} data-species-id={species.id}>
+              <span className="species-mix-name"><i style={{ background: species.color }} /><span><strong>{displayName}</strong><small>{species.scientificName}</small></span></span>
+              <label><span>{t('species.mixTarget')}</span><span className="species-mix-number"><input aria-label={t('species.mixTargetFor', { name: displayName })} type="number" min="0" max="100" step="1" value={entry.targetPercent} onChange={(event) => update({ speciesMix: rebalanceSpeciesMix(selectedSpecies, selectedMix, species.id, Number(event.target.value)) })} /><b>%</b></span></label>
+              <label><span>{t('species.mixSuccession')}</span><select aria-label={t('species.mixSuccessionFor', { name: displayName })} value={entry.successionOverride ?? ''} onChange={(event) => update({ speciesMix: {
+                ...selectedMix,
+                [species.id]: {
+                  ...entry,
+                  successionOverride: (event.target.value || null) as DesignConfiguration['speciesMix'][string]['successionOverride'],
+                },
+              } })}>
+                <option value="">{t('species.mixSuggested', { phase: localizedEnum(species.succession, t) })}</option>
+                {(['placenta', 'secondary', 'climax'] as const).map((phase) => <option key={phase} value={phase}>{localizedEnum(phase, t)}</option>)}
+              </select></label>
+            </article>;
+          })}
+        </div>
+      </div>}
       <div className="objective-panel" data-testid="design-objectives">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
         <p>{t('species.objectivesBody')}</p>
@@ -3710,7 +4310,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   );
 }
 
-function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedTreeIds, onTreeSelect, onSelectGroup, onClearSelection, onReplaceSelected, onLockSelected, onDeleteSelected, onAlignSelected, onSpaceSelected, selectedSpecies, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies, onFireOperations }: {
+function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedTreeIds, onTreeSelect, onSelectGroup, onClearSelection, onReplaceSelected, onLockSelected, onDeleteSelected, onAlignSelected, onSpaceSelected, selectedSpecies, hiddenSpeciesIds, onToggleSpeciesVisibility, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies, onFireOperations, dailySolarExposure, solarMonth, solarHour, showSolarExposure, onSolarMonth, onSolarHour, onShowSolarExposure }: {
   variants: LayoutVariant[];
   selectedVariant: LayoutVariant | null;
   onSelect: (id: string) => void;
@@ -3725,6 +4325,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   onAlignSelected: () => void;
   onSpaceSelected: () => void;
   selectedSpecies: DesignSpecies[];
+  hiddenSpeciesIds: string[];
+  onToggleSpeciesVisibility: (speciesId: string) => void;
   treeSpeciesId: string;
   onTreeSpecies: (id: string) => void;
   drawMode: DrawMode;
@@ -3739,11 +4341,36 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   onCalculate: () => void;
   onOpenSpecies: () => void;
   onFireOperations: () => void;
+  dailySolarExposure: DailyPlantSolarExposure | null;
+  solarMonth: number;
+  solarHour: number;
+  showSolarExposure: boolean;
+  onSolarMonth: (month: number) => void;
+  onSolarHour: (hour: number) => void;
+  onShowSolarExposure: (show: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
   const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
   const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
+  const selectedTreeCode = selectedTree ? plantPositionCode(selectedTree) : null;
+  const selectedDailySolarHour = dailySolarExposure?.hours.find((hour) => hour.localSolarHour === solarHour) ?? null;
+  const selectedPlantExposure = selectedTree
+    ? selectedDailySolarHour?.plants.find((plant) => plant.treeId === selectedTree.id) ?? null
+    : null;
+  const solarMonths = Array.from({ length: 12 }, (_, index) => ({
+    value: index + 1,
+    label: new Intl.DateTimeFormat(locale, { month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, index, 15))),
+  }));
+  const plantedSpecies = selectedSpecies.map((species) => {
+    const count = selectedVariant.trees.filter((tree) => tree.speciesId === species.id).length;
+    return {
+      species,
+      count,
+      actualPercent: selectedVariant.trees.length ? count / selectedVariant.trees.length * 100 : 0,
+      targetPercent: selectedVariant.design.speciesMix[species.id]?.targetPercent ?? null,
+    };
+  }).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.species.id.localeCompare(b.species.id));
   return (
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
@@ -3756,6 +4383,22 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         <Metric label={t('layout.canopyY20')} value={`${selectedVariant.metrics.projectedCanopyYear20Percent}%`} detail={t('layout.projectedCover')} />
         <Metric label={t('layout.openInterior')} value={`${formatNumber(selectedVariant.metrics.cropInteriorAreaM2, 0)} m²`} detail={t(selectedVariant.design.extent === 'full-field' ? 'layout.betweenRows' : 'layout.keptFree')} />
         <Metric label={t('layout.rowBearing')} value={`${selectedVariant.directionDegrees.toFixed(0)}°`} detail={localizedEnum(selectedVariant.design.orientationObjective, t)} />
+      </div>
+      <div className="plan-species-summary" data-testid="plan-species-summary">
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('layout.speciesPlanEyebrow')}</small><strong>{t('layout.speciesPlanTitle')}</strong></span></div><output>{t('layout.speciesPlanTotal', { count: selectedVariant.trees.length })}</output></div>
+        <p>{t('layout.speciesPlanBody')}</p>
+        <div className="plan-species-list">
+          {plantedSpecies.map(({ species, count, actualPercent, targetPercent }) => {
+            const visible = !hiddenSpeciesIds.includes(species.id);
+            return <button key={species.id} data-species-id={species.id} className={visible ? 'active' : ''} aria-pressed={visible} aria-label={t(visible ? 'layout.hideSpeciesOnMap' : 'layout.showSpeciesOnMap', { name: speciesDisplayName(species, t) })} onClick={() => onToggleSpeciesVisibility(species.id)}>
+              <i style={{ background: species.color }} />
+              <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
+              <span className="plan-species-count"><strong>{count}</strong><small>{t('layout.exactPlants')}</small></span>
+              <span className="plan-species-percent"><strong>{formatNumber(actualPercent, 1)}%</strong><small>{targetPercent === null ? t('layout.actualShare') : t('layout.targetShare', { target: formatNumber(targetPercent, 1) })}</small></span>
+              {visible ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>;
+          })}
+        </div>
       </div>
       <div className="composition-card" data-testid="layout-composition">
         <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.objectiveCheck')}</small><strong>{t('layout.composition')}</strong></span></div></div>
@@ -3774,6 +4417,45 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         {selectedVariant.solar.status === 'available' && <div className="solar-metrics"><span><small>{t('layout.terrainPlane')}</small><strong>{formatNumber(selectedVariant.solar.terrainPlaneKwhM2Year ?? 0, 0)} kWh/m²·yr</strong></span><span><small>{t('layout.shadeLoss')}</small><strong>{selectedVariant.solar.shadedCropAreaPercent}%</strong></span><span><small>{t('layout.winterSun')}</small><strong>{selectedVariant.solar.winterSunHoursPerDay} h/day</strong></span><span><small>{t('layout.summerSun')}</small><strong>{selectedVariant.solar.summerSunHoursPerDay} h/day</strong></span></div>}
         <p>{t('layout.solarMethod')}</p>
         {selectedVariant.solar.limitations.length > 0 && <small className="solar-limitation">{t('layout.solarLimitation')}</small>}
+        <section className="daily-solar-exposure" data-testid="daily-solar-exposure">
+          <div className="daily-solar-heading">
+            <span><small>{t('solar.dailyEyebrow')}</small><strong>{t('solar.dailyTitle')}</strong></span>
+            {dailySolarExposure && <StatusPill status={dailySolarExposure.status === 'available' ? dailySolarExposure.confidence : 'unavailable'} />}
+          </div>
+          <p>{t('solar.dailyBody', { year: dailySolarExposure?.growthYear ?? selectedVariant.design.analysisYear })}</p>
+          <div className="solar-time-controls">
+            <label><span>{t('solar.month')}</span><select aria-label={t('solar.month')} value={solarMonth} onChange={(event) => onSolarMonth(Number(event.target.value))}>{solarMonths.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}</select></label>
+            <label><span>{t('solar.hour')}</span><output>{String(solarHour).padStart(2, '0')}:00</output><input data-testid="solar-hour" aria-label={t('solar.hour')} type="range" min="5" max="20" step="1" value={solarHour} onChange={(event) => onSolarHour(Number(event.target.value))} /></label>
+          </div>
+          {dailySolarExposure?.status === 'available' && selectedDailySolarHour ? <>
+            <div className="solar-day-timeline" data-testid="solar-day-timeline" role="list" aria-label={t('solar.timeline')}>
+              {dailySolarExposure.hours.map((hour) => {
+                const daylight = hour.elevationDegrees > 0 && hour.estimatedHorizontalWm2 >= 5;
+                const height = daylight ? Math.max(10, Math.min(100, hour.elevationDegrees / 90 * 100)) : 4;
+                return <button key={hour.localSolarHour} type="button" role="listitem" className={`${hour.localSolarHour === solarHour ? 'active' : ''} ${daylight ? '' : 'night'}`} aria-label={t('solar.hourSummary', { hour: String(hour.localSolarHour).padStart(2, '0'), sunlit: hour.sunlitPercent })} onClick={() => onSolarHour(hour.localSolarHour)}>
+                  <i style={{ height: `${height}%` }} /><span>{hour.localSolarHour}</span>
+                </button>;
+              })}
+            </div>
+            <div className="daily-solar-metrics">
+              <span><small>{t('solar.sunElevation')}</small><strong>{formatNumber(selectedDailySolarHour.elevationDegrees, 1)}°</strong></span>
+              <span><small>{t('solar.azimuth')}</small><strong>{formatNumber(selectedDailySolarHour.azimuthDegrees, 1)}°</strong></span>
+              <span><small>{t('solar.estimatedRadiation')}</small><strong>{formatNumber(selectedDailySolarHour.estimatedHorizontalWm2, 0)} W/m²</strong></span>
+              <span><small>{t('solar.sunlitPlants')}</small><strong>{selectedDailySolarHour.sunlitCount}/{selectedDailySolarHour.activePlantCount}</strong></span>
+              <span><small>{t('solar.shadedPlants')}</small><strong>{selectedDailySolarHour.shadedCount}</strong></span>
+              <span><small>{t('solar.sunlitShare')}</small><strong>{formatNumber(selectedDailySolarHour.sunlitPercent, 1)}%</strong></span>
+            </div>
+            {selectedTree && <div className={`selected-plant-solar ${selectedPlantExposure?.status ?? 'inactive'}`} data-testid="selected-plant-solar">
+              <span><small>{t('solar.selectedPlant')} · {selectedTreeCode}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong></span>
+              <b>{selectedPlantExposure
+                ? t(`solar.status.${selectedPlantExposure.status}`, { exposure: formatNumber(selectedPlantExposure.exposurePercent, 0) })
+                : t('solar.status.inactive')}</b>
+            </div>}
+            <label className="solar-map-toggle"><input data-testid="solar-map-toggle" type="checkbox" checked={showSolarExposure} onChange={(event) => onShowSolarExposure(event.target.checked)} /><span><strong>{t('solar.showOnMap')}</strong><small>{t('solar.showOnMapHint')}</small></span></label>
+            <div className="solar-source-note"><Database size={15} /><span><strong>{dailySolarExposure.source}</strong><small>{dailySolarExposure.sourcePeriod} · {dailySolarExposure.sourceVersion} · {t('solar.localSolarTime')} · {translatedStatus(dailySolarExposure.confidence, t)}</small></span></div>
+            <small className="solar-limitation">{t('solar.dailyLimitation')}</small>
+          </> : <div className="solar-unavailable">{t('solar.unavailable')}</div>}
+        </section>
       </div>
       <div className="generation-audit" data-testid="generation-audit">
         <div className="card-heading"><div><Sparkles size={17} /><span><small>{t('layout.generationAudit')}</small><strong>{t(selectedVariant.generation.mode === 'partial' ? 'layout.partialGeneration' : 'layout.fullGeneration')}</strong></span></div><StatusPill status={selectedVariant.generation.conflicts.length ? 'review-required' : 'available'} /></div>
@@ -3781,8 +4463,15 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       </div>
       {selectedVariant.machinery.enabled && <div className="machinery-plan" data-testid="machinery-plan">
         <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.planEyebrow')}</small><strong>{t('machinery.planTitle')}</strong></span></div><StatusPill status={selectedVariant.machinery.clearanceSatisfied ? 'available' : 'review-required'} /></div>
-        <div className="machinery-result"><span><small>{t('machinery.corridors')}</small><strong>{selectedVariant.machinery.corridors.length}</strong></span><span><small>{t('machinery.turningAreas')}</small><strong>{selectedVariant.machinery.turningAreas.length}</strong></span><span><small>{t('machinery.reservedArea')}</small><strong>{formatNumber(selectedVariant.machinery.reservedAreaM2, 0)} m²</strong></span></div>
+        <div className="machinery-result">
+          <span><small>{t('machinery.perimeterLoop')}</small><strong>{formatNumber((selectedVariant.machinery.perimeterLoops ?? []).reduce((sum, route) => sum + route.lengthM, 0), 0)} m</strong></span>
+          <span><small>{t('machinery.manoeuvreRoute')}</small><strong>{formatNumber((selectedVariant.machinery.manoeuvreRoutes ?? []).reduce((sum, route) => sum + route.lengthM, 0), 0)} m</strong></span>
+          <span><small>{t('machinery.corridors')}</small><strong>{selectedVariant.machinery.corridors.length}</strong></span>
+          <span><small>{t('machinery.turningAreas')}</small><strong>{selectedVariant.machinery.turningAreas.length}</strong></span>
+          <span><small>{t('machinery.reservedArea')}</small><strong>{formatNumber(selectedVariant.machinery.reservedAreaM2, 0)} m²</strong></span>
+        </div>
         <p>{t('machinery.planBody', { corridor: formatNumber(selectedVariant.machinery.requiredCorridorWidthM, 2), headland: formatNumber(selectedVariant.machinery.headlandDepthM, 2) })}</p>
+        {!selectedVariant.machinery.clearanceSatisfied && <small className="machinery-review">{t('machinery.routeReview')}</small>}
       </div>}
       {selectedVariant.firebreak?.enabled && <div className="firebreak-plan" data-testid="firebreak-plan">
         <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.planEyebrow')}</small><strong>{t('firebreak.planTitle')}</strong></span></div><StatusPill status="review-required" /></div>
@@ -3793,7 +4482,10 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       </div>}
       <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
       <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
-      <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{selectedVariant.trees.map((tree) => <option key={tree.id} value={tree.id}>{tree.id}</option>)}</select></label>
+      <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{[...selectedVariant.trees].sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id)).map((tree) => {
+        const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+        return <option key={tree.id} value={tree.id}>{plantPositionCode(tree)} · {species ? speciesDisplayName(species, t) : tree.speciesId}</option>;
+      })}</select></label>
       <div className={`bulk-editor ${selectedTreeIds.length ? 'active' : ''}`} data-testid="bulk-editor">
         <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.bulkEyebrow')}</small><strong>{t('layout.bulkSelected', { count: selectedTreeIds.length })}</strong></span></div>{selectedTreeIds.length > 0 && <button className="bulk-clear" onClick={onClearSelection}>{t('actions.clear')}</button>}</div>
         <p>{t('layout.bulkHint')}</p>
@@ -3813,7 +4505,7 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
           </div>
         </>}
       </div>
-      {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span>{t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
+      {selectedTree ? <div className="selected-tree-card" data-testid="selected-tree-identity" data-plant-code={selectedTreeCode}><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')} <b>{selectedTreeCode}</b></small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span className="tree-scientific-name">{selectedTreeSpecies?.scientificName}</span><span>{t('layout.plantPosition', { row: plantingRowLabel(selectedTree.rowIndex), position: selectedTree.positionIndex + 1 })} · {t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
       {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
       </div>
       <div className="panel-action-bar">
@@ -3823,7 +4515,41 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   );
 }
 
-function WaterPanel({ site, irrigation, configuration, onConfiguration, profile, canCalculate, onCalculate, onPrepare, onCosts, onShowZones, editingIrrigation, onEditIrrigation }: { site: SiteBoundary | null; irrigation: IrrigationEstimate | null; configuration: IrrigationConfiguration; onConfiguration: (value: IrrigationConfiguration) => void; profile: SiteProfile | null; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onCosts: () => void; onShowZones: () => void; editingIrrigation: boolean; onEditIrrigation: () => void }) {
+function WaterPanel({
+  site,
+  irrigation,
+  configuration,
+  onConfiguration,
+  profile,
+  canCalculate,
+  onCalculate,
+  onPrepare,
+  onCosts,
+  onShowZones,
+  editingIrrigation,
+  showSupplyPipes,
+  showDripLaterals,
+  onShowSupplyPipes,
+  onShowDripLaterals,
+  onEditIrrigation,
+}: {
+  site: SiteBoundary | null;
+  irrigation: IrrigationEstimate | null;
+  configuration: IrrigationConfiguration;
+  onConfiguration: (value: IrrigationConfiguration) => void;
+  profile: SiteProfile | null;
+  canCalculate: boolean;
+  onCalculate: () => void;
+  onPrepare: () => void;
+  onCosts: () => void;
+  onShowZones: () => void;
+  editingIrrigation: boolean;
+  showSupplyPipes: boolean;
+  showDripLaterals: boolean;
+  onShowSupplyPipes: (visible: boolean) => void;
+  onShowDripLaterals: (visible: boolean) => void;
+  onEditIrrigation: () => void;
+}) {
   const { t } = useI18n();
   const update = (patch: Partial<IrrigationConfiguration>) => onConfiguration({ ...configuration, ...patch });
   const sourceConfiguration = <div className="water-configuration" data-testid="water-configuration">
@@ -3883,7 +4609,19 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
         {irrigation.network.manualOverrideCount > 0 && <p>{t('water.manualOverrides', { count: irrigation.network.manualOverrideCount })}</p>}
         {irrigation.network.warnings.map((warning) => <p className="hydraulic-warning" key={warning}>• {localizedDomainMessage(warning, t)}</p>)}
       </div>
-      <div className={`network-lines${routingValid ? '' : ' has-conflicts'}`}><div className="card-heading"><div><Route size={17} /><span><small>{t('water.lineScheduleEyebrow')}</small><strong>{t('water.lineSchedule')}</strong></span></div><button className={editingIrrigation ? 'line-edit active' : 'line-edit'} onClick={onEditIrrigation}>{t(editingIrrigation ? 'water.finishLineEdit' : 'water.editLines')}</button></div><p className="line-edit-hint">{t('water.editLinesHint')}</p>{!routingValid && <p className="routing-conflict">{t('water.editBlockedLines')}</p>}{(['mainline', 'submain', 'lateral', 'protected-crossing'] as const).map((kind) => {
+      <div className={`network-lines${routingValid ? '' : ' has-conflicts'}`}>
+        <div className="card-heading"><div><Route size={17} /><span><small>{t('water.lineScheduleEyebrow')}</small><strong>{t('water.lineSchedule')}</strong></span></div><button className={editingIrrigation ? 'line-edit active' : 'line-edit'} disabled={!showSupplyPipes && !showDripLaterals} onClick={onEditIrrigation}>{t(editingIrrigation ? 'water.finishLineEdit' : 'water.editLines')}</button></div>
+        <div className="irrigation-layer-controls" data-testid="irrigation-layer-controls" role="group" aria-label={t('water.editScope')}>
+          <button type="button" aria-pressed={showSupplyPipes} className={showSupplyPipes ? 'active' : ''} onClick={() => onShowSupplyPipes(!showSupplyPipes)}>
+            <Waves size={16} /><span><strong>{t('water.supplyPipes')}</strong><small>{t('water.supplyPipesBody')}</small></span><Check size={14} />
+          </button>
+          <button type="button" aria-pressed={showDripLaterals} className={showDripLaterals ? 'active' : ''} onClick={() => onShowDripLaterals(!showDripLaterals)}>
+            <Droplets size={16} /><span><strong>{t('water.dripLaterals')}</strong><small>{t('water.dripLateralsBody')}</small></span><Check size={14} />
+          </button>
+        </div>
+        <p className="line-edit-hint">{t('water.editLinesHint')}</p>
+        {!routingValid && <p className="routing-conflict">{t('water.editBlockedLines')}</p>}
+        {(['mainline', 'submain', 'lateral', 'protected-crossing'] as const).map((kind) => {
         const lines = irrigation.network.lines.filter((line) => line.kind === kind);
         if (!lines.length) return null;
         return <div key={kind}><span><i className={kind} /><strong>{t(`water.line.${kind}`)}</strong><small>{t('water.lineCountLength', { count: lines.length, length: formatNumber(lines.reduce((sum, line) => sum + line.lengthM, 0), 0) })}</small></span><span>{[...new Set(lines.map((line) => `${line.diameterMm} mm`))].join(' · ')}</span></div>;
@@ -3912,6 +4650,11 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
     sourceObservedAt: new Date().toISOString(),
     confidence: 'high',
   });
+  const resetPlantPrice = (speciesId: string) => {
+    const plantUnitCostOverrides = { ...configuration.plantUnitCostOverrides };
+    delete plantUnitCostOverrides[speciesId];
+    update({ plantUnitCostOverrides });
+  };
   const rateConfiguration = <div className="economic-configuration" data-testid="economic-configuration">
     <div className="card-heading"><div><CircleDollarSign size={17} /><span><small>{t('costs.localBasisEyebrow')}</small><strong>{t('costs.localBasisTitle', { country: configuration.countryCode })}</strong></span></div><StatusPill status={configuration.missingLocalRates.length ? 'review-required' : 'available'} /></div>
     <p>{localizedEconomicSummary(configuration.sourceSummary, t)}</p>
@@ -3925,6 +4668,30 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
       <label><span>{t('costs.smallProtection')}</span><input aria-label={t('costs.smallProtection')} type="number" min="0" step="0.01" value={configuration.smallProtectionUnitCost} onChange={(event) => update({ smallProtectionUnitCost: Number(event.target.value) })} /><i>{configuration.currencyCode}</i></label>
       <label><span>{t('costs.largeProtection')}</span><input aria-label={t('costs.largeProtection')} type="number" min="0" step="0.01" value={configuration.largeProtectionUnitCost} onChange={(event) => update({ largeProtectionUnitCost: Number(event.target.value) })} /><i>{configuration.currencyCode}</i></label>
     </div>
+    <section className="plant-unit-prices" data-testid="plant-unit-price-overrides">
+      <div>
+        <small>{t('costs.plantPricesEyebrow')}</small>
+        <strong>{t('costs.plantPricesTitle')}</strong>
+        <p>{t('costs.plantPricesBody')}</p>
+      </div>
+      <div className="plant-unit-price-list">
+        {species.map((item) => {
+          const customPrice = configuration.plantUnitCostOverrides[item.id];
+          const referencePrice = item.referencePurchasePrice * configuration.plantReferenceMultiplier;
+          const label = t('costs.unitPlantPriceFor', { species: speciesDisplayName(item, t) });
+          return <label key={item.id} data-species-id={item.id}>
+            <span><strong>{speciesDisplayName(item, t)}</strong><small>{item.scientificName}</small></span>
+            <span className="plant-price-input">
+              <input aria-label={label} type="number" min="0" step="0.01" value={customPrice ?? Number(referencePrice.toFixed(2))} onChange={(event) => update({ plantUnitCostOverrides: { ...configuration.plantUnitCostOverrides, [item.id]: Number(event.target.value) } })} />
+              <i>{configuration.currencyCode}</i>
+              {customPrice !== undefined && <button type="button" aria-label={t('costs.resetPlantPriceFor', { species: speciesDisplayName(item, t) })} title={t('costs.resetPlantPrice')} onClick={() => resetPlantPrice(item.id)}><X size={13} /></button>}
+            </span>
+            <em>{t(customPrice === undefined ? 'costs.referencePlantPrice' : 'costs.customPlantPrice')}</em>
+          </label>;
+        })}
+      </div>
+      <p className="plant-prices-hint">{t('costs.recalculatePriceHint')}</p>
+    </section>
     {configuration.missingLocalRates.length > 0 && <div className="economic-warning"><ShieldCheck size={16} /><span>{t('costs.missingLocalRates', { values: configuration.missingLocalRates.map((value) => localizedEconomicRate(value, t)).join(', ') })}</span></div>}
   </div>;
   if (!costs || !irrigation) return <div className="panel-body">{rateConfiguration}<EmptyState icon={CircleDollarSign} title={t('costs.emptyTitle')} body={t('costs.emptyBody')} action={t(canCalculate ? 'costs.calculate' : 'costs.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;

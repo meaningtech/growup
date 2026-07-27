@@ -548,6 +548,11 @@ export type DesignObjectives = {
   lowMaintenance: number;
 };
 
+export type SpeciesMixEntry = {
+  targetPercent: number;
+  successionOverride: SuccessionPhase | null;
+};
+
 export type DesignConfiguration = {
   system: DesignSystemId;
   extent: PlantingExtent;
@@ -560,6 +565,7 @@ export type DesignConfiguration = {
   monocultureSpeciesId: string | null;
   seed: number;
   objectives: DesignObjectives;
+  speciesMix: Record<string, SpeciesMixEntry>;
   machinery: MachineryConfiguration;
   firebreak: FirebreakConfiguration;
 };
@@ -609,6 +615,16 @@ export type MachineryTurningArea = {
   rowIndexes: number[];
 };
 
+export type MachineryRoute = {
+  id: string;
+  points: Coordinate[];
+  widthM: number;
+  lengthM: number;
+  closed: boolean;
+  connectedCorridorIds: string[];
+  clearanceSatisfied: boolean;
+};
+
 export type MachineryPlan = {
   enabled: boolean;
   presetId: AgriculturalMachinePresetId;
@@ -622,6 +638,8 @@ export type MachineryPlan = {
   reservedAreaM2: number;
   corridors: MachineryCorridor[];
   turningAreas: MachineryTurningArea[];
+  perimeterLoops: MachineryRoute[];
+  manoeuvreRoutes: MachineryRoute[];
   clearanceSatisfied: boolean;
   notes: string[];
 };
@@ -737,6 +755,7 @@ export type EconomicConfiguration = {
   waterCostPerM3: number;
   electricityCostPerKwh: number;
   plantReferenceMultiplier: number;
+  plantUnitCostOverrides: Record<string, number>;
   irrigationReferenceMultiplier: number;
   smallProtectionUnitCost: number;
   largeProtectionUnitCost: number;

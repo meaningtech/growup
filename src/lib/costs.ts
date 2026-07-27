@@ -48,7 +48,8 @@ function calculatePlantScope(
   const bySpecies = [...counts.entries()].map(([speciesId, count]) => {
     const item = speciesById.get(speciesId);
     if (!item) throw new Error(`Unknown species ${speciesId}`);
-    const unitPlantCost = item.referencePurchasePrice * economics.plantReferenceMultiplier;
+    const unitPlantCost = economics.plantUnitCostOverrides[item.id]
+      ?? item.referencePurchasePrice * economics.plantReferenceMultiplier;
     const subtotalCost = count * (unitPlantCost + item.plantingLaborHours * economics.laborCostPerHour);
     return {
       speciesId,

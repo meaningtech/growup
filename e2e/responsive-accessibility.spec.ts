@@ -75,8 +75,9 @@ test('keeps the Google sign-in dialog inside narrow mobile viewports', async ({ 
     user: null,
   } }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'Apri menu' }).click();
-  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Accedi' }).click();
+  const topbarAccount = page.getByTestId('topbar-account');
+  await expect(topbarAccount).toHaveAttribute('aria-label', 'Accedi');
+  await topbarAccount.click();
 
   const dialog = page.getByRole('dialog', { name: 'Tutti i progetti dei terreni, insieme.' });
   const googleButton = dialog.getByRole('button', { name: 'Continua con Google' });
@@ -107,6 +108,55 @@ test('keeps the Google sign-in dialog inside narrow mobile viewports', async ({ 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-google-login.png'), fullPage: false });
+});
+
+test('keeps the signed-in identity visible outside the menu on narrow screens', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.route('**/api/config', (route) => route.fulfill({ json: {
+    googleMapsApiKey: '',
+    initialMapViewport: { center: { lat: 0, lng: 0 }, zoom: 2 },
+    climatePeriod: '2021-01-01 to 2025-12-31',
+    modelVersion: 'responsive-test',
+    assistant: { configured: false, interface: 'openai-compatible' },
+    auth: { configured: true, googleClientId: 'responsive-test.apps.googleusercontent.com' },
+    sharing: { configured: true },
+  } }));
+  await page.route('**/api/catalog/stats', (route) => route.fulfill({ json: {
+    total: 51,
+    treeLike: 51,
+    globUnt: 0,
+    designReady: 51,
+  } }));
+  await page.route('**/api/auth/session', (route) => route.fulfill({ json: {
+    authenticated: true,
+    configured: true,
+    user: {
+      id: 'responsive-user',
+      email: 'sebastiano@example.test',
+      name: 'Sebastiano',
+      pictureUrl: null,
+      locale: 'it',
+      preferences: {},
+    },
+  } }));
+  await page.route('**/api/projects', (route) => route.fulfill({ json: [] }));
+  await page.goto('/');
+
+  const account = page.getByTestId('topbar-account');
+  await expect(account).toHaveAttribute('aria-label', 'Signed in as Sebastiano');
+  await expect(account).toContainText('S');
+  const box = await account.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+
+  await account.click();
+  const menu = page.getByRole('dialog', { name: 'Menu' });
+  await expect(menu).toContainText('Sebastiano');
+  const overflow = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
 });
 
 test('keeps supporting text readable without oversized form controls', async ({ page }, testInfo) => {

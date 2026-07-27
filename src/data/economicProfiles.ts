@@ -90,6 +90,7 @@ export function convertedEconomicConfiguration(
     waterCostPerM3: round(USD_PLANNING_RATES.waterCostPerM3 * rate),
     electricityCostPerKwh: round(USD_PLANNING_RATES.electricityCostPerKwh * rate),
     plantReferenceMultiplier: round(rate),
+    plantUnitCostOverrides: {},
     irrigationReferenceMultiplier: round(rate),
     smallProtectionUnitCost: round(USD_PLANNING_RATES.smallProtectionUnitCost * rate),
     largeProtectionUnitCost: round(USD_PLANNING_RATES.largeProtectionUnitCost * rate),
@@ -102,6 +103,12 @@ export function normalizeEconomicConfiguration(value: Partial<EconomicConfigurat
   const defaults = defaultEconomicConfiguration(countryCode);
   if (!value || value.countryCode?.toUpperCase() !== defaults.countryCode) return defaults;
   const numeric = (candidate: unknown, fallback: number) => Number.isFinite(Number(candidate)) && Number(candidate) >= 0 ? Number(candidate) : fallback;
+  const plantUnitCostOverrides = Object.fromEntries(
+    Object.entries(value.plantUnitCostOverrides && typeof value.plantUnitCostOverrides === 'object' ? value.plantUnitCostOverrides : {})
+      .filter(([speciesId, unitCost]) => speciesId.length > 0 && speciesId.length <= 160 && Number.isFinite(Number(unitCost)) && Number(unitCost) >= 0 && Number(unitCost) <= 1_000_000)
+      .slice(0, 200)
+      .map(([speciesId, unitCost]) => [speciesId, Number(unitCost)]),
+  );
   const result: EconomicConfiguration = {
     ...defaults,
     currencyCode: /^[A-Z]{3}$/.test(String(value.currencyCode ?? '').toUpperCase()) ? String(value.currencyCode).toUpperCase() : defaults.currencyCode,
@@ -112,6 +119,7 @@ export function normalizeEconomicConfiguration(value: Partial<EconomicConfigurat
     waterCostPerM3: numeric(value.waterCostPerM3, defaults.waterCostPerM3),
     electricityCostPerKwh: numeric(value.electricityCostPerKwh, defaults.electricityCostPerKwh),
     plantReferenceMultiplier: numeric(value.plantReferenceMultiplier, defaults.plantReferenceMultiplier),
+    plantUnitCostOverrides,
     irrigationReferenceMultiplier: numeric(value.irrigationReferenceMultiplier, defaults.irrigationReferenceMultiplier),
     smallProtectionUnitCost: numeric(value.smallProtectionUnitCost, defaults.smallProtectionUnitCost),
     largeProtectionUnitCost: numeric(value.largeProtectionUnitCost, defaults.largeProtectionUnitCost),

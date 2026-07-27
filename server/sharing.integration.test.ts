@@ -52,7 +52,8 @@ describe('shared project review integration', () => {
       updateUserOnboarding: async () => user,
       getProject: async (ownerUserId, id) => ownerUserId === user.id && id === project.id ? project : null,
       getSharedProject: async (id) => id === project.id ? { ownerUserId: user.id, project } : null,
-      listProjects: async () => [{ id: project.id, name: project.name, updatedAt: project.updatedAt }],
+      listProjects: async () => [{ id: project.id, name: project.name, updatedAt: project.updatedAt, archivedAt: null }],
+      setProjectArchived: async (_ownerUserId, id, archivedAt) => ({ id, name: project.name, updatedAt: project.updatedAt, archivedAt }),
       listProjectRevisions: async () => [],
       getProjectRevision: async () => null,
       getCalculationRun: async () => null,
@@ -72,6 +73,26 @@ describe('shared project review integration', () => {
     });
     const login = await request(app).post('/api/auth/google').send({ credential: 'valid-test-token' }).expect(200);
     const cookie = String(login.headers['set-cookie'][0]).split(';')[0];
+    const viewOnly = await request(app).post(`/api/projects/${project.id}/share`).set('Cookie', cookie).send({
+      mode: 'view',
+      expiresAt: '2026-08-26T10:00:00.000Z',
+    }).expect(200);
+    expect(viewOnly.body).toEqual(expect.objectContaining({ enabled: true, mode: 'view', path: expect.stringMatching(/^\/shared\//) }));
+    const viewToken = viewOnly.body.path.split('/').pop();
+    const viewOnlyProject = await request(app).get(`/api/shared/projects/${viewToken}`).expect(200);
+    expect(viewOnlyProject.body.collaboration.share).toEqual(expect.objectContaining({ enabled: true, mode: 'view' }));
+    expect(viewOnlyProject.body.collaboration.share).not.toHaveProperty('tokenVersion');
+    await request(app).post(`/api/shared/projects/${viewToken}/comments`).send({
+      authorName: 'Read-only visitor',
+      message: 'This must not be stored.',
+    }).expect(403);
+    await request(app).post(`/api/shared/projects/${viewToken}/review`).send({
+      status: 'approved',
+      reviewerName: 'Read-only visitor',
+    }).expect(403);
+    expect(project.collaboration.comments).toHaveLength(0);
+    expect(project.collaboration.review).toBeNull();
+
     const shared = await request(app).post(`/api/projects/${project.id}/share`).set('Cookie', cookie).send({
       mode: 'review',
       expiresAt: '2026-08-26T10:00:00.000Z',

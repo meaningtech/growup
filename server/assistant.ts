@@ -73,12 +73,13 @@ export async function planAssistantAction(
   };
 
   let lastError: unknown = null;
+  let repairStructuredOutput = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(providerRequestBody(requestBody, baseUrl, model, repairStructuredOutput)),
         signal: AbortSignal.timeout(timeoutMs),
       });
       const payload = await response.json().catch(() => null) as OpenAiCompatibleResponse | { error?: { message?: string } } | null;
@@ -88,11 +89,15 @@ export async function planAssistantAction(
         throw assistantError(502, 'AI_PROVIDER_ERROR', boundedProviderMessage(providerMessage) || `The configured AI provider returned ${response.status}.`, retryable);
       }
       const content = payload && 'choices' in payload ? payload.choices?.[0]?.message?.content?.trim() : '';
-      if (!content) throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.', true);
+      if (!content) {
+        repairStructuredOutput = true;
+        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.', true);
+      }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(content);
+        parsed = parseJsonResponse(content);
       } catch {
+        repairStructuredOutput = true;
         throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned invalid JSON.', true);
       }
       try {
@@ -126,7 +131,7 @@ export async function reviewAssistantProject(
   const model = providerModel(config);
   const baseUrl = providerBaseUrl(config).replace(/\/$/, '');
   const fetchImpl = config.fetchImpl ?? fetch;
-  const timeoutMs = integerSetting(config.aiProviderTimeoutMs, process.env.AI_PROVIDER_TIMEOUT_MS, 25_000, 1_000, 60_000);
+  const timeoutMs = integerSetting(config.aiProviderTimeoutMs, process.env.AI_PROVIDER_TIMEOUT_MS, 60_000, 1_000, 120_000);
   const maxAttempts = integerSetting(config.aiProviderMaxAttempts, process.env.AI_PROVIDER_MAX_ATTEMPTS, 2, 1, 3);
   const retryDelayMs = integerSetting(config.aiProviderRetryDelayMs, process.env.AI_PROVIDER_RETRY_DELAY_MS, 250, 0, 5_000);
   const requestBody = {
@@ -150,12 +155,13 @@ export async function reviewAssistantProject(
   };
 
   let lastError: unknown = null;
+  let repairStructuredOutput = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(providerRequestBody(requestBody, baseUrl, model, repairStructuredOutput)),
         signal: AbortSignal.timeout(timeoutMs),
       });
       const payload = await response.json().catch(() => null) as OpenAiCompatibleResponse | { error?: { message?: string } } | null;
@@ -165,11 +171,15 @@ export async function reviewAssistantProject(
         throw assistantError(502, 'AI_PROVIDER_ERROR', boundedProviderMessage(providerMessage) || `The configured AI provider returned ${response.status}.`, retryable);
       }
       const content = payload && 'choices' in payload ? payload.choices?.[0]?.message?.content?.trim() : '';
-      if (!content) throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.', true);
+      if (!content) {
+        repairStructuredOutput = true;
+        throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned an empty JSON response.', true);
+      }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(content);
+        parsed = parseJsonResponse(content);
       } catch {
+        repairStructuredOutput = true;
         throw assistantError(502, 'AI_PROVIDER_INVALID_RESPONSE', 'The configured AI provider returned invalid JSON.', true);
       }
       try {
@@ -234,6 +244,7 @@ Rules:
 - Verdict "ready" means ready for documented planning use with stated local/field checks, never legal certification. Use "revise" for material correctable issues and "incomplete" when core project outputs are absent.
 - Score dimensions and overall from 0 to 100. Keep scores consistent with findings: blocking findings cap overall at 49, major unresolved findings cap it at 74.
 - Prefer concise, testable recommendations.
+- Begin the response immediately with the JSON object. Keep each dimension summary under 35 words and each finding explanation under 60 words.
 
 Required JSON shape:
 {
@@ -327,6 +338,18 @@ function compactContext(context: AssistantProjectContext) {
         requiredCorridorWidthM: variant.machinery.requiredCorridorWidthM,
         headlandDepthM: variant.machinery.headlandDepthM,
         reservedAreaM2: variant.machinery.reservedAreaM2,
+        perimeterLoops: (variant.machinery.perimeterLoops ?? []).map((route) => ({
+          id: route.id,
+          widthM: route.widthM,
+          lengthM: route.lengthM,
+          clearanceSatisfied: route.clearanceSatisfied,
+        })),
+        manoeuvreRoutes: (variant.machinery.manoeuvreRoutes ?? []).map((route) => ({
+          id: route.id,
+          lengthM: route.lengthM,
+          connectedCorridorIds: route.connectedCorridorIds,
+          clearanceSatisfied: route.clearanceSatisfied,
+        })),
         clearanceSatisfied: variant.machinery.clearanceSatisfied,
         notes: variant.machinery.notes,
       },
@@ -596,15 +619,50 @@ function providerModel(config: AssistantProviderConfig) {
 }
 
 function structuredOutputProviderOptions(baseUrl: string, model: string) {
+  if (isDeepSeekProvider(baseUrl, model)) return { thinking: { type: 'disabled' as const } };
+  return {};
+}
+
+function providerRequestBody<T extends { messages: Array<{ role: string; content: string }>; response_format: { type: string } }>(
+  requestBody: T,
+  baseUrl: string,
+  model: string,
+  repairStructuredOutput: boolean,
+) {
+  if (!repairStructuredOutput || !isDeepSeekProvider(baseUrl, model)) return requestBody;
+  const { response_format: _responseFormat, ...fallback } = requestBody;
+  return {
+    ...fallback,
+    messages: [
+      ...requestBody.messages,
+      {
+        role: 'user',
+        content: 'The previous JSON-mode response was empty. Return exactly one compact valid JSON object now, beginning with { and ending with }. Do not use Markdown fences or any text outside the object.',
+      },
+    ],
+  };
+}
+
+function isDeepSeekProvider(baseUrl: string, model: string) {
   try {
     const hostname = new URL(baseUrl).hostname.toLocaleLowerCase('en');
-    if (hostname === 'api.deepseek.com' || model.toLocaleLowerCase('en').startsWith('deepseek-v4')) {
-      return { thinking: { type: 'disabled' as const } };
-    }
+    return hostname === 'api.deepseek.com' || model.toLocaleLowerCase('en').startsWith('deepseek-v4');
   } catch {
-    return {};
+    return model.toLocaleLowerCase('en').startsWith('deepseek-v4');
   }
-  return {};
+}
+
+function parseJsonResponse(content: string) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const fenced = content.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+    if (fenced) return JSON.parse(fenced);
+    const start = content.indexOf('{');
+    const end = content.lastIndexOf('}');
+    if (start >= 0 && end > start) return JSON.parse(content.slice(start, end + 1));
+    throw new Error('No JSON object found.');
+  }
 }
 
 function integerSetting(configured: number | undefined, environmental: string | undefined, fallback: number, minimum: number, maximum: number) {

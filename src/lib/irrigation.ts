@@ -479,7 +479,14 @@ function segmentIsClear(start: PointM, end: PointM, obstacles: PointM[][], bound
 
 function configurationCrossings(boundary: SiteBoundary, variant: LayoutVariant, lines: IrrigationLine[]): IrrigationLine[] {
   const corridors: Array<{ id: string; points: Coordinate[]; widthM: number }> = [];
-  if (variant.design.machinery.protectPipeCrossings && variant.machinery.enabled) corridors.push(...variant.machinery.corridors);
+  if (variant.design.machinery.protectPipeCrossings && variant.machinery.enabled) {
+    corridors.push(...variant.machinery.corridors);
+    for (const route of [...(variant.machinery.perimeterLoops ?? []), ...(variant.machinery.manoeuvreRoutes ?? [])]) {
+      for (let index = 0; index < route.points.length - 1; index += 1) {
+        corridors.push({ id: `${route.id}-${index}`, points: [route.points[index], route.points[index + 1]], widthM: route.widthM });
+      }
+    }
+  }
   if (variant.firebreak?.enabled && variant.firebreak.protectPipeCrossings) corridors.push(...variant.firebreak.lines);
   if (!corridors.length) return [];
   const projection = createLocalProjection(polygonCentroid(boundary.polygon));

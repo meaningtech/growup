@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ONBOARDING_STEPS,
   ONBOARDING_STORAGE_KEY,
   isOnboardingLocationReady,
   latestOnboardingPreference,
@@ -45,5 +46,28 @@ describe('onboarding persistence', () => {
     expect(readOnboardingPreference(storage)).toBeNull();
     expect(storage.getItem(ONBOARDING_STORAGE_KEY)).toBeNull();
     expect(normalizeOnboardingPreference({ status: 'active', step: 'location', updatedAt: 'invalid' })).toBeNull();
+  });
+
+  it('round-trips every checkpoint in the complete planning flow', () => {
+    expect(ONBOARDING_STEPS).toEqual([
+      'welcome',
+      'location',
+      'boundary',
+      'analysis',
+      'species',
+      'design',
+      'water',
+      'fire',
+      'costs',
+      'review',
+      'complete',
+    ]);
+    for (const step of ONBOARDING_STEPS) {
+      expect(normalizeOnboardingPreference({
+        status: 'active',
+        step,
+        updatedAt: '2026-07-27T12:00:00.000Z',
+      })?.step).toBe(step);
+    }
   });
 });

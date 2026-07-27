@@ -30,7 +30,7 @@ test('uses the configured AI provider to propose and apply a confirmed species c
 
   await page.getByRole('button', { name: 'Apply validated changes' }).click();
   await expect(page.getByText('AI proposal validated and applied to the Growup project.')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('assistant-proposal')).toHaveCount(0);
+  await expect(page.getByTestId('assistant-proposal')).toContainText('Changes applied to the project');
   await page.getByTestId('step-species').click();
   await expect(page.getByText('10 species selected. Configure plants, fire access and working equipment in one place.')).toBeVisible();
   await page.getByTestId('step-costs').click();

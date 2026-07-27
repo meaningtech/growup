@@ -19,6 +19,8 @@ export type OperationalSchedule = {
     machineryCorridorCount: number;
     machineryReservedAreaM2: number;
     machineryHeadlandDepthM: number;
+    machineryPerimeterLengthM: number;
+    machineryManoeuvreLengthM: number;
     firebreakLengthM: number;
     firebreakWidthM: number;
     firebreakReservedAreaM2: number;
@@ -104,6 +106,8 @@ export function buildOperationalSchedule(
       machineryCorridorCount: variant.machinery.corridors.length,
       machineryReservedAreaM2: variant.machinery.reservedAreaM2,
       machineryHeadlandDepthM: variant.machinery.headlandDepthM,
+      machineryPerimeterLengthM: (variant.machinery.perimeterLoops ?? []).reduce((sum, route) => sum + route.lengthM, 0),
+      machineryManoeuvreLengthM: (variant.machinery.manoeuvreRoutes ?? []).reduce((sum, route) => sum + route.lengthM, 0),
       firebreakLengthM: variant.firebreak?.totalLengthM ?? 0,
       firebreakWidthM: variant.firebreak?.plannedWidthM ?? 0,
       firebreakReservedAreaM2: variant.firebreak?.reservedAreaM2 ?? 0,
