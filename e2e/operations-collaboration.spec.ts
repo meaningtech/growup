@@ -4,6 +4,7 @@ import { defaultEconomicConfiguration } from '../src/data/economicProfiles';
 import { firebreakConfigurationFromFuelModel } from '../src/data/firebreak';
 import { defaultProjectCollaboration } from '../src/lib/collaboration';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
+import { projectAnalysisFingerprint } from '../src/lib/projectAnalysis';
 import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
 import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from '../src/lib/layout';
 import type { ProjectState } from '../src/types';
@@ -43,7 +44,7 @@ function projectFixture(): ProjectState {
   };
 }
 
-async function mockBase(page: Page, authenticated = false) {
+async function mockBase(page: Page, authenticated = false, assistantConfigured = false) {
   await page.route('**/api/config', async (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -52,7 +53,7 @@ async function mockBase(page: Page, authenticated = false) {
       initialMapViewport: { center: { lat: 0, lng: 0 }, zoom: 2 },
       climatePeriod: '2021–2025',
       modelVersion: 'test',
-      assistant: { configured: false, interface: 'openai-compatible' },
+      assistant: { configured: assistantConfigured, interface: 'openai-compatible' },
       auth: { configured: authenticated, googleClientId: authenticated ? 'test.apps.googleusercontent.com' : '' },
       sharing: { configured: true },
     },
@@ -114,11 +115,13 @@ test('persists fire operations and advanced group edits through local recovery',
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toContainText('EFFIS · FWI');
   await expect(operations).toContainText('8 km forecast grid');
+  await operations.getByRole('tab', { name: 'Operations' }).click();
   const firstTask = operations.locator('.fire-task-list article').filter({ hasText: 'Remove accumulated surface fuels' });
   await firstTask.locator('select').selectOption('complete');
   await firstTask.getByPlaceholder('Field note').fill('Cleared and photographed.');
   await operations.getByLabel('Next field inspection').fill('2026-08-15');
   await page.screenshot({ path: '/private/tmp/growup-fire-operations-checklist.png', fullPage: false });
+  await operations.getByRole('tab', { name: 'Analysis' }).click();
   await operations.getByRole('button', { name: 'Show on map' }).click();
 
   await page.getByRole('button', { name: 'Map layers' }).click();
@@ -137,6 +140,7 @@ test('persists fire operations and advanced group edits through local recovery',
   await page.reload();
   await page.getByRole('button', { name: 'Recover' }).click();
   await page.getByTestId('step-fire').click();
+  await page.getByTestId('fire-operations-panel').getByRole('tab', { name: 'Operations' }).click();
   await expect(page.getByTestId('fire-operations-panel')).toContainText('1 of 5 controls closed');
 });
 
@@ -277,7 +281,7 @@ test('gives authenticated project selection its own mobile page', async ({ page 
   await expect(page.locator('.mobile-project-select')).toHaveCount(0);
 });
 
-test('keeps the fire checklist usable on a mobile viewport', async ({ page }) => {
+test('opens fire analysis first and keeps operations secondary on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const project = projectFixture();
   await mockBase(page);
@@ -291,6 +295,19 @@ test('keeps the fire checklist usable on a mobile viewport', async ({ page }) =>
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toBeVisible();
   await expect(operations.getByText('EFFIS · FWI')).toBeVisible();
+  await expect(operations.getByTestId('fire-analysis-overview')).toBeVisible();
+  await expect(operations.locator('.fire-component-list article')).toHaveCount(5);
+  await expect(operations.locator('.fire-task-list article')).toHaveCount(0);
+  await operations.locator('.fire-analysis-hero').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '/private/tmp/growup-fire-analysis-mobile.png', fullPage: false });
+  await operations.getByRole('tab', { name: 'Data' }).click();
+  await expect(operations.getByTestId('fire-analysis-data')).toBeVisible();
+  await expect(operations.locator('.fire-data-section')).toHaveCount(5);
+  await expect(operations.getByText('35% weight')).toBeVisible();
+  await operations.getByRole('tab', { name: 'Sources' }).click();
+  await expect(operations.getByTestId('fire-analysis-sources')).toBeVisible();
+  await expect(operations.locator('.fire-evidence-card')).not.toHaveCount(0);
+  await operations.getByRole('tab', { name: 'Operations' }).click();
   await expect(operations.locator('.fire-task-list article')).toHaveCount(5);
   await expect(page.locator('.modal-backdrop')).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Inspect, maintain and record' })).toHaveCount(0);
@@ -303,6 +320,64 @@ test('keeps the fire checklist usable on a mobile viewport', async ({ page }) =>
   expect(operationsBox!.x).toBeGreaterThanOrEqual(inspectorBox!.x);
   expect(operationsBox!.x + operationsBox!.width).toBeLessThanOrEqual(inspectorBox!.x + inspectorBox!.width);
   await page.screenshot({ path: '/private/tmp/growup-fire-operations-mobile.png', fullPage: false });
+});
+
+test('runs and persists the final formal AI review', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const project = projectFixture();
+  await mockBase(page, false, true);
+  await page.route('**/api/assistant/review', async (route) => {
+    const request = route.request().postDataJSON() as { context: Parameters<typeof projectAnalysisFingerprint>[0] };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: {
+        id: 'formal-review-browser',
+        model: 'review-test-model',
+        generatedAt: observedAt,
+        contextFingerprint: projectAnalysisFingerprint(request.context),
+        verdict: 'revise',
+        overallScore: 72,
+        executiveSummary: 'The plan is coherent but needs a documented local fire review.',
+        dimensions: [
+          ['evidence', 82, 'pass'],
+          ['species', 80, 'pass'],
+          ['design', 78, 'pass'],
+          ['water', 74, 'attention'],
+          ['fire', 62, 'attention'],
+          ['operations', 66, 'attention'],
+          ['economics', 70, 'attention'],
+          ['coherence', 81, 'pass'],
+        ].map(([id, score, status]) => ({ id, score, status, summary: `${id} review summary.` })),
+        findings: [{
+          id: 'fire-local-review',
+          severity: 'major',
+          area: 'fire',
+          title: 'Local fire review remains open',
+          explanation: 'The mapped firebreak is a planning output, not field implementation evidence.',
+          evidence: ['selectedVariant.firebreak.localReviewRequired'],
+          recommendation: 'Confirm local authority requirements and field fuel continuity.',
+        }],
+        assumptions: ['The irrigation source remains available during the dry season.'],
+        limitations: ['This AI review is not a legal or wildfire-safety certification.'],
+      },
+    });
+  });
+  await loadRecoveryDraft(page, project);
+  await page.locator('.toast button').click();
+  await page.getByTestId('step-analysis').click();
+  const analysis = page.getByTestId('project-analysis-panel');
+  await expect(analysis).toBeVisible();
+  await analysis.getByRole('button', { name: 'Run formal review' }).click();
+  const report = page.getByTestId('formal-review-report');
+  await expect(report).toContainText('Revision required');
+  await expect(report).toContainText('72');
+  await expect(report).toContainText('Local fire review remains open');
+  await page.screenshot({ path: '/private/tmp/growup-formal-analysis-desktop.png', fullPage: false });
+  await expect.poll(async () => {
+    const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
+    return saved?.analysis?.id;
+  }).toBe('formal-review-browser');
 });
 
 test('keeps the populated water page locked to the mobile viewport', async ({ page }, testInfo) => {

@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
+import { defaultEconomicConfiguration } from '../src/data/economicProfiles.js';
 import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/lib/geometry.js';
 import { defaultProjectCollaboration } from '../src/lib/collaboration.js';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations.js';
+import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation.js';
 import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout.js';
 import { distanceToSiteBoundaryM, siteContainsCoordinate } from '../src/lib/siteGeometry.js';
 import type { Evidence, ProjectState, SiteProfile } from '../src/types.js';
@@ -624,6 +626,19 @@ describe('Growup API integration', () => {
       irrigation: costsResponse.body.irrigation,
       costs: costsResponse.body.establishment,
       fireOperations,
+      analysis: {
+        id: 'persisted-formal-review',
+        model: 'integration-review-model',
+        generatedAt: observedAt,
+        contextFingerprint: 'review-integration',
+        verdict: 'revise',
+        overallScore: 72,
+        executiveSummary: 'A local fire review remains open.',
+        dimensions: [],
+        findings: [],
+        assumptions: [],
+        limitations: ['Not a legal certification.'],
+      },
       collaboration,
       createdAt: observedAt,
       updatedAt: observedAt,
@@ -641,6 +656,11 @@ describe('Growup API integration', () => {
       status: 'complete',
       completedAt: observedAt,
       notes: 'Surface fuels inspected after mowing.',
+    }));
+    expect(storedResponse.body.analysis).toEqual(expect.objectContaining({
+      id: 'persisted-formal-review',
+      verdict: 'revise',
+      overallScore: 72,
     }));
     expect(storedResponse.body.collaboration.comments).toEqual([
       expect.objectContaining({
@@ -858,6 +878,8 @@ describe('Growup API integration', () => {
         siteProfile: siteProfile(),
         selectedSpeciesIds,
         designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+        irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+        economicConfiguration: defaultEconomicConfiguration('IT'),
         variants: [],
         selectedVariantId: null,
         timelineYear: 5,
@@ -876,6 +898,85 @@ describe('Growup API integration', () => {
     ]);
   });
 
+  it('runs a structured formal AI review grounded in the complete project context', async () => {
+    const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    const app = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      fetchImpl: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        expect(body.messages[0].content).toContain('independent senior agroforestry project reviewer');
+        expect(body.messages[0].content).toContain('EFFIS FWI is a regional weather-danger forecast');
+        expect(body.messages[0].content).toContain('Missing evidence is unknown');
+        expect(body.messages[1].content).toContain('Formal review fixture');
+        expect(body.messages[1].content).toContain('Italian');
+        expect(body.messages[1].content).toContain('"economicConfiguration"');
+        expect(body.messages[1].content).toContain('"irrigationConfiguration"');
+        expect(body.messages[1].content).toContain('"waterPointCount"');
+        expect(body.max_tokens).toBe(5_000);
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({
+            verdict: 'revise',
+            overallScore: 78,
+            executiveSummary: 'Il progetto è coerente, ma richiede una verifica operativa antincendio.',
+            dimensions: [
+              { id: 'evidence', score: 82, status: 'pass', summary: 'Fonti tracciate.' },
+              { id: 'species', score: 80, status: 'pass', summary: 'Palette compatibile.' },
+              { id: 'design', score: 79, status: 'pass', summary: 'Geometria coerente.' },
+              { id: 'water', score: 76, status: 'attention', summary: 'Confermare la fonte.' },
+              { id: 'fire', score: 62, status: 'attention', summary: 'Serve verifica locale.' },
+              { id: 'operations', score: 68, status: 'attention', summary: 'Checklist aperta.' },
+              { id: 'economics', score: 75, status: 'pass', summary: 'Costi tracciati.' },
+              { id: 'coherence', score: 81, status: 'pass', summary: 'Nessuna contraddizione bloccante.' },
+            ],
+            findings: [{
+              id: 'fire-local-review',
+              severity: 'major',
+              area: 'fire',
+              title: 'Verifica antincendio locale aperta',
+              explanation: 'La fascia è un output progettuale e non prova la realizzazione sul campo.',
+              evidence: ['project.fireOperations.tasks.authority-review', 'selectedVariant.firebreak.localReviewRequired'],
+              recommendation: 'Confermare requisiti AIB e condizioni del combustibile sul campo.',
+            }],
+            assumptions: ['La sorgente irrigua resta disponibile nella stagione secca.'],
+            limitations: ['La revisione AI non costituisce certificazione legale o antincendio.'],
+          }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    const response = await request(app).post('/api/assistant/review').send({
+      locale: 'it',
+      context: {
+        site: { ...TEMPERATE_OPEN_FIELD_FIXTURE, name: 'Formal review fixture' },
+        siteProfile: siteProfile(),
+        selectedSpeciesIds,
+        designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+        irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+        economicConfiguration: defaultEconomicConfiguration('IT'),
+        variants: [],
+        selectedVariantId: null,
+        timelineYear: 5,
+        irrigation: null,
+        costs: null,
+        fireOperations: defaultFireOperationsPlan('2026-07-27T08:00:00.000Z'),
+        section: 'analysis',
+      },
+    }).expect(200);
+
+    expect(response.body).toEqual(expect.objectContaining({
+      verdict: 'revise',
+      overallScore: 74,
+      model: expect.any(String),
+      contextFingerprint: expect.stringMatching(/^review-[a-f0-9]{8}$/),
+      generatedAt: expect.any(String),
+    }));
+    expect(response.body.dimensions).toHaveLength(8);
+    expect(response.body.findings[0]).toEqual(expect.objectContaining({
+      severity: 'major',
+      area: 'fire',
+    }));
+  });
+
   it('retries only transient AI-provider failures and classifies provider timeouts', async () => {
     const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
     const context = {
@@ -883,6 +984,8 @@ describe('Growup API integration', () => {
       siteProfile: siteProfile(),
       selectedSpeciesIds,
       designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+      economicConfiguration: defaultEconomicConfiguration('IT'),
       variants: [],
       selectedVariantId: null,
       timelineYear: 5,

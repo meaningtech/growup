@@ -57,6 +57,7 @@ import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakE
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
 import { disabledFirebreakPlan } from './lib/firebreak';
 import { defaultFireOperationsPlan, effisFireWeatherTile, normalizeFireOperationsPlan } from './lib/fireOperations';
+import { assessFireScreening, type FireScreeningComponentId } from './lib/fireRisk';
 import { defaultProjectCollaboration, normalizeProjectCollaboration } from './lib/collaboration';
 import { growthState } from './lib/growth';
 import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
@@ -64,6 +65,7 @@ import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOver
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration } from './lib/layout';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
+import { projectAnalysisFingerprint } from './lib/projectAnalysis';
 import {
   distanceToSiteBoundaryM,
   distanceToSitePathM,
@@ -102,6 +104,7 @@ import type {
   LayoutVariant,
   LocationSearchResult,
   ProjectState,
+  ProjectAnalysisReport,
   ProjectCollaboration,
   FireOperationsPlan,
   FireMaintenanceTask,
@@ -118,7 +121,7 @@ import type {
   WindClimatologyPeriod,
 } from './types';
 
-type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs';
+type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
 type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'path' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
 
 type AppConfig = {
@@ -182,6 +185,7 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'water', label: 'Water', icon: Droplets },
   { id: 'fire', label: 'Fire', icon: Flame },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
+  { id: 'analysis', label: 'Analysis', icon: ClipboardCheck },
 ];
 
 export default function App() {
@@ -359,6 +363,9 @@ function WorkspaceApp() {
   const [economicConfiguration, setEconomicConfiguration] = useState<EconomicConfiguration>(() => defaultEconomicConfiguration(''));
   const [costs, setCosts] = useState<EstablishmentCost | null>(null);
   const [fireOperations, setFireOperations] = useState<FireOperationsPlan>(() => defaultFireOperationsPlan());
+  const [projectAnalysis, setProjectAnalysis] = useState<ProjectAnalysisReport | null>(null);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [collaboration, setCollaboration] = useState<ProjectCollaboration>(() => defaultProjectCollaboration());
   const [section, setSection] = useState<WorkspaceSection>('site');
   const [drawMode, setDrawMode] = useState<DrawMode>('idle');
@@ -521,7 +528,7 @@ function WorkspaceApp() {
       if (authUser) queueProjectSave(snapshot, serial);
     }, 1_200);
     return () => window.clearTimeout(timer);
-  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, collaboration, authUser]);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, projectAnalysis, collaboration, authUser]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -1283,6 +1290,8 @@ function WorkspaceApp() {
     projectRevisionRef.current = 0;
     setRevisions([]);
     setFireOperations(defaultFireOperationsPlan());
+    setProjectAnalysis(null);
+    setAnalysisError(null);
     setCollaboration(defaultProjectCollaboration());
     setSharePath(null);
     setSaveStatus('idle');
@@ -1303,6 +1312,8 @@ function WorkspaceApp() {
     setSelectedVariantId(null);
     setIrrigation(null);
     setCosts(null);
+    setProjectAnalysis(null);
+    setAnalysisError(null);
   }
 
   function activateDrawMode(mode: DrawMode) {
@@ -1502,11 +1513,26 @@ function WorkspaceApp() {
       siteProfile,
       selectedSpeciesIds,
       designConfiguration,
-      variants: variants.map(({ id, name, description, score, metrics }) => ({ id, name, description, score, metrics })),
+      irrigationConfiguration,
+      economicConfiguration,
+      variants: variants.map(({ id, name, description, score, metrics, solar, composition, machinery, firebreak, warnings, generation }) => ({
+        id,
+        name,
+        description,
+        score,
+        metrics,
+        solar,
+        composition,
+        machinery,
+        firebreak,
+        warnings,
+        generation,
+      })),
       selectedVariantId,
       timelineYear,
       irrigation,
       costs,
+      fireOperations,
       section,
     };
   }
@@ -1525,6 +1551,23 @@ function WorkspaceApp() {
       setAssistantError(messageOf(assistantRequestError));
     } finally {
       setAssistantBusy(false);
+    }
+  }
+
+  async function runProjectAnalysis() {
+    if (!site || !siteProfile || !selectedVariant) return;
+    setAnalysisBusy(true);
+    setAnalysisError(null);
+    try {
+      const report = await api<ProjectAnalysisReport>('/api/assistant/review', post({
+        locale,
+        context: currentAssistantContext(),
+      }));
+      setProjectAnalysis(report);
+    } catch (reviewError) {
+      setAnalysisError(messageOf(reviewError));
+    } finally {
+      setAnalysisBusy(false);
     }
   }
 
@@ -1660,6 +1703,7 @@ function WorkspaceApp() {
       irrigation,
       costs,
       fireOperations,
+      analysis: projectAnalysis,
       collaboration,
       revision: projectRevisionRef.current,
       revisionId: revisions[0]?.revisionId ?? null,
@@ -1746,6 +1790,8 @@ function WorkspaceApp() {
     setIrrigation(project.irrigation);
     setCosts(project.costs);
     setFireOperations(normalizeFireOperationsPlan(project.fireOperations, project.updatedAt));
+    setProjectAnalysis(project.analysis ?? null);
+    setAnalysisError(null);
     setCollaboration(normalizeProjectCollaboration(project.collaboration));
     setSelectedTreeId(null);
     setSelectedTreeIds([]);
@@ -2144,6 +2190,7 @@ function WorkspaceApp() {
     water: Boolean(irrigation),
     fire: fireOperations.tasks.every((task) => task.status === 'complete' || task.status === 'not-applicable'),
     costs: Boolean(costs),
+    analysis: Boolean(projectAnalysis && projectAnalysis.contextFingerprint === projectAnalysisFingerprint(currentAssistantContext())),
   };
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
   const renderStepButton = (step: (typeof STEPS)[number], index: number) => {
@@ -2327,12 +2374,23 @@ function WorkspaceApp() {
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} />}
           {section === 'water' && <WaterPanel site={site} irrigation={irrigation} configuration={irrigationConfiguration} onConfiguration={setIrrigationConfiguration} profile={siteProfile} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onCosts={() => setSection('costs')} onShowZones={() => { setShowWaterSamples(true); setShowNdmi(false); }} editingIrrigation={editingIrrigation} onEditIrrigation={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />}
           {section === 'fire' && <FireOperationsPanel
+            profile={siteProfile}
+            variant={selectedVariant}
             plan={fireOperations}
             onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
             onTask={updateFireTask}
             onShowLayer={() => setShowFireWeather(true)}
           />}
           {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => { setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode)); setIrrigation(null); setCosts(null); }} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={calculateWaterAndCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
+          {section === 'analysis' && <ProjectAnalysisPanel
+            configured={Boolean(config?.assistant.configured)}
+            context={currentAssistantContext()}
+            report={projectAnalysis}
+            busy={analysisBusy}
+            error={analysisError}
+            onRun={runProjectAnalysis}
+            onOpenSection={setSection}
+          />}
         </section>
       </main>
 
@@ -2848,39 +2906,208 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer }: {
+function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLayer }: {
+  profile: SiteProfile | null;
+  variant: LayoutVariant | null;
   plan: FireOperationsPlan;
   onPlan: (plan: FireOperationsPlan) => void;
   onTask: (id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) => void;
   onShowLayer: () => void;
 }) {
   const { t, locale } = useI18n();
+  const [tab, setTab] = useState<'analysis' | 'data' | 'sources' | 'operations'>('analysis');
+  const assessment = useMemo(() => assessFireScreening(profile, variant), [profile, variant]);
   const complete = plan.tasks.filter((task) => task.status === 'complete' || task.status === 'not-applicable').length;
+  const evidence = assessment.components
+    .flatMap((component) => component.evidence)
+    .filter((item, index, items) => items.findIndex((candidate) => candidate.source === item.source && candidate.version === item.version) === index);
+  const componentIcon = (id: FireScreeningComponentId) => {
+    if (id === 'wind') return WindIcon;
+    if (id === 'terrain') return MapIcon;
+    if (id === 'fuels') return Leaf;
+    if (id === 'protection') return ShieldCheck;
+    return Flame;
+  };
   return <div className="panel-body fire-operations-page" data-testid="fire-operations-panel">
     <div className="panel-intro compact fire-operations-intro">
-      <span className="eyebrow">{t('fireOperations.eyebrow')}</span>
-      <h1 id="fire-operations-title">{t('fireOperations.title')}</h1>
-      <p>{t('fireOperations.body')}</p>
+      <span className="eyebrow">{t('fireAnalysis.eyebrow')}</span>
+      <h1 id="fire-operations-title">{t('fireAnalysis.title')}</h1>
+      <p>{t('fireAnalysis.body')}</p>
     </div>
-    <div className="fire-source-card">
-      <span><Flame size={18} /><i><small>{t('fireOperations.source')}</small><strong>EFFIS · FWI</strong></i></span>
-      <b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b>
-      <p>{t('fireOperations.sourceBody')}</p>
-      <div><label><span>{t('fireOperations.forecastDate')}</span><input type="date" value={plan.sourceSnapshot.forecastDate} onChange={(event) => onPlan({ ...plan, sourceSnapshot: { ...plan.sourceSnapshot, forecastDate: event.target.value, observedAt: new Date().toISOString() } })} /></label><button onClick={onShowLayer}><Layers3 size={14} />{t('fireOperations.showLayer')}</button></div>
-      <a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a>
+    <div className="fire-analysis-tabs" role="tablist" aria-label={t('fireAnalysis.tabs')}>
+      {([
+        ['analysis', Flame],
+        ['data', Database],
+        ['sources', Satellite],
+        ['operations', ClipboardCheck],
+      ] as const).map(([id, Icon]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+        <Icon size={15} /><span>{t(`fireAnalysis.tab.${id}`)}</span>
+      </button>)}
     </div>
-    <div className="operations-progress"><span><strong>{t('fireOperations.readiness')}</strong><small>{t('fireOperations.completed', { complete, total: plan.tasks.length })}</small></span><div><i style={{ width: `${complete / plan.tasks.length * 100}%` }} /></div></div>
-    <label className="operations-date"><span>{t('fireOperations.nextInspection')}</span><input type="date" value={plan.nextInspectionAt?.slice(0, 10) ?? ''} onChange={(event) => onPlan({ ...plan, nextInspectionAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
-    <div className="fire-task-list">{plan.tasks.map((task) => <article key={task.id} className={task.status}>
-      <span><i>{task.status === 'complete' ? <Check size={14} /> : <Flame size={14} />}</i><strong>{t(`fireOperations.task.${task.id}`)}</strong></span>
-      <select aria-label={t(`fireOperations.task.${task.id}`)} value={task.status} onChange={(event) => onTask(task.id, { status: event.target.value as FireMaintenanceTask['status'] })}>
-        {(['due', 'scheduled', 'complete', 'not-applicable'] as const).map((status) => <option key={status} value={status}>{t(`fireOperations.status.${status}`)}</option>)}
-      </select>
-      <label><span>{t('fireOperations.due')}</span><input type="date" value={task.dueAt?.slice(0, 10) ?? ''} onChange={(event) => onTask(task.id, { dueAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
-      <input aria-label={t('fireOperations.taskNotes')} placeholder={t('fireOperations.taskNotes')} value={task.notes} onChange={(event) => onTask(task.id, { notes: event.target.value })} />
-    </article>)}</div>
-    <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
-    <footer className="fire-operations-footer"><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small></footer>
+
+    {tab === 'analysis' && <div className="fire-analysis-overview" data-testid="fire-analysis-overview">
+      {assessment.score === null ? <div className="fire-analysis-empty"><Flame size={23} /><strong>{t('fireAnalysis.unavailableTitle')}</strong><p>{t('fireAnalysis.unavailableBody')}</p></div> : <>
+        <section className={`fire-analysis-hero ${assessment.level}`}>
+          <div className="fire-score">
+            <strong>{assessment.score}</strong><span>/100</span>
+            <small>{t('fireAnalysis.attentionIndex')}</small>
+          </div>
+          <div>
+            <span>{t('fireAnalysis.levelLabel')}</span>
+            <h2>{t(`fireAnalysis.level.${assessment.level}`)}</h2>
+            <p>{t('fireAnalysis.heroBody', { coverage: assessment.coveragePercent })}</p>
+            <small><Info size={13} />{t('fireAnalysis.notCertification')}</small>
+          </div>
+        </section>
+        <div className="fire-driver-heading"><span><strong>{t('fireAnalysis.driversTitle')}</strong><small>{t('fireAnalysis.driversBody')}</small></span><b>{t(`evidence.confidence.${assessment.confidence}`)}</b></div>
+        <div className="fire-component-list">{assessment.components.map((component) => {
+          const Icon = componentIcon(component.id);
+          const primaryMetrics = component.metrics.filter((metric) => metric.value !== null).slice(0, 2);
+          return <article key={component.id} className={component.level ?? 'unknown'}>
+            <span className="fire-component-icon"><Icon size={17} /></span>
+            <span><strong>{t(`fireAnalysis.component.${component.id}`)}</strong><small>{primaryMetrics.map((metric) => `${t(`fireAnalysis.metric.${metric.id}`)} ${formatNumber(metric.value!, 1)} ${metric.unit}`).join(' · ') || t('fireAnalysis.noData')}</small></span>
+            <div><i style={{ width: `${component.score ?? 0}%` }} /></div>
+            <b>{component.score ?? '—'}</b>
+          </article>;
+        })}</div>
+        {variant && <section className={`fire-design-response ${variant.firebreak.enabled && variant.firebreak.planningWidthSatisfied ? 'satisfied' : 'attention'}`}>
+          <header><span><ShieldCheck size={18} /><i><small>{t('fireAnalysis.designResponse')}</small><strong>{variant.firebreak.enabled ? t('fireAnalysis.firebreakPlanned') : t('fireAnalysis.firebreakMissing')}</strong></i></span><b>{variant.firebreak.enabled && variant.firebreak.planningWidthSatisfied ? t('fireAnalysis.basisMet') : t('fireAnalysis.reviewRequired')}</b></header>
+          <div>
+            <span><small>{t('fireAnalysis.plannedWidth')}</small><strong>{variant.firebreak.enabled ? `${formatNumber(variant.firebreak.plannedWidthM, 1)} m` : '—'}</strong></span>
+            <span><small>{t('fireAnalysis.minimumWidth')}</small><strong>{variant.firebreak.enabled ? `${formatNumber(variant.firebreak.minimumPlanningWidthM, 1)} m` : '—'}</strong></span>
+            <span><small>{t('fireAnalysis.windwardSections')}</small><strong>{variant.firebreak.lines.filter((line) => line.priority === 'windward').length}</strong></span>
+            <span><small>{t('fireAnalysis.vehicleAccess')}</small><strong>{t(variant.firebreak.supportVehicleAccess ? 'common.yes' : 'common.no')}</strong></span>
+          </div>
+          <p>{t('fireAnalysis.localReview')}</p>
+        </section>}
+      </>}
+      <EffisSourceCard plan={plan} onPlan={onPlan} onShowLayer={onShowLayer} />
+    </div>}
+
+    {tab === 'data' && <div className="fire-data-view" data-testid="fire-analysis-data">
+      <div className="fire-data-note"><Database size={17} /><span><strong>{t('fireAnalysis.dataTitle')}</strong><small>{t('fireAnalysis.dataBody')}</small></span></div>
+      {assessment.components.map((component) => {
+        const Icon = componentIcon(component.id);
+        return <section key={component.id} className="fire-data-section">
+          <header><span><Icon size={16} /><strong>{t(`fireAnalysis.component.${component.id}`)}</strong></span><b>{component.score === null ? t('fireAnalysis.noData') : `${component.score}/100 · ${t('fireAnalysis.weight', { value: component.weight * 100 })}`}</b></header>
+          <div>{component.metrics.map((metric) => <span key={metric.id}><small>{t(`fireAnalysis.metric.${metric.id}`)}</small><strong>{metric.value === null ? '—' : `${formatNumber(metric.value, 1)} ${metric.unit}`}</strong></span>)}</div>
+          <footer>{component.evidence.length ? component.evidence.map((item) => item.source).join(' · ') : t('fireAnalysis.noSource')}</footer>
+        </section>;
+      })}
+      <EffisSourceCard plan={plan} onPlan={onPlan} onShowLayer={onShowLayer} />
+    </div>}
+
+    {tab === 'sources' && <div className="fire-sources-view" data-testid="fire-analysis-sources">
+      <div className="fire-data-note"><Satellite size={17} /><span><strong>{t('fireAnalysis.sourcesTitle')}</strong><small>{t('fireAnalysis.sourcesBody')}</small></span></div>
+      <article className="fire-evidence-card"><span><Flame size={16} /><i><strong>Copernicus EFFIS</strong><small>{plan.sourceSnapshot.layer} · {plan.sourceSnapshot.forecastDate}</small></i></span><b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b><p>{t('fireOperations.sourceBody')}</p><a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a></article>
+      {evidence.map((item) => <article className="fire-evidence-card" key={`${item.source}-${item.version}`}>
+        <span><Database size={16} /><i><strong>{item.source}</strong><small>{item.version}</small></i></span>
+        <b>{t(`evidence.confidence.${item.confidence}`)}</b>
+        <p>{item.resolution ?? t('fireAnalysis.resolutionUnavailable')} · {shortDate(item.observedAt, locale)}</p>
+        <a href={item.sourceUrl} target="_blank" rel="noreferrer">{t('fireAnalysis.openSource')} <ChevronRight size={13} /></a>
+      </article>)}
+      <div className="fire-limitations"><strong>{t('fireAnalysis.limitationsTitle')}</strong>{assessment.limitations.map((item) => <p key={item}>• {t(fireLimitationKey(item))}</p>)}</div>
+    </div>}
+
+    {tab === 'operations' && <div className="fire-operations-view" data-testid="fire-operations-checklist">
+      <div className="operations-progress"><span><strong>{t('fireOperations.readiness')}</strong><small>{t('fireOperations.completed', { complete, total: plan.tasks.length })}</small></span><div><i style={{ width: `${complete / plan.tasks.length * 100}%` }} /></div></div>
+      <label className="operations-date"><span>{t('fireOperations.nextInspection')}</span><input type="date" value={plan.nextInspectionAt?.slice(0, 10) ?? ''} onChange={(event) => onPlan({ ...plan, nextInspectionAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
+      <div className="fire-task-list">{plan.tasks.map((task) => <article key={task.id} className={task.status}>
+        <span><i>{task.status === 'complete' ? <Check size={14} /> : <Flame size={14} />}</i><strong>{t(`fireOperations.task.${task.id}`)}</strong></span>
+        <select aria-label={t(`fireOperations.task.${task.id}`)} value={task.status} onChange={(event) => onTask(task.id, { status: event.target.value as FireMaintenanceTask['status'] })}>
+          {(['due', 'scheduled', 'complete', 'not-applicable'] as const).map((status) => <option key={status} value={status}>{t(`fireOperations.status.${status}`)}</option>)}
+        </select>
+        <label><span>{t('fireOperations.due')}</span><input type="date" value={task.dueAt?.slice(0, 10) ?? ''} onChange={(event) => onTask(task.id, { dueAt: event.target.value ? new Date(`${event.target.value}T09:00:00`).toISOString() : null })} /></label>
+        <input aria-label={t('fireOperations.taskNotes')} placeholder={t('fireOperations.taskNotes')} value={task.notes} onChange={(event) => onTask(task.id, { notes: event.target.value })} />
+      </article>)}</div>
+      <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
+      <footer className="fire-operations-footer"><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small></footer>
+    </div>}
+  </div>;
+}
+
+function EffisSourceCard({ plan, onPlan, onShowLayer }: {
+  plan: FireOperationsPlan;
+  onPlan: (plan: FireOperationsPlan) => void;
+  onShowLayer: () => void;
+}) {
+  const { t } = useI18n();
+  return <div className="fire-source-card">
+    <span><Flame size={18} /><i><small>{t('fireOperations.source')}</small><strong>EFFIS · FWI</strong></i></span>
+    <b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b>
+    <p>{t('fireOperations.sourceBody')}</p>
+    <div><label><span>{t('fireOperations.forecastDate')}</span><input type="date" value={plan.sourceSnapshot.forecastDate} onChange={(event) => onPlan({ ...plan, sourceSnapshot: { ...plan.sourceSnapshot, forecastDate: event.target.value, observedAt: new Date().toISOString() } })} /></label><button onClick={onShowLayer}><Layers3 size={14} />{t('fireOperations.showLayer')}</button></div>
+    <a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a>
+  </div>;
+}
+
+function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun, onOpenSection }: {
+  configured: boolean;
+  context: AssistantProjectContext;
+  report: ProjectAnalysisReport | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onOpenSection: (section: WorkspaceSection) => void;
+}) {
+  const { t, locale } = useI18n();
+  const currentFingerprint = projectAnalysisFingerprint(context);
+  const stale = Boolean(report && report.contextFingerprint !== currentFingerprint);
+  const readiness = [
+    { id: 'evidence', ready: Boolean(context.siteProfile), section: 'profile' as const },
+    { id: 'species', ready: context.selectedSpeciesIds.length > 0, section: 'species' as const },
+    { id: 'design', ready: Boolean(context.selectedVariantId && context.variants.length), section: 'layout' as const },
+    { id: 'water', ready: Boolean(context.irrigation), section: 'water' as const },
+    { id: 'fire', ready: Boolean(context.variants.find((variant) => variant.id === context.selectedVariantId)?.firebreak), section: 'fire' as const },
+    { id: 'economics', ready: Boolean(context.costs), section: 'costs' as const },
+  ];
+  const readyCount = readiness.filter((item) => item.ready).length;
+  const canRun = configured && readiness.slice(0, 3).every((item) => item.ready);
+  return <div className="panel-body project-analysis-page" data-testid="project-analysis-panel">
+    <div className="panel-intro compact">
+      <span className="eyebrow">{t('projectAnalysis.eyebrow')}</span>
+      <h1>{t('projectAnalysis.title')}</h1>
+      <p>{t('projectAnalysis.body')}</p>
+    </div>
+    <section className="analysis-protocol">
+      <header><span><ShieldCheck size={18} /><i><small>{t('projectAnalysis.protocolEyebrow')}</small><strong>{t('projectAnalysis.protocolTitle')}</strong></i></span><b>{readyCount}/{readiness.length}</b></header>
+      <p>{t('projectAnalysis.protocolBody')}</p>
+      <div>{readiness.map((item) => <button key={item.id} className={item.ready ? 'ready' : 'missing'} onClick={() => onOpenSection(item.section)}>
+        {item.ready ? <Check size={13} /> : <Info size={13} />}<span>{t(`projectAnalysis.dimension.${item.id}`)}</span>
+      </button>)}</div>
+      <footer><span><Sparkles size={14} />{t('projectAnalysis.aiBoundary')}</span><button className="button primary" disabled={!canRun || busy} onClick={onRun}>{busy ? <LoaderCircle className="spin" size={15} /> : <ClipboardCheck size={15} />}{busy ? t('projectAnalysis.running') : report ? t('projectAnalysis.runAgain') : t('projectAnalysis.run')}</button></footer>
+    </section>
+    {!configured && <div className="analysis-inline-warning"><Info size={16} /><span><strong>{t('projectAnalysis.unavailableTitle')}</strong><small>{t('projectAnalysis.unavailableBody')}</small></span></div>}
+    {configured && !canRun && <div className="analysis-inline-warning"><Info size={16} /><span><strong>{t('projectAnalysis.incompleteTitle')}</strong><small>{t('projectAnalysis.incompleteBody')}</small></span></div>}
+    {error && <div className="assistant-error"><strong>{t('projectAnalysis.failed')}</strong><span>{localizedDomainMessage(error, t)}</span></div>}
+    {busy && <div className="analysis-running"><LoaderCircle className="spin" size={22} /><strong>{t('projectAnalysis.runningTitle')}</strong><p>{t('projectAnalysis.runningBody')}</p></div>}
+    {report && !busy && <div className="formal-review-report" data-testid="formal-review-report">
+      {stale && <div className="analysis-stale"><Info size={15} /><span><strong>{t('projectAnalysis.staleTitle')}</strong><small>{t('projectAnalysis.staleBody')}</small></span></div>}
+      <header className={`review-verdict ${report.verdict}`}>
+        <div><small>{t('projectAnalysis.verdict')}</small><strong>{t(`projectAnalysis.verdict.${report.verdict}`)}</strong><span>{t('projectAnalysis.generated', { date: shortDate(report.generatedAt, locale) })} · {report.model}</span></div>
+        <b>{report.overallScore}<small>/100</small></b>
+      </header>
+      <p className="review-summary">{report.executiveSummary}</p>
+      <div className="review-dimensions">{report.dimensions.map((dimension) => <article key={dimension.id} className={dimension.status}>
+        <header><strong>{t(`projectAnalysis.dimension.${dimension.id}`)}</strong><b>{dimension.score}</b></header>
+        <div><i style={{ width: `${dimension.score}%` }} /></div>
+        <p>{dimension.summary}</p>
+      </article>)}</div>
+      <section className="review-findings">
+        <header><strong>{t('projectAnalysis.findings')}</strong><small>{report.findings.length}</small></header>
+        {report.findings.length ? report.findings.map((finding) => <article key={finding.id} className={finding.severity}>
+          <header><span>{t(`projectAnalysis.severity.${finding.severity}`)}</span><small>{t(`projectAnalysis.dimension.${finding.area}`)}</small></header>
+          <strong>{finding.title}</strong>
+          <p>{finding.explanation}</p>
+          {finding.evidence.length > 0 && <div>{finding.evidence.map((item) => <code key={item}>{item}</code>)}</div>}
+          <footer><Check size={13} /><span>{finding.recommendation}</span></footer>
+        </article>) : <p className="review-empty">{t('projectAnalysis.noFindings')}</p>}
+      </section>
+      {(report.assumptions.length > 0 || report.limitations.length > 0) && <div className="review-boundaries">
+        {report.assumptions.length > 0 && <section><strong>{t('projectAnalysis.assumptions')}</strong>{report.assumptions.map((item) => <p key={item}>• {item}</p>)}</section>}
+        {report.limitations.length > 0 && <section><strong>{t('projectAnalysis.limitations')}</strong>{report.limitations.map((item) => <p key={item}>• {item}</p>)}</section>}
+      </div>}
+    </div>}
   </div>;
 }
 
@@ -3962,6 +4189,12 @@ function cloneSite(site: SiteBoundary): SiteBoundary {
 function previousSection(section: WorkspaceSection) { const index = STEPS.findIndex((step) => step.id === section); return STEPS[Math.max(0, index - 1)].id; }
 function nextSection(section: WorkspaceSection) { const index = STEPS.findIndex((step) => step.id === section); return STEPS[Math.min(STEPS.length - 1, index + 1)].id; }
 function stepLabelKey(section: WorkspaceSection) { return `nav.${section}`; }
+function fireLimitationKey(value: string) {
+  if (value.startsWith('This is a transparent planning-attention index')) return 'fireAnalysis.limitation.index';
+  if (value.startsWith('Climate and wind inputs')) return 'fireAnalysis.limitation.field';
+  if (value.startsWith('The EFFIS Fire Weather Index layer')) return 'fireAnalysis.limitation.effis';
+  return value;
+}
 function compactNumber(value: number) { return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
 function compactCurrency(value: number, economics: Pick<EconomicConfiguration, 'currencyCode' | 'currencyLocale'>) {
   try {

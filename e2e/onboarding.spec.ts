@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (window.sessionStorage.getItem('growup:test:onboarding-reset')) return;
+    window.localStorage.removeItem('growup:onboarding:v1');
+    window.sessionStorage.setItem('growup:test:onboarding-reset', '1');
+  });
   await page.goto('/');
   await page.waitForFunction(() => Boolean(document.querySelector('.app-shell')) && !document.querySelector('.toast .spin'));
-  await page.evaluate(() => window.localStorage.removeItem('growup:onboarding:v1'));
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('growup:onboarding:v1'))).toBeNull();
-  await page.reload();
 });
 
 test('guides a first-time visitor into a resumable project setup', async ({ page }) => {

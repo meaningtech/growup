@@ -13,7 +13,7 @@ import { localSiteValidation, normalizeSiteBoundary } from '../src/lib/siteGeome
 import { createProjectComment, MAX_PROJECT_COMMENTS, requireProjectReview, rotateShareVersion } from '../src/lib/collaboration.js';
 import type { LayoutVariant, ProjectState, SiteBoundary, SiteProfile, SiteProfileOverrideField } from '../src/types.js';
 import type { AssistantProjectContext } from '../src/types.js';
-import { assistantStatus, planAssistantAction, type AssistantProviderConfig } from './assistant.js';
+import { assistantStatus, planAssistantAction, reviewAssistantProject, type AssistantProviderConfig } from './assistant.js';
 import {
   authenticatedUser,
   authStatus,
@@ -136,6 +136,14 @@ export function createApp(config: GrowupAppConfig = {}) {
     await handle(res, async () => planAssistantAction(
       typeof req.body?.message === 'string' ? req.body.message : '',
       requireAssistantContext(req.body?.context),
+      config,
+    ));
+  });
+
+  app.post('/api/assistant/review', assistantLimiter, async (req: Request, res: Response) => {
+    await handle(res, async () => reviewAssistantProject(
+      requireAssistantContext(req.body?.context),
+      req.body?.locale === 'it' ? 'it' : 'en',
       config,
     ));
   });

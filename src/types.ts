@@ -920,6 +920,7 @@ export type ProjectState = {
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
   fireOperations: FireOperationsPlan;
+  analysis?: ProjectAnalysisReport | null;
   collaboration: ProjectCollaboration;
   revision?: number;
   revisionId?: string | null;
@@ -1033,12 +1034,15 @@ export type AssistantProjectContext = {
   siteProfile: SiteProfile | null;
   selectedSpeciesIds: string[];
   designConfiguration: DesignConfiguration;
-  variants: Array<Pick<LayoutVariant, 'id' | 'name' | 'description' | 'score' | 'metrics'>>;
+  irrigationConfiguration: IrrigationConfiguration;
+  economicConfiguration: EconomicConfiguration;
+  variants: Array<Pick<LayoutVariant, 'id' | 'name' | 'description' | 'score' | 'metrics' | 'solar' | 'composition' | 'machinery' | 'firebreak' | 'warnings' | 'generation'>>;
   selectedVariantId: string | null;
   timelineYear: number;
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
-  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs';
+  fireOperations: FireOperationsPlan;
+  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
 };
 
 export type AssistantAction =
@@ -1058,4 +1062,39 @@ export type AssistantProposal = {
   warnings: string[];
   actions: AssistantAction[];
   requiresConfirmation: boolean;
+};
+
+export type ProjectAnalysisDimensionId = 'evidence' | 'species' | 'design' | 'water' | 'fire' | 'operations' | 'economics' | 'coherence';
+export type ProjectAnalysisVerdict = 'ready' | 'revise' | 'incomplete';
+export type ProjectAnalysisSeverity = 'blocking' | 'major' | 'minor' | 'info';
+
+export type ProjectAnalysisDimension = {
+  id: ProjectAnalysisDimensionId;
+  score: number;
+  status: 'pass' | 'attention' | 'fail' | 'unknown';
+  summary: string;
+};
+
+export type ProjectAnalysisFinding = {
+  id: string;
+  severity: ProjectAnalysisSeverity;
+  area: ProjectAnalysisDimensionId;
+  title: string;
+  explanation: string;
+  evidence: string[];
+  recommendation: string;
+};
+
+export type ProjectAnalysisReport = {
+  id: string;
+  model: string;
+  generatedAt: string;
+  contextFingerprint: string;
+  verdict: ProjectAnalysisVerdict;
+  overallScore: number;
+  executiveSummary: string;
+  dimensions: ProjectAnalysisDimension[];
+  findings: ProjectAnalysisFinding[];
+  assumptions: string[];
+  limitations: string[];
 };
