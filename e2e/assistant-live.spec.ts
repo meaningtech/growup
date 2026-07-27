@@ -16,9 +16,9 @@ test('uses the configured AI provider to propose and apply a confirmed species c
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
   await expect(page.getByText('3 reproducible layouts generated.')).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole('button', { name: 'Ask AF' }).click();
+  await page.getByRole('button', { name: 'Ask' }).click();
   await expect(page.getByRole('complementary', { name: 'Growup AI assistant' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Ask AF' }).fill(
+  await page.getByRole('textbox', { name: 'Ask' }).fill(
     'Aggiungi Olea europaea alla selezione, rigenera i tre layout e ricalcola acqua e costi. Non rimuovere specie.',
   );
   await page.getByRole('button', { name: 'Send to AI assistant' }).click();

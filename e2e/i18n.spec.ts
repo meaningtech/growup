@@ -3,7 +3,7 @@ import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
-test('switches English and Italian through an extensible persisted locale', async ({ page }) => {
+test('switches English and Italian through an extensible persisted locale', async ({ page }, testInfo) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Open menu' }).click();
   const languagePicker = page.getByRole('dialog', { name: 'Menu' }).getByRole('group', { name: 'Language' });
@@ -13,12 +13,13 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByTestId('step-site')).toContainText('Terreno');
   await expect(page.getByText('Nessun terreno attivo')).toBeVisible();
   await expect(page.getByText('Importa GeoJSON', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Chiedi AF' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chiedi' })).toBeVisible();
 
   await page.getByTestId('step-profile').click();
   await expect(page.getByRole('heading', { name: 'Nessun profilo di evidenze' })).toBeVisible();
 
   await page.getByTestId('step-layout').click();
+  await expect(page.getByTestId('step-layout')).toContainText('Piano');
   await expect(page.getByRole('heading', { name: 'Nessun sistema generato' })).toBeVisible();
 
   await page.getByTestId('step-water').click();
@@ -32,7 +33,8 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByRole('heading', { name: 'Nessun piano dei costi' })).toBeVisible();
 
   await page.getByTestId('step-species').click();
-  await expect(page.getByTestId('step-species')).toContainText('Progettazione');
+  await expect(page.getByTestId('step-species')).toContainText('Progetta');
+  await expect(page.getByTestId('step-fire')).toContainText('Incendi');
   await expect(page.getByRole('tab', { name: 'Specie' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Tagliafuoco' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Mezzi di lavoro' })).toBeVisible();
@@ -40,6 +42,14 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByLabel('Sistema di impianto')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Solo perimetro' })).toBeVisible();
   await expect(page.getByPlaceholder('Cerca un genere o nome scientifico')).toHaveValue('');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const workflowLabelsFit = await page.locator('.step-rail button > span:last-child').evaluateAll((labels) => labels.every((label) => {
+    const labelBox = label.getBoundingClientRect();
+    const buttonBox = label.parentElement?.getBoundingClientRect();
+    return Boolean(buttonBox && labelBox.left >= buttonBox.left && labelBox.right <= buttonBox.right);
+  }));
+  expect(workflowLabelsFit).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-italian-workflow.png'), fullPage: false });
 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'it');

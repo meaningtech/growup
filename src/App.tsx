@@ -16,6 +16,7 @@ import {
   Droplets,
   Flame,
   FlaskConical,
+  FolderOpen,
   Info,
   Layers3,
   Leaf,
@@ -404,6 +405,7 @@ function WorkspaceApp() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [revisions, setRevisions] = useState<ProjectRevisionSummary[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [projectsOpen, setProjectsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [fireOperationsOpen, setFireOperationsOpen] = useState(false);
   const [collaborationOpen, setCollaborationOpen] = useState(false);
@@ -2142,7 +2144,16 @@ function WorkspaceApp() {
     water: Boolean(irrigation),
     costs: Boolean(costs),
   };
+  const fireOperationsComplete = fireOperations.tasks.every((task) => task.status === 'complete' || task.status === 'not-applicable');
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
+  const renderStepButton = (step: (typeof STEPS)[number], index: number) => {
+    const Icon = step.icon;
+    return <button key={step.id} data-testid={`step-${step.id}`} className={section === step.id ? 'active' : ''} onClick={() => setSection(step.id)}>
+      <span className="step-number">{completed[step.id] ? <Check size={12} /> : index + 1}</span>
+      <Icon size={18} />
+      <span>{t(stepLabelKey(step.id))}</span>
+    </button>;
+  };
 
   return (
     <div className={`app-shell ${selectedVariant ? 'has-succession-timeline' : ''} ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
@@ -2172,8 +2183,8 @@ function WorkspaceApp() {
         <div className="top-actions">
           <button className="button ai-trigger mobile-top-action mobile-ai-trigger" aria-label={t('actions.ask')} title={t('actions.ask')} onClick={() => setAssistantOpen(true)}>
             <Sparkles size={16} />
-            <span className="mobile-ai-label">{t('actions.ask')}</span>
           </button>
+          {authUser && <button className="mobile-top-action projects-trigger" aria-label={t('projects.open')} title={t('projects.open')} aria-expanded={projectsOpen} onClick={() => { setMobileMenuOpen(false); setProjectsOpen(true); }}><FolderOpen size={17} /></button>}
           <button className="mobile-top-action mobile-menu-trigger" aria-label={t('mobile.openMenu')} aria-expanded={mobileMenuOpen} aria-controls="mobile-product-menu" onClick={() => setMobileMenuOpen((value) => !value)}><Menu size={18} /></button>
         </div>
       </header>
@@ -2183,7 +2194,6 @@ function WorkspaceApp() {
         <aside id="mobile-product-menu" className="mobile-product-menu" role="dialog" aria-modal="true" aria-label={t('mobile.menu')}>
           <header><span><strong>{t('mobile.menu')}</strong><small>{projectName}</small></span><button aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)}><X size={18} /></button></header>
           {site && <div className={`mobile-save-status ${saveStatus}`} data-testid="save-status"><i /><span>{t(`auth.status.${saveStatus}`)}{projectRevision > 0 ? ` · r${projectRevision}` : ''}</span></div>}
-          {authUser && projects.length > 0 && <label className="mobile-project-select"><span>{t('auth.projectSelector')}</span><select aria-label={t('auth.projectSelector')} value={projects.some((item) => item.id === projectId) ? projectId : ''} onChange={(event) => { setMobileMenuOpen(false); void openProject(event.target.value); }}><option value="">{t('auth.openProject')}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
           <div className="mobile-language-picker" role="group" aria-label={t('language.label')}>
             <span>{t('language.label')}</span>
             <div>{SUPPORTED_LOCALES.map((item) => <button key={item.code} aria-label={item.label} aria-pressed={locale === item.code} className={locale === item.code ? 'active' : ''} onClick={() => { setLocale(item.code); setMobileMenuOpen(false); }}><b aria-hidden="true">{item.flag}</b><small>{item.shortLabel}</small></button>)}</div>
@@ -2193,7 +2203,6 @@ function WorkspaceApp() {
             <button onClick={() => { setMobileMenuOpen(false); setInfoOpen(true); }}><span><Info size={17} />{t('info.open')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); void saveProject(); }} disabled={!site || Boolean(busy)}><span><Save size={17} />{t('actions.save')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); setHistoryOpen(true); }} disabled={!authUser || projectRevision < 1}><span><Database size={17} />{t('auth.history')}</span><ChevronRight size={16} /></button>
-            <button onClick={() => { setMobileMenuOpen(false); setFireOperationsOpen(true); }} disabled={!site}><span><Flame size={17} />{t('fireOperations.open')}</span><ChevronRight size={16} /></button>
             <button onClick={() => { setMobileMenuOpen(false); void openCollaboration(); }} disabled={!site}><span><Share2 size={17} />{t('sharing.open')}</span><ChevronRight size={16} /></button>
           </nav>
           <div className="mobile-export-actions">
@@ -2210,16 +2219,21 @@ function WorkspaceApp() {
       {recoveryDraft && !site && <div className="recovery-banner" role="status"><span><Save size={16} /><strong>{t('auth.recoveryTitle')}</strong><small>{t('auth.recoveryBody', { name: recoveryDraft.name })}</small></span><button onClick={recoverLocalDraft}>{t('auth.recover')}</button><button onClick={discardLocalDraft}>{t('auth.discard')}</button></div>}
 
       <aside className="step-rail" aria-label={t('nav.workflow')}>
-        {STEPS.map((step, index) => {
-          const Icon = step.icon;
-          return (
-            <button key={step.id} data-testid={`step-${step.id}`} className={section === step.id ? 'active' : ''} onClick={() => setSection(step.id)}>
-              <span className="step-number">{completed[step.id] ? <Check size={12} /> : index + 1}</span>
-              <Icon size={18} />
-              <span>{t(stepLabelKey(step.id))}</span>
-            </button>
-          );
-        })}
+        {STEPS.slice(0, -1).map(renderStepButton)}
+        <button
+          type="button"
+          data-testid="step-fire"
+          className={fireOperationsOpen ? 'active' : ''}
+          aria-haspopup="dialog"
+          aria-expanded={fireOperationsOpen}
+          disabled={!site}
+          onClick={() => setFireOperationsOpen(true)}
+        >
+          <span className="step-number">{fireOperationsComplete ? <Check size={12} /> : <Clock3 size={10} />}</span>
+          <Flame size={18} />
+          <span>{t('fireOperations.nav')}</span>
+        </button>
+        {STEPS.slice(-1).map((step) => renderStepButton(step, STEPS.length - 1))}
         <div className="rail-data">
           <Database size={16} />
           <strong>{catalogueStats ? compactNumber(catalogueStats.total) : '—'}</strong>
@@ -2375,6 +2389,13 @@ function WorkspaceApp() {
       {infoOpen && <InfoPanel onClose={() => setInfoOpen(false)} />}
 
       {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
+
+      {projectsOpen && authUser && <ProjectsPage
+        projects={projects}
+        activeProjectId={projectId}
+        onOpen={(id) => { setProjectsOpen(false); void openProject(id); }}
+        onClose={() => setProjectsOpen(false)}
+      />}
 
       {historyOpen && <ProjectHistoryPanel projectId={projectId} revisions={revisions} onRestore={restoreRevision} onClose={() => setHistoryOpen(false)} />}
 
@@ -2647,22 +2668,16 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const prompts = [
-    t('assistant.promptProductive'),
-    t('assistant.promptWater'),
-    t('assistant.promptExplain'),
-  ];
+  const hasBodyContent = !configured || busy || Boolean(error) || Boolean(proposal);
   return (
-    <aside className="assistant-panel" aria-label={t('assistant.aria')}>
+    <aside className={`assistant-panel${hasBodyContent ? ' has-content' : ''}`} aria-label={t('assistant.aria')}>
       <header>
         <span className="assistant-mark"><Sparkles size={18} /></span>
         <span><small>{t('assistant.internal')}</small><strong>{t('actions.ask')}</strong></span>
         <button aria-label={t('assistant.close')} onClick={onClose}><X size={17} /></button>
       </header>
-      <div className="assistant-body">
-        <div className="assistant-trust"><ShieldCheck size={16} /><span><strong>{t('assistant.validated')}</strong><small>{t('assistant.validatedBody')}</small></span></div>
+      {hasBodyContent && <div className="assistant-body">
         {!configured && <div className="assistant-warning">{t('assistant.unavailable')}</div>}
-        {!proposal && !busy && <div className="assistant-prompts">{prompts.map((prompt) => <button key={prompt} onClick={() => { onInput(prompt); onAsk(prompt); }} disabled={!configured}>{prompt}</button>)}</div>}
         {busy && <div className="assistant-thinking"><LoaderCircle className="spin" size={20} /><span>{t('assistant.reading')}</span></div>}
         {error && <div className="assistant-error"><strong>{t('assistant.notApplied')}</strong><span>{localizedDomainMessage(error, t)}</span></div>}
         {proposal && <div className="assistant-proposal" data-testid="assistant-proposal">
@@ -2671,7 +2686,7 @@ function AssistantPanel({ configured, input, onInput, proposal, busy, error, onA
           {proposal.warnings.length > 0 && <div className="assistant-proposal-warnings">{proposal.warnings.map((warning) => <span key={warning}>• {warning}</span>)}</div>}
           <div className="assistant-confirm"><button onClick={onDismiss}>{t('assistant.dismiss')}</button>{proposal.requiresConfirmation ? <button className="confirm" onClick={onApply} disabled={busy}><ShieldCheck size={15} /> {t('assistant.apply')}</button> : <button className="confirm" onClick={onDismiss}>{t('assistant.done')}</button>}</div>
         </div>}
-      </div>
+      </div>}
       <form onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
         <textarea
           aria-label={t('actions.ask')}
@@ -2881,6 +2896,41 @@ function FireOperationsPanel({ plan, onPlan, onTask, onShowLayer, onClose }: {
     <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
     <footer><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small><button className="button primary" onClick={onClose}>{t('actions.done')}</button></footer>
   </section></div>;
+}
+
+function ProjectsPage({ projects, activeProjectId, onOpen, onClose }: {
+  projects: ProjectSummary[];
+  activeProjectId: string;
+  onOpen: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { t, locale } = useI18n();
+  return <div className="projects-page-backdrop">
+    <section className="projects-page" role="dialog" aria-modal="true" aria-labelledby="projects-page-title" data-testid="projects-page">
+      <header>
+        <span className="projects-page-mark"><FolderOpen size={22} /></span>
+        <span><small>{t('projects.eyebrow')}</small><h2 id="projects-page-title">{t('projects.title')}</h2><p>{t('projects.body')}</p></span>
+        <button aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>
+      </header>
+      <div className="projects-page-count">{t('projects.count', { count: projects.length })}</div>
+      {projects.length > 0 ? <div className="projects-grid">
+        {projects.map((project) => {
+          const active = project.id === activeProjectId;
+          return <button
+            key={project.id}
+            className={`project-card${active ? ' active' : ''}`}
+            aria-label={t('projects.openProject', { name: project.name })}
+            aria-current={active ? 'page' : undefined}
+            onClick={() => onOpen(project.id)}
+          >
+            <span className="project-card-mark"><FolderOpen size={19} /></span>
+            <span><strong>{project.name}</strong><small>{t('projects.updated', { date: shortDate(project.updatedAt, locale) })}</small></span>
+            {active ? <b>{t('projects.active')}</b> : <ChevronRight size={17} />}
+          </button>;
+        })}
+      </div> : <div className="projects-empty"><FolderOpen size={28} /><strong>{t('projects.emptyTitle')}</strong><p>{t('projects.emptyBody')}</p></div>}
+    </section>
+  </div>;
 }
 
 function CollaborationPanel({ authenticated, configured, collaboration, sharePath, busy, onEnable, onDisable, onSignIn, onResolve, onClose }: {

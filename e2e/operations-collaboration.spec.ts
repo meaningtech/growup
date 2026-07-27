@@ -136,8 +136,7 @@ test('persists fire operations and advanced group edits through local recovery',
 
   await page.reload();
   await page.getByRole('button', { name: 'Recover' }).click();
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  await page.locator('#mobile-product-menu').getByRole('button', { name: 'Fire operations' }).click();
+  await page.getByTestId('step-fire').click();
   await expect(page.getByTestId('fire-operations-panel')).toContainText('1 of 5 controls closed');
 });
 
@@ -225,13 +224,69 @@ test('creates the authenticated share link and renders the public review surface
   await page.screenshot({ path: '/private/tmp/growup-public-review.png', fullPage: false });
 });
 
+test('gives authenticated project selection its own mobile page', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const project = projectFixture();
+  await mockBase(page, true);
+  await page.route('**/api/projects', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: [
+      { id: project.id, name: project.name, updatedAt: project.updatedAt },
+      { id: 'second-project', name: 'Northern orchard', updatedAt: '2026-07-25T09:00:00.000Z' },
+    ],
+  }));
+  await loadRecoveryDraft(page, project);
+
+  const assistantTrigger = page.getByRole('button', { name: 'Ask' });
+  const projectsTrigger = page.getByRole('button', { name: 'Projects' });
+  const menuTrigger = page.getByRole('button', { name: 'Open menu' });
+  await expect(assistantTrigger).toBeVisible();
+  await expect(projectsTrigger).toBeVisible();
+  expect((await assistantTrigger.textContent())?.trim()).toBe('');
+  expect((await projectsTrigger.textContent())?.trim()).toBe('');
+  const [assistantBox, projectsTriggerBox, menuBox] = await Promise.all([
+    assistantTrigger.boundingBox(),
+    projectsTrigger.boundingBox(),
+    menuTrigger.boundingBox(),
+  ]);
+  expect(assistantBox).not.toBeNull();
+  expect(projectsTriggerBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(assistantBox!.width).toBe(assistantBox!.height);
+  expect(projectsTriggerBox!.width).toBe(projectsTriggerBox!.height);
+  expect(assistantBox!.x + assistantBox!.width).toBeLessThan(projectsTriggerBox!.x);
+  expect(projectsTriggerBox!.x + projectsTriggerBox!.width).toBeLessThan(menuBox!.x);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(380);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-authenticated-top-actions.png'), fullPage: false });
+
+  await projectsTrigger.click();
+  const projectsPage = page.getByTestId('projects-page');
+  await expect(projectsPage).toBeVisible();
+  await expect(projectsPage.getByRole('heading', { name: 'Your projects' })).toBeVisible();
+  await expect(projectsPage.getByRole('button', { name: `Open ${project.name}` })).toHaveAttribute('aria-current', 'page');
+  await expect(projectsPage.getByRole('button', { name: 'Open Northern orchard' })).toBeVisible();
+  const projectsBox = await projectsPage.boundingBox();
+  expect(projectsBox).not.toBeNull();
+  expect(projectsBox!.width).toBe(390);
+  expect(projectsBox!.height).toBe(844);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-projects-page.png'), fullPage: false });
+
+  await projectsPage.getByRole('button', { name: 'Close projects' }).click();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await expect(page.locator('.mobile-project-select')).toHaveCount(0);
+});
+
 test('keeps the fire checklist usable on a mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const project = projectFixture();
   await mockBase(page);
   await loadRecoveryDraft(page, project);
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  await page.locator('#mobile-product-menu').getByRole('button', { name: 'Fire operations' }).click();
+  const fireStep = page.getByTestId('step-fire');
+  await expect(fireStep).toBeVisible();
+  await expect(fireStep).toContainText('Fire');
+  await fireStep.click();
+  await expect(fireStep).toHaveAttribute('aria-expanded', 'true');
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toBeVisible();
   await expect(operations.getByText('EFFIS · FWI')).toBeVisible();

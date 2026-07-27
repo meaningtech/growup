@@ -187,6 +187,12 @@ test('keeps planning subtabs and the primary action available above mobile navig
   expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(navigationBox!.y - 6);
   expect(actionBox!.x).toBeGreaterThanOrEqual(12);
   expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(378);
+  const labelsFitNavigationButtons = await navigation.locator('button > span:last-child').evaluateAll((labels) => labels.every((label) => {
+    const labelBox = label.getBoundingClientRect();
+    const buttonBox = label.parentElement?.getBoundingClientRect();
+    return Boolean(buttonBox && labelBox.left >= buttonBox.left && labelBox.right <= buttonBox.right);
+  }));
+  expect(labelsFitNavigationButtons).toBe(true);
 
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs.png'), fullPage: false });
 });
@@ -196,9 +202,10 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   const menuTrigger = page.getByRole('button', { name: 'Open menu' });
-  const assistantTrigger = page.getByRole('button', { name: 'Ask AF' });
+  const assistantTrigger = page.getByRole('button', { name: 'Ask' });
   await expect(menuTrigger).toBeVisible();
   await expect(assistantTrigger).toBeVisible();
+  expect((await assistantTrigger.textContent())?.trim()).toBe('');
   const [menuTriggerBox, assistantTriggerBox] = await Promise.all([menuTrigger.boundingBox(), assistantTrigger.boundingBox()]);
   expect(menuTriggerBox).not.toBeNull();
   expect(assistantTriggerBox).not.toBeNull();
@@ -208,7 +215,6 @@ test('keeps the complete map-layer control keyboard-accessible on a mobile viewp
   expect(assistantTriggerBox!.width).toBe(menuTriggerBox!.width);
   expect(menuTriggerBox!.x).toBeGreaterThan(assistantTriggerBox!.x);
   expect(390 - (menuTriggerBox!.x + menuTriggerBox!.width)).toBeLessThanOrEqual(12);
-  await expect(assistantTrigger.locator('.mobile-ai-label')).toBeHidden();
   await menuTrigger.click();
   const mobileMenu = page.getByRole('dialog', { name: 'Menu' });
   await expect(mobileMenu).toBeVisible();
@@ -277,7 +283,7 @@ test('keeps the desktop product menu right-aligned and gives map tools distinct 
   await page.goto('/');
 
   const menuTrigger = page.getByRole('button', { name: 'Open menu' });
-  const assistantTrigger = page.getByRole('button', { name: 'Ask AF' });
+  const assistantTrigger = page.getByRole('button', { name: 'Ask' });
   const [menuBox, assistantBox] = await Promise.all([menuTrigger.boundingBox(), assistantTrigger.boundingBox()]);
   expect(menuBox).not.toBeNull();
   expect(assistantBox).not.toBeNull();

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('submits Ask AF with Enter and keeps Shift+Enter as a line break', async ({ page }) => {
+test('submits the assistant request with Enter and keeps Shift+Enter as a line break', async ({ page }, testInfo) => {
   await page.route('**/api/config', async (route) => {
     await route.fulfill({
       status: 200,
@@ -40,8 +40,15 @@ test('submits Ask AF with Enter and keeps Shift+Enter as a line break', async ({
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Ask AF' }).click();
-  const composer = page.getByRole('textbox', { name: 'Ask AF' });
+  await page.getByRole('button', { name: 'Ask' }).click();
+  await expect(page.getByText('Validated actions only')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add a productive species suited to the site and regenerate the design.' })).toHaveCount(0);
+  await expect(page.locator('.assistant-body')).toHaveCount(0);
+  const compactPanelBox = await page.getByRole('complementary', { name: 'Growup AI assistant' }).boundingBox();
+  expect(compactPanelBox).not.toBeNull();
+  expect(compactPanelBox!.height).toBeLessThan(200);
+  await page.screenshot({ path: testInfo.outputPath('growup-assistant-compact.png'), fullPage: false });
+  const composer = page.getByRole('textbox', { name: 'Ask' });
   await composer.fill('First line');
   await composer.press('Shift+Enter');
   await composer.pressSequentially('Second line');
