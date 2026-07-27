@@ -684,7 +684,7 @@ button { color: inherit; }
   .workspace { grid-column: 1; grid-row: 2; grid-template-columns: 1fr; grid-template-rows: clamp(430px, 58svh, 560px) auto; min-height: calc(100svh - 128px); }
   .map-stage { min-height: 430px; }
   .inspector { min-height: 560px; border: 0; box-shadow: 0 -16px 42px rgba(15,35,25,.12); }
-  .inspector-header { position: sticky; top: 60px; height: 58px; padding: 0 15px; background: rgba(248,246,239,.94); backdrop-filter: blur(16px); z-index: 45; }
+  .inspector-header { position: relative; top: auto; height: 58px; padding: 0 15px; background: #f8f6ef; z-index: 1; }
   .inspector-header strong { font-size: 19px; }
   .panel-body { height: auto; min-height: 500px; padding-bottom: calc(96px + env(safe-area-inset-bottom)); overflow: visible; }
   .app-shell.has-succession-timeline .panel-body { padding-bottom: calc(172px + env(safe-area-inset-bottom)); }

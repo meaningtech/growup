@@ -2,6 +2,37 @@ import { expect, test } from '@playwright/test';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
+test('places the mobile flow guide directly below the map without covering the panel title', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('growup:onboarding:v1', JSON.stringify({
+      status: 'skipped',
+      step: 'welcome',
+      updatedAt: new Date().toISOString(),
+    }));
+  });
+  await page.goto('/');
+
+  const [mapBox, headerBox, bodyBox, titleBox] = await Promise.all([
+    page.locator('.map-stage').boundingBox(),
+    page.locator('.inspector-header').boundingBox(),
+    page.locator('.panel-body').boundingBox(),
+    page.locator('.panel-intro h1').boundingBox(),
+  ]);
+  expect(mapBox).not.toBeNull();
+  expect(headerBox).not.toBeNull();
+  expect(bodyBox).not.toBeNull();
+  expect(titleBox).not.toBeNull();
+
+  const mapBottom = mapBox!.y + mapBox!.height;
+  const headerBottom = headerBox!.y + headerBox!.height;
+  expect(Math.abs(headerBox!.y - mapBottom)).toBeLessThanOrEqual(1);
+  expect(bodyBox!.y).toBeGreaterThanOrEqual(headerBottom - 1);
+  expect(titleBox!.y).toBeGreaterThanOrEqual(headerBottom + 20);
+
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-flow-layout.png'), fullPage: false });
+});
+
 test('keeps the complete map-layer control keyboard-accessible on a mobile viewport', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
