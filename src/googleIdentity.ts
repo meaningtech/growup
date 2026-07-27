@@ -13,10 +13,9 @@ export async function renderGoogleSignIn(
   clientId: string,
   locale: string,
   onCredential: (credential: string) => void,
-) {
+): Promise<() => void> {
   await loadGoogleIdentity(locale);
   if (!window.google?.accounts?.id) throw new Error('Google Identity Services did not initialize.');
-  element.replaceChildren();
   window.google.accounts.id.initialize({
     client_id: clientId,
     callback: (response: GoogleCredentialResponse) => {
@@ -26,16 +25,33 @@ export async function renderGoogleSignIn(
     cancel_on_tap_outside: true,
     use_fedcm_for_prompt: true,
   });
-  window.google.accounts.id.renderButton(element, {
-    type: 'standard',
-    theme: 'outline',
-    size: 'large',
-    shape: 'rectangular',
-    text: 'continue_with',
-    logo_alignment: 'left',
-    width: 320,
-    locale,
-  });
+
+  let renderedWidth = 0;
+  const render = () => {
+    const width = googleSignInButtonWidth(element.clientWidth);
+    if (width === renderedWidth) return;
+    renderedWidth = width;
+    element.replaceChildren();
+    window.google.accounts.id.renderButton(element, {
+      type: 'standard',
+      theme: 'outline',
+      size: 'large',
+      shape: 'rectangular',
+      text: 'continue_with',
+      logo_alignment: 'left',
+      width,
+      locale,
+    });
+  };
+
+  render();
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(render);
+  observer?.observe(element);
+  return () => observer?.disconnect();
+}
+
+export function googleSignInButtonWidth(containerWidth: number): number {
+  return Math.max(200, Math.min(320, Math.floor(containerWidth)));
 }
 
 function loadGoogleIdentity(locale: string): Promise<void> {

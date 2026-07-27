@@ -10,6 +10,7 @@ test('reserves editable machinery corridors and turning headlands in the generat
   await page.getByRole('tab', { name: /Satellite/ }).click();
   await expect(page.getByTestId('existing-vegetation-audit')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('step-species').click();
+  await page.getByTestId('planning-tab-machinery').click();
 
   const machinery = page.getByTestId('machinery-config');
   await expect(machinery).toBeVisible();

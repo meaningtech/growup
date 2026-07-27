@@ -749,6 +749,29 @@ describe('Growup API integration', () => {
     })]);
     const mismatched = await request(app).get('/api/catalog/search?q=Olea&evergreen=false').expect(200);
     expect(mismatched.body.total).toBe(0);
+
+    const desertProfile = {
+      ...profile,
+      location: { countryCode: 'DZ', displayName: 'Sahara test field' },
+      climate: {
+        ...profile.climate,
+        absoluteMinTemperatureC: 5,
+        absoluteMaxTemperatureC: 46,
+        annualPrecipitationMm: 50,
+        annualEt0Mm: 2200,
+        aridityIndex: 0.02,
+      },
+    };
+    const recommendations = await request(app)
+      .post('/api/recommendations')
+      .send({ siteProfile: desertProfile })
+      .expect(200);
+    expect(recommendations.body.palette.map((species: { id: string }) => species.id)).not.toContain('quercus-ilex');
+    expect(recommendations.body.recommendations).toContainEqual(expect.objectContaining({
+      species: expect.objectContaining({ id: 'quercus-ilex' }),
+      status: 'poor',
+      components: expect.arrayContaining([expect.objectContaining({ key: 'water', status: 'poor' })]),
+    }));
   });
 
   it('rejects invalid palettes and mismatched project IDs', async () => {

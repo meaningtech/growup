@@ -39,10 +39,10 @@ test('keeps the tour usable on a narrow mobile viewport', async ({ page }, testI
   await tour.getByLabel('Project name').fill('Mobile field');
   await tour.getByRole('button', { name: 'Create my project' }).click();
   await expect(tour.getByRole('button', { name: 'Select a specific place first' })).toBeDisabled();
-  const searchBox = await page.getByLabel('Search place or address').boundingBox();
-  expect(searchBox).not.toBeNull();
-  expect(searchBox!.y).toBeGreaterThanOrEqual(0);
-  expect(searchBox!.y + searchBox!.height).toBeLessThanOrEqual(800);
+  await expect.poll(async () => {
+    const searchBox = await page.getByLabel('Search place or address').boundingBox();
+    return searchBox && searchBox.y >= 0 ? searchBox.y + searchBox.height : Number.POSITIVE_INFINITY;
+  }).toBeLessThanOrEqual(800);
   const toastClose = page.locator('.toast button');
   if (await toastClose.count() === 1 && await toastClose.isVisible()) await toastClose.click();
   await page.screenshot({ path: testInfo.outputPath('growup-checkpoint-mobile-location.png'), fullPage: false });

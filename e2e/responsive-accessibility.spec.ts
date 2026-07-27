@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
@@ -31,6 +32,163 @@ test('places the mobile flow guide directly below the map without covering the p
   expect(titleBox!.y).toBeGreaterThanOrEqual(headerBottom + 20);
 
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-flow-layout.png'), fullPage: false });
+});
+
+test('keeps the Google sign-in dialog inside narrow mobile viewports', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('growup.locale', 'it');
+    (window as any).google = {
+      accounts: {
+        id: {
+          initialize: () => undefined,
+          renderButton: (element: HTMLElement, options: { width: number }) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Continua con Google';
+            button.style.width = `${options.width}px`;
+            button.style.minHeight = '44px';
+            element.append(button);
+          },
+        },
+      },
+    };
+  });
+  await page.route('**/api/config', (route) => route.fulfill({ json: {
+    googleMapsApiKey: '',
+    initialMapViewport: { center: { lat: 0, lng: 0 }, zoom: 2 },
+    climatePeriod: '2021-01-01 to 2025-12-31',
+    modelVersion: 'responsive-test',
+    assistant: { configured: false, interface: 'openai-compatible' },
+    auth: { configured: true, googleClientId: 'responsive-test.apps.googleusercontent.com' },
+    sharing: { configured: false },
+  } }));
+  await page.route('**/api/catalog/stats', (route) => route.fulfill({ json: {
+    total: 0,
+    treeLike: 0,
+    globUnt: 0,
+    designReady: 0,
+  } }));
+  await page.route('**/api/auth/session', (route) => route.fulfill({ json: {
+    authenticated: false,
+    configured: true,
+    user: null,
+  } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Apri menu' }).click();
+  await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Accedi' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Tutti i progetti dei terreni, insieme.' });
+  const googleButton = dialog.getByRole('button', { name: 'Continua con Google' });
+  await expect(googleButton).toBeVisible();
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 720 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(async () => {
+      const [panelBox, closeBox, googleBox] = await Promise.all([
+        dialog.boundingBox(),
+        dialog.getByRole('button', { name: 'Chiudi accesso' }).boundingBox(),
+        googleButton.boundingBox(),
+      ]);
+      if (!panelBox || !closeBox || !googleBox) return false;
+      const panelRight = panelBox.x + panelBox.width;
+      return panelBox.x >= 0
+        && panelRight <= viewport.width
+        && closeBox.x + closeBox.width <= panelRight
+        && googleBox.x >= panelBox.x
+        && googleBox.x + googleBox.width <= panelRight;
+    }).toBe(true);
+    const overflow = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      content: document.documentElement.scrollWidth,
+    }));
+    expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-google-login.png'), fullPage: false });
+});
+
+test('keeps supporting text readable without oversized form controls', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByTestId('step-species').click();
+
+  const readTypeScale = () => page.locator('.catalogue-advanced-filters').evaluate((panel) => {
+    const label = panel.querySelector('label');
+    const description = panel.querySelector('p');
+    const select = panel.querySelector('select');
+    if (!label || !description || !select) return null;
+    const selectStyle = getComputedStyle(select);
+    return {
+      labelPx: Number.parseFloat(getComputedStyle(label).fontSize),
+      descriptionPx: Number.parseFloat(getComputedStyle(description).fontSize),
+      selectPx: Number.parseFloat(selectStyle.fontSize),
+      selectWeight: Number.parseInt(selectStyle.fontWeight, 10),
+      selectHeight: select.getBoundingClientRect().height,
+    };
+  });
+
+  const mobile = await readTypeScale();
+  expect(mobile).not.toBeNull();
+  expect(mobile!.labelPx).toBeGreaterThanOrEqual(10);
+  expect(mobile!.descriptionPx).toBeGreaterThanOrEqual(11);
+  expect(mobile!.selectPx).toBe(16);
+  expect(mobile!.selectWeight).toBeLessThanOrEqual(500);
+  expect(mobile!.selectHeight).toBeLessThanOrEqual(42);
+
+  await page.setViewportSize({ width: 1280, height: 887 });
+  const desktop = await readTypeScale();
+  expect(desktop).not.toBeNull();
+  expect(desktop!.labelPx).toBeGreaterThanOrEqual(10);
+  expect(desktop!.descriptionPx).toBeGreaterThanOrEqual(11);
+  expect(desktop!.selectPx).toBeGreaterThanOrEqual(12);
+  expect(desktop!.selectPx).toBeLessThanOrEqual(13);
+  await page.locator('.catalogue-advanced-filters').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('growup-desktop-readable-type.png'), fullPage: false });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.catalogue-advanced-filters').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-readable-type.png'), fullPage: false });
+});
+
+test('keeps planning subtabs and the primary action available above mobile navigation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByTestId('step-species').click();
+
+  const planningTabs = page.getByTestId('planning-tabs');
+  const action = page.locator('.generate-design-action');
+  const navigation = page.locator('.step-rail');
+  await expect(planningTabs).toBeVisible();
+  await expect(page.getByTestId('step-species')).toContainText('Planning');
+  await expect(page.getByRole('tab', { name: 'Species' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('design-config')).toBeVisible();
+  await expect(page.getByTestId('recommendation-basis')).toContainText(`curated ${DESIGN_SPECIES_BY_ID.size}-species design catalogue`);
+  await planningTabs.scrollIntoViewIfNeeded();
+  await expect(action).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs-top.png'), fullPage: false });
+
+  await page.getByRole('tab', { name: 'Firebreak' }).click();
+  await expect(page.getByTestId('firebreak-config')).toBeVisible();
+  await expect(page.getByTestId('design-config')).toBeHidden();
+
+  await page.getByRole('tab', { name: 'Work equipment' }).click();
+  await expect(page.getByTestId('machinery-config')).toBeVisible();
+  await expect(page.getByTestId('firebreak-config')).toBeHidden();
+
+  await page.getByRole('tab', { name: 'Species' }).click();
+  await page.locator('.catalogue-advanced-filters').scrollIntoViewIfNeeded();
+  await expect(action).toBeVisible();
+
+  const [actionBox, navigationBox] = await Promise.all([action.boundingBox(), navigation.boundingBox()]);
+  expect(actionBox).not.toBeNull();
+  expect(navigationBox).not.toBeNull();
+  expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(navigationBox!.y - 6);
+  expect(actionBox!.x).toBeGreaterThanOrEqual(12);
+  expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(378);
+
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs.png'), fullPage: false });
 });
 
 test('keeps the complete map-layer control keyboard-accessible on a mobile viewport', async ({ page }, testInfo) => {

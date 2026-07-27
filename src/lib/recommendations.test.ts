@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from '../data/designSpecies';
 import type { DesignObjectives, SiteProfile } from '../types';
 import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
-import { rankSpecies, suitabilityWeights } from './recommendations';
+import { rankSpecies, recommendedPalette, suitabilityWeights } from './recommendations';
 
 function fieldProfile(ph: number | null = 7.2): SiteProfile {
   return {
@@ -60,5 +60,29 @@ describe('objective-driven species suitability', () => {
 
     expect(recommendation.status).not.toBe('recommended');
     expect(recommendation.mitigations[0]).toContain('monitor spread');
+  });
+
+  it('does not let drought tolerance mask rainfall below the supported envelope', () => {
+    const holmOak = DESIGN_SPECIES_BY_ID.get('quercus-ilex')!;
+    const desertProfile = {
+      ...fieldProfile(7.5),
+      location: { countryCode: 'DZ', displayName: 'Sahara test field' },
+      climate: {
+        ...fieldProfile().climate,
+        absoluteMinTemperatureC: 5,
+        absoluteMaxTemperatureC: 46,
+        annualPrecipitationMm: 50,
+        annualEt0Mm: 2200,
+      },
+    } as SiteProfile;
+    const [recommendation] = rankSpecies([holmOak], desertProfile, DEFAULT_DESIGN_OBJECTIVES);
+
+    expect(recommendation.components).toContainEqual(expect.objectContaining({
+      key: 'water',
+      score: 33,
+      status: 'poor',
+    }));
+    expect(recommendation.status).toBe('poor');
+    expect(recommendedPalette([recommendation])).toEqual([]);
   });
 });

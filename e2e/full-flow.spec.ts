@@ -33,8 +33,9 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-evidence.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
-  await expect(page.getByText('Evidence-ranked palette')).toBeVisible();
-  await expect(page.getByText('species selected across strata', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Coordinate the living and working system' })).toBeVisible();
+  await expect(page.getByTestId('recommendation-basis')).toContainText('planning estimates, not field trials');
+  await page.getByRole('tab', { name: 'Work equipment' }).click();
   await expect(page.getByLabel('Reserve space')).not.toBeChecked();
   await page.getByLabel('Reserve space').check();
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
@@ -64,7 +65,9 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   expect(mobileRailBox).not.toBeNull();
   expect(mobileTimelineBox!.y).toBeGreaterThanOrEqual(0);
   expect(mobileTimelineBox!.y + mobileTimelineBox!.height).toBeLessThan(mobileRailBox!.y);
-  await expect(page.locator('.app-shell.has-succession-timeline .panel-body')).toHaveCSS('padding-bottom', '172px');
+  const mobileActionBarBox = await page.locator('.panel-action-bar').boundingBox();
+  expect(mobileActionBarBox).not.toBeNull();
+  expect(mobileActionBarBox!.y + mobileActionBarBox!.height).toBeLessThanOrEqual(mobileRailBox!.y);
   const mobileToastBox = await page.locator('.toast').boundingBox();
   expect(mobileToastBox).not.toBeNull();
   expect(mobileToastBox!.y + mobileToastBox!.height).toBeLessThan(mobileTimelineBox!.y);

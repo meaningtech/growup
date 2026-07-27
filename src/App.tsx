@@ -2567,7 +2567,18 @@ function AuthPanel({ configured, clientId, locale, onCredential, onClose }: {
   const [identityError, setIdentityError] = useState<string | null>(null);
   useEffect(() => {
     if (!configured || !clientId || !buttonRef.current) return;
-    renderGoogleSignIn(buttonRef.current, clientId, locale, onCredential).catch((error) => setIdentityError(messageOf(error)));
+    let disposed = false;
+    let stopObserving: (() => void) | undefined;
+    renderGoogleSignIn(buttonRef.current, clientId, locale, onCredential)
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else stopObserving = cleanup;
+      })
+      .catch((error) => setIdentityError(messageOf(error)));
+    return () => {
+      disposed = true;
+      stopObserving?.();
+    };
   }, [configured, clientId, locale, onCredential]);
   return (
     <div className="auth-backdrop" role="presentation">
@@ -2747,7 +2758,8 @@ function SitePanel({
     onUpdate({ ...site, [kind]: site[kind].filter((_, itemIndex) => itemIndex !== index) });
   };
   return (
-    <div className="panel-body">
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
       <div className="panel-intro"><span className="eyebrow">{t('site.eyebrow')}</span><h1>{t('site.title')}</h1><p>{t('site.body')}</p></div>
       <div className="location-search">
         <Search size={16} />
@@ -2810,8 +2822,11 @@ function SitePanel({
         {site.existingTrees.map((point) => <span key={point.id}><i>T</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, existingTrees: site.existingTrees.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
       </div>}
       <div className="callout"><CloudSun size={18} /><div><strong>{t('site.climateTitle')}</strong><span>{t('site.climateBody')}</span></div></div>
-      <button className="button primary wide analyse-site-action" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
       <p className="fine-print">{t('site.executionNote')}</p>
+      </div>
+      <div className="panel-action-bar">
+        <button className="button primary wide sticky-action analyse-site-action" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }
@@ -3249,6 +3264,7 @@ function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
 function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
+  const [planningTab, setPlanningTab] = useState<'species' | 'firebreak' | 'machinery'>('species');
   const [filters, setFilters] = useState<CatalogueFilters>({
     treeOnly: true,
     globUntOnly: false,
@@ -3279,9 +3295,31 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
     { key: 'waterResilience', label: t('species.objective.waterResilience') },
     { key: 'lowMaintenance', label: t('species.objective.lowMaintenance') },
   ] as const;
+  const planningTabs = [
+    { id: 'species', label: t('planning.tab.species'), icon: Sprout },
+    { id: 'firebreak', label: t('planning.tab.firebreak'), icon: Flame },
+    { id: 'machinery', label: t('planning.tab.machinery'), icon: Route },
+  ] as const;
   return (
-    <div className="panel-body">
-      <div className="panel-intro compact"><span className="eyebrow">{t('species.eyebrow')}</span><h1>{t('species.title')}</h1><p>{t('species.selected', { count: selectedIds.length })}</p></div>
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
+      <div className="panel-intro compact"><span className="eyebrow">{t('planning.eyebrow')}</span><h1>{t('planning.title')}</h1><p>{t('planning.summary', { count: selectedIds.length })}</p></div>
+      <div className="planning-tabs" role="tablist" aria-label={t('planning.tabsLabel')} data-testid="planning-tabs">
+        {planningTabs.map(({ id, label, icon: Icon }) => <button
+          key={id}
+          id={`planning-tab-${id}`}
+          type="button"
+          role="tab"
+          aria-selected={planningTab === id}
+          aria-controls="planning-tab-panel"
+          className={planningTab === id ? 'active' : ''}
+          data-testid={`planning-tab-${id}`}
+          onClick={() => setPlanningTab(id)}
+        ><Icon size={16} /><span>{label}</span></button>)}
+      </div>
+      <div id="planning-tab-panel" className="planning-tab-panel" role="tabpanel" aria-labelledby={`planning-tab-${planningTab}`}>
+      {planningTab === 'species' && <>
+      <div className="recommendation-basis" data-testid="recommendation-basis"><Database size={17} /><span><strong>{t('planning.speciesBasisTitle')}</strong><p>{t('planning.speciesBasisBody', { count: DESIGN_SPECIES_BY_ID.size })}</p></span></div>
       {recommendations.length > 0 && <div className="safety-gate" data-testid="species-safety-gate"><ShieldCheck size={18} /><span><small>{t('species.safetyEyebrow')}</small><strong>{t('species.safetyCount', { blocked: blocked.length, monitored: monitored.length })}</strong><p>{t('species.safetyBody')}</p></span>{blocked.length > 0 && <button onClick={() => setInspectedId(blocked[0].species.id)}>{t('actions.inspect')}</button>}</div>}
       <div className="objective-panel" data-testid="design-objectives">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
@@ -3320,7 +3358,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         </select></label>
         {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label={t('design.bearing')} type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
       </div>
-      <div className="firebreak-config" data-testid="firebreak-config">
+      </>}
+      {planningTab === 'firebreak' && <div className="firebreak-config" data-testid="firebreak-config">
         <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.eyebrow')}</small><strong>{t('firebreak.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('firebreak.enabled')} type="checkbox" checked={design.firebreak.enabled} onChange={(event) => updateFirebreak({ enabled: event.target.checked })} /><span>{t('firebreak.enabled')}</span></label></div>
         <p>{t('firebreak.body')}</p>
         <div className="firebreak-inputs">
@@ -3347,8 +3386,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.firebreak.supportVehicleAccess} disabled={!design.firebreak.enabled} onChange={(event) => updateFirebreak({ supportVehicleAccess: event.target.checked })} /><span><strong>{t('firebreak.vehicleAccess')}</strong><small>{t('firebreak.vehicleAccessBody')}</small></span></label>
         <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.firebreak.protectPipeCrossings} disabled={!design.firebreak.enabled} onChange={(event) => updateFirebreak({ protectPipeCrossings: event.target.checked })} /><span><strong>{t('firebreak.pipeCrossings')}</strong><small>{t('firebreak.pipeCrossingsBody')}</small></span></label>
         <p className="firebreak-source"><a href="https://www.gov.uk/government/publications/heather-and-grass-management-code/heather-and-grass-management-code-2025" target="_blank" rel="noreferrer">{t('firebreak.widthSource')}</a> · {t('firebreak.localReview')}</p>
-      </div>
-      <div className="machinery-config" data-testid="machinery-config">
+      </div>}
+      {planningTab === 'machinery' && <div className="machinery-config" data-testid="machinery-config">
         <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.eyebrow')}</small><strong>{t('machinery.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('machinery.enabled')} type="checkbox" checked={design.machinery.enabled} onChange={(event) => updateMachinery({ enabled: event.target.checked })} /><span>{t('machinery.enabled')}</span></label></div>
         <p>{t('machinery.body')}</p>
         <label className="select-label"><span>{t('machinery.preset')}</span><select aria-label={t('machinery.preset')} value={design.machinery.presetId} disabled={!design.machinery.enabled} onChange={(event) => update({ machinery: machineryConfigurationFromPreset(event.target.value as DesignConfiguration['machinery']['presetId']) })}>{MACHINERY_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{t(`machinery.category.${preset.category}`)} · {preset.referenceModel}</option>)}</select></label>
@@ -3363,7 +3402,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         </div>
         <div className="machinery-result"><span><small>{t('machinery.requiredCorridor')}</small><strong>{formatNumber(machineEnvelope.corridorWidthM, 2)} m</strong></span><span><small>{t('machinery.headland')}</small><strong>{formatNumber(machineEnvelope.headlandDepthM, 2)} m</strong></span></div>
         <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.machinery.protectPipeCrossings} disabled={!design.machinery.enabled} onChange={(event) => updateMachinery({ protectPipeCrossings: event.target.checked })} /><span><strong>{t('machinery.pipeCrossings')}</strong><small>{t('machinery.pipeCrossingsBody')}</small></span></label>
-      </div>
+      </div>}
+      {planningTab === 'species' && <>
       <div className="catalogue-search"><Search size={16} /><input value={query} placeholder={t('species.searchPlaceholder')} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch(filters)} aria-label={t('species.searchCatalogue')} /><button onClick={() => onSearch(filters)}>{t('actions.search')}</button></div>
       <div className="catalogue-filters" aria-label={t('species.catalogueFilters')}>{([
         ['treeOnly', t('species.filterTrees')], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', t('species.filterDesignReady')],
@@ -3397,7 +3437,12 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
         <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
       </div>}
+      </>}
+      </div>
+      </div>
+      <div className="panel-action-bar">
       <button className="button primary wide sticky-action generate-design-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }
@@ -3437,7 +3482,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
   const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
   return (
-    <div className="panel-body">
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
       <div className="panel-intro compact"><span className="eyebrow">{t('layout.eyebrow')}</span><h1>{localizedVariantName(selectedVariant, Math.max(0, variants.findIndex((variant) => variant.id === selectedVariant.id)), t)}</h1><p>{localizedVariantDescription(selectedVariant, t)}</p></div>
       <div className="variant-tabs">{variants.map((variant, index) => <button key={variant.id} className={variant.id === selectedVariant.id ? 'active' : ''} onClick={() => onSelect(variant.id)}><span>0{index + 1}</span><strong>{localizedVariantName(variant, index, t)}</strong><small>{t('layout.score', { score: variant.score })}</small></button>)}</div>
       <div className="metric-grid">
@@ -3506,7 +3552,10 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       </div>
       {selectedTree ? <div className="selected-tree-card"><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')}</small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span>{t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
       {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
-      <button className="button primary wide calculate-design-action" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
+      </div>
+      <div className="panel-action-bar">
+        <button className="button primary wide sticky-action calculate-design-action" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }
@@ -3537,7 +3586,8 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
   const routingValid = irrigation.network.routingValid !== false;
   const routingConflictCount = irrigation.network.unroutableLineIds?.length ?? 0;
   return (
-    <div className="panel-body">
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
       <div className="panel-intro compact"><span className="eyebrow">{t('water.eyebrow')}</span><h1>{t('water.annual', { value: formatNumber(irrigation.annualWaterM3, 0) })}</h1><p>{t('water.method')}</p></div>
       <div className="system-water-model" data-testid="system-water-model">
         <div><Sprout size={17} /><span><small>{t('water.systemModelEyebrow')}</small><strong>{t(systemTranslationKey(irrigation.waterModel.system))}</strong></span><b>{formatNumber(irrigation.waterModel.supplementalIrrigationPercent, 0)}%</b></div>
@@ -3580,7 +3630,10 @@ function WaterPanel({ site, irrigation, configuration, onConfiguration, profile,
       <div className="satellite-schedule"><div><Satellite size={18} /><span><small>{t('water.satelliteSchedule')}</small><strong>{t('water.nextPulse', { value: signed(irrigation.satelliteScheduling.adjustmentPercent) })}</strong></span><StatusPill status={irrigation.satelliteScheduling.confidence} /></div><p>{localizedIrrigationRecommendation(irrigation, t)}</p><div className="priority-counts"><span className="high">{irrigation.satelliteScheduling.highPrioritySamples} {t('water.priorityHigh')}</span><span className="medium">{irrigation.satelliteScheduling.mediumPrioritySamples} {t('water.priorityMonitor')}</span><span className="low">{irrigation.satelliteScheduling.lowPrioritySamples} {t('water.priorityLow')}</span></div><button className="text-button" onClick={onShowZones}>{t('water.showZones')} <ChevronRight size={14} /></button></div>
       <div className="cost-breakdown"><Row label={t('water.water')} value={currency(irrigation.annualOperation.waterCost, irrigation.economics)} /><Row label={t('water.pumping', { value: formatNumber(irrigation.annualOperation.pumpingKwh, 0) })} value={currency(irrigation.annualOperation.energyCost, irrigation.economics)} /><Row label={t('water.systemCare', { hours: formatNumber(irrigation.annualOperation.managementLaborHours, 1) })} value={currency(irrigation.annualOperation.managementLaborCost, irrigation.economics)} /><Row label={t('water.annualMaintenance')} value={currency(irrigation.annualOperation.maintenanceCost, irrigation.economics)} /><Row label={t('water.installationMaterials')} value={currency(irrigation.installation.materialsCost, irrigation.economics)} strong /><Row label={t('water.installationLabour', { hours: irrigation.installation.laborHours })} value={currency(irrigation.installation.laborCost, irrigation.economics)} /></div>
       {Boolean(profile?.satellite.limitations.length) && <p className="fine-print">{t('water.satelliteLimitation')}</p>}
-      <button className="button primary wide" onClick={onCosts}>{t('water.reviewCosts')} <ChevronRight size={18} /></button>
+      </div>
+      <div className="panel-action-bar">
+        <button className="button primary wide sticky-action" onClick={onCosts}>{t('water.reviewCosts')} <ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }
@@ -3614,7 +3667,8 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
   if (!costs || !irrigation) return <div className="panel-body">{rateConfiguration}<EmptyState icon={CircleDollarSign} title={t('costs.emptyTitle')} body={t('costs.emptyBody')} action={t(canCalculate ? 'costs.calculate' : 'costs.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
   const speciesMap = new Map(species.map((item) => [item.id, item]));
   return (
-    <div className="panel-body">
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
       {rateConfiguration}
       {costs.economics.missingLocalRates.length > 0 && <div className="estimate-partial"><strong>{t('costs.partialTitle')}</strong><span>{t('costs.partialBody')}</span></div>}
       <div className="cost-scope-grid">
@@ -3630,7 +3684,10 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
       })}</div>
       <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>
       <button className="button schedule-button wide" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} /> {t('schedule.open')}</button>
-      <button className="button primary wide" onClick={onCalculate}>{t('costs.recalculate')} <ChevronRight size={18} /></button>
+      </div>
+      <div className="panel-action-bar">
+        <button className="button primary wide sticky-action" onClick={onCalculate}>{t('costs.recalculate')} <ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }
@@ -4023,7 +4080,7 @@ function localizedSuitabilityExplanation(component: SuitabilityComponent, specie
   if (component.key === 'soil') return profile.soil.ph === null
     ? t('species.explanation.soilUnknown')
     : t('species.explanation.soil', { ph: profile.soil.ph, min: species.phMin, max: species.phMax });
-  if (component.key === 'water') return t('species.explanation.water', { rain: profile.climate.annualPrecipitationMm, et0: profile.climate.annualEt0Mm, drought: species.droughtTolerance });
+  if (component.key === 'water') return t('species.explanation.water', { rain: profile.climate.annualPrecipitationMm, supportedMin: species.annualRainMinMm, supportedMax: species.annualRainMaxMm, et0: profile.climate.annualEt0Mm, drought: species.droughtTolerance });
   if (component.key === 'native') return t('species.explanation.nativeUnverified', { country: profile.location.countryCode ?? profile.location.displayName });
   if (component.key === 'purpose') return t('species.explanation.purpose', { type: t(species.productiveFromYear !== null ? 'species.productive' : 'species.support'), roles: species.roles.map((role) => localizedEnum(role, t)).join(', ') });
   if (component.key === 'syntropic') return t('species.explanation.syntropic', { stratum: localizedEnum(species.stratum, t), succession: localizedEnum(species.succession, t), fixer: species.nitrogenFixer ? t('species.nitrogenFixerSuffix') : '' });

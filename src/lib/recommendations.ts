@@ -16,7 +16,13 @@ export function rankSpecies(
 }
 
 export function recommendedPalette(recommendations: SpeciesRecommendation[], size = 9): SpeciesRecommendation[] {
-  const eligible = recommendations.filter((item) => item.status === 'recommended' || item.status === 'conditional');
+  const eligible = recommendations.filter((item) => (
+    (item.status === 'recommended' || item.status === 'conditional')
+    && !item.components.some((component) => (
+      (component.key === 'climate' || component.key === 'water')
+      && component.status === 'poor'
+    ))
+  ));
   const selected: SpeciesRecommendation[] = [];
   const strata = ['emergent', 'high', 'medium', 'low', 'ground', 'climber'] as const;
   const phases = ['placenta', 'secondary', 'climax'] as const;
@@ -77,7 +83,10 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
   const soilScore = site.soil.ph === null ? null : rangeScore(site.soil.ph, species.phMin, species.phMax);
   const aridityDemand = site.climate.annualEt0Mm > 0 ? site.climate.annualPrecipitationMm / site.climate.annualEt0Mm : null;
   const droughtScore = species.droughtTolerance * 20;
-  const waterScore = Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
+  const rawWaterScore = Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
+  const rainBelowEnvelope = site.climate.annualPrecipitationMm < species.annualRainMinMm;
+  const severeRainDeficit = site.climate.annualPrecipitationMm < species.annualRainMinMm * 0.75;
+  const waterScore = rainBelowEnvelope ? Math.min(rawWaterScore, severeRainDeficit ? 33 : 51) : rawWaterScore;
   const nativeness = siteNativeness(species, site);
   const productive = species.productiveFromYear !== null || species.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role));
   const productionScore = productive ? Math.max(68, 100 - Math.max(0, (species.productiveFromYear ?? 5) - 1) * 5) : species.roles.includes('timber') ? 62 : 30;
@@ -90,7 +99,7 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
   const components: SuitabilityComponent[] = [
     component('climate', 'Climate fit', climateScore, weights.climate, `Observed ${site.climate.absoluteMinTemperatureC}–${site.climate.absoluteMaxTemperatureC} °C; supported envelope ${species.minTemperatureC}–${species.maxTemperatureC} °C.`),
     component('soil', 'Soil reaction', soilScore, weights.soil, site.soil.ph === null ? 'Soil pH is unavailable; a representative field test is required before recommendation.' : `SoilGrids pH ${site.soil.ph}; supported range ${species.phMin}–${species.phMax}.`),
-    component('water', 'Water resilience', waterScore, weights.water, `${site.climate.annualPrecipitationMm} mm annual rain versus ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.`),
+    component('water', 'Water resilience', waterScore, weights.water, `${site.climate.annualPrecipitationMm} mm annual rain versus supported ${species.annualRainMinMm}–${species.annualRainMaxMm} mm; ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.`),
     component('native', 'Native habitat value', nativeness.score, weights.native, nativeness.explanation),
     component('purpose', 'Objective value', purposeScore, weights.purpose, `${productive ? 'Productive' : 'Support'} species; functions: ${species.roles.join(', ')}.`),
     component('syntropic', 'Successional function', syntropicScore, weights.syntropic, `${species.stratum} stratum, ${species.succession} succession${species.nitrogenFixer ? ', nitrogen fixer' : ''}.`),

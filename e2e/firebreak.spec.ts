@@ -111,6 +111,7 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-soil-composition.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
+  await page.getByTestId('planning-tab-firebreak').click();
   const firebreakConfiguration = page.getByTestId('firebreak-config');
   await expect(firebreakConfiguration).toBeVisible();
   await page.getByLabel('Reserve firebreak').check();

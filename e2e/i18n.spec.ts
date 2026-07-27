@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
 
@@ -31,6 +32,11 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByRole('heading', { name: 'Nessun piano dei costi' })).toBeVisible();
 
   await page.getByTestId('step-species').click();
+  await expect(page.getByTestId('step-species')).toContainText('Progettazione');
+  await expect(page.getByRole('tab', { name: 'Specie' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Tagliafuoco' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Mezzi di lavoro' })).toBeVisible();
+  await expect(page.getByTestId('recommendation-basis')).toContainText(`catalogo curato di ${DESIGN_SPECIES_BY_ID.size} specie`);
   await expect(page.getByLabel('Sistema di impianto')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Solo perimetro' })).toBeVisible();
   await expect(page.getByPlaceholder('Cerca un genere o nome scientifico')).toHaveValue('');
