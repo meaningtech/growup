@@ -421,6 +421,8 @@ test('keeps the populated water page locked to the mobile viewport', async ({ pa
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
   expect(overflow.scrollX).toBe(0);
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-water-locked.png'), fullPage: false });
+  await expect(page.getByTestId('water-tabs').getByRole('tab')).toHaveCount(4);
+  await page.getByTestId('water-tab-network').click();
   const layerControls = page.getByTestId('irrigation-layer-controls');
   await layerControls.scrollIntoViewIfNeeded();
   const layerButtons = layerControls.getByRole('button');
@@ -443,4 +445,26 @@ test('keeps the populated water page locked to the mobile viewport', async ({ pa
     expect(geometry.descriptionRight).toBeLessThanOrEqual(geometry.cardRight);
   }
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-irrigation-layer-cards.png'), fullPage: false });
+
+  await page.getByTestId('step-costs').click();
+  const costTabs = page.getByTestId('cost-tabs').getByRole('tab');
+  await expect(costTabs).toHaveCount(4);
+  for (const tab of await costTabs.all()) {
+    const geometry = await tab.evaluate((element) => {
+      const label = element.querySelector('span')?.getBoundingClientRect();
+      const bounds = element.getBoundingClientRect();
+      return {
+        labelLeft: label?.left ?? 0,
+        labelRight: label?.right ?? 0,
+        buttonLeft: bounds.left,
+        buttonRight: bounds.right,
+      };
+    });
+    expect(geometry.labelLeft).toBeGreaterThanOrEqual(geometry.buttonLeft);
+    expect(geometry.labelRight).toBeLessThanOrEqual(geometry.buttonRight);
+  }
+  await expect(page.getByTestId('costs-tab-management')).toBeDisabled();
+  await page.getByTestId('costs-tab-parameters').click();
+  await expect(page.getByTestId('economic-configuration')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-cost-tabs.png'), fullPage: false });
 });

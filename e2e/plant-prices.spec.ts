@@ -14,6 +14,10 @@ test('edits a species unit price and applies it to project costs', async ({ page
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
   await page.getByRole('button', { name: 'Size water + calculate costs' }).click();
   await page.getByTestId('step-costs').click();
+  await expect(page.getByTestId('cost-tabs').getByRole('tab')).toHaveCount(4);
+  await expect(page.getByTestId('costs-tab-summary')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('Establishment total')).toBeVisible();
+  await page.getByTestId('costs-tab-parameters').click();
 
   const prices = page.getByTestId('plant-unit-price-overrides');
   await expect(prices.locator('label')).toHaveCount(9);
@@ -38,4 +42,9 @@ test('edits a species unit price and applies it to project costs', async ({ page
   await firstRow.getByRole('button', { name: /Restore reference price/ }).click();
   await expect(input).toHaveValue(referenceValue);
   await expect(firstRow).toContainText('Reference estimate');
+
+  await page.getByTestId('costs-tab-installation').click();
+  await expect(page.getByTestId('cost-installation-table')).toBeVisible();
+  await page.getByTestId('costs-tab-management').click();
+  await expect(page.getByTestId('open-operational-schedule')).toBeVisible();
 });

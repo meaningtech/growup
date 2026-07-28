@@ -171,6 +171,11 @@ test('keeps the signed-in identity visible outside the menu on narrow screens', 
   await account.click();
   const menu = page.getByRole('dialog', { name: 'Menu' });
   await expect(menu).toContainText('Sebastiano');
+  const signOut = page.getByTestId('menu-sign-out');
+  await expect(signOut).toBeVisible();
+  await expect(signOut).toContainText('Sign out');
+  await expect(signOut.locator('img')).toHaveCount(0);
+  await menu.screenshot({ path: testInfo.outputPath('growup-mobile-account-menu.png') });
   const overflow = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,
     content: document.documentElement.scrollWidth,

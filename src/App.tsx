@@ -21,6 +21,7 @@ import {
   Flame,
   FlaskConical,
   FolderOpen,
+  Github,
   Info,
   Layers3,
   Leaf,
@@ -3100,9 +3101,8 @@ function WorkspaceApp() {
             <a className={!selectedVariant || !authUser ? 'disabled' : ''} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.geojson` : undefined} onClick={() => setMobileMenuOpen(false)}><Download size={15} />GeoJSON</a>
             <a className={!selectedVariant || !authUser ? 'disabled' : ''} aria-disabled={!selectedVariant || !authUser} href={selectedVariant && authUser ? `/api/projects/${projectId}/export.csv` : undefined} onClick={() => setMobileMenuOpen(false)}><Download size={15} />CSV</a>
           </div>
-          {authUser ? <button className="mobile-account-action" onClick={() => { setMobileMenuOpen(false); void logout(); }}>
-            {authUser.pictureUrl ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
-            <strong>{authUser.name}</strong><small>{t('auth.signOut')}</small><LogOut size={17} />
+          {authUser ? <button className="mobile-account-action sign-out-action" data-testid="menu-sign-out" onClick={() => { setMobileMenuOpen(false); void logout(); }}>
+            <span><LogOut size={16} /></span><strong>{t('auth.signOut')}</strong><small>{authUser.name}</small><ChevronRight size={17} />
           </button> : <button className="mobile-account-action signed-out" onClick={() => { setMobileMenuOpen(false); setAuthOpen(true); }}><span><LogIn size={17} /></span><strong>{t('auth.signIn')}</strong><small>{t('auth.workspace')}</small><ChevronRight size={17} /></button>}
         </aside>
       </div>}
@@ -3649,6 +3649,11 @@ function InfoPanel({ onClose }: { onClose: () => void }) {
         <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>
         <header><span className="info-mark"><Sprout size={24} /></span><small>{t('info.eyebrow')}</small><h2 id="info-title">{t('info.title')}</h2><p>{t('info.body')}</p></header>
         <div className="info-features">{features.map(({ icon: Icon, title, body }, index) => <article key={title}><span><Icon size={17} /></span><small>0{index + 1}</small><h3>{title}</h3><p>{body}</p></article>)}</div>
+        <a className="info-open-source" href="https://github.com/turinglabsorg/growup" target="_blank" rel="noreferrer">
+          <span><Github size={19} /></span>
+          <span><small>{t('info.openSourceEyebrow')}</small><strong>{t('info.openSourceTitle')}</strong><p>{t('info.openSourceBody')}</p></span>
+          <ChevronRight size={18} />
+        </a>
         <footer><ShieldCheck size={15} /><p>{t('info.disclaimer')}</p></footer>
       </section>
     </div>
@@ -5073,7 +5078,34 @@ function WaterPanel({
   onEditIrrigation: () => void;
 }) {
   const { t } = useI18n();
+  const [waterTab, setWaterTab] = useState<'summary' | 'configuration' | 'network' | 'verification'>('summary');
   const update = (patch: Partial<IrrigationConfiguration>) => onConfiguration({ ...configuration, ...patch });
+  const waterIssueCount = irrigation
+    ? irrigation.network.warnings.length + (irrigation.network.unroutableLineIds?.length ?? 0)
+    : 0;
+  const waterTabs = [
+    { id: 'summary', label: t('water.tab.summary'), icon: ClipboardCheck, issueCount: 0 },
+    { id: 'configuration', label: t('water.tab.configuration'), icon: Droplets, issueCount: 0 },
+    { id: 'network', label: t('water.tab.network'), icon: Waves, issueCount: waterIssueCount },
+    { id: 'verification', label: t('water.tab.verification'), icon: ShieldCheck, issueCount: 0 },
+  ] as const;
+  const waterTabNavigation = <div className="planning-tabs section-tabs" role="tablist" aria-label={t('water.tabsLabel')} data-testid="water-tabs">
+    {waterTabs.map(({ id, label, icon: Icon, issueCount }) => {
+      const disabled = !irrigation && id !== 'summary' && id !== 'configuration';
+      return <button
+        key={id}
+        id={`water-tab-${id}`}
+        type="button"
+        role="tab"
+        aria-selected={waterTab === id}
+        aria-controls="water-tab-panel"
+        className={`${waterTab === id ? 'active' : ''}${issueCount ? ' has-alert' : ''}`}
+        disabled={disabled}
+        data-testid={`water-tab-${id}`}
+        onClick={() => setWaterTab(id)}
+      ><Icon size={16} /><span>{label}</span>{issueCount ? <b>{issueCount}</b> : null}</button>;
+    })}
+  </div>;
   const sourceConfiguration = <div className="water-configuration" data-testid="water-configuration">
     <div className="card-heading"><div><Droplets size={17} /><span><small>{t('water.sourceEyebrow')}</small><strong>{t('water.sourceTitle')}</strong></span></div></div>
     <p>{t('water.sourceBody')}</p>
@@ -5092,7 +5124,7 @@ function WaterPanel({
     </div>
     <small className="water-source-note">{t(configuration.sourceType === 'well' ? 'water.wellSurvey' : configuration.sourceType === 'tank' ? 'water.tankPlacement' : 'water.sourceVerification')}</small>
   </div>;
-  if (!irrigation) return <div className="panel-body">{sourceConfiguration}<EmptyState icon={Droplets} title={t('water.emptyTitle')} body={t('water.emptyBody')} action={t(canCalculate ? 'water.calculate' : 'water.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
+  if (!irrigation) return <div className="panel-body"><div className="panel-scroll-content">{waterTabNavigation}<div id="water-tab-panel" className="planning-tab-panel section-tab-panel" role="tabpanel" aria-labelledby={`water-tab-${waterTab}`}>{waterTab === 'configuration' ? sourceConfiguration : <EmptyState icon={Droplets} title={t('water.emptyTitle')} body={t('water.emptyBody')} action={t(canCalculate ? 'water.calculate' : 'water.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} />}</div></div></div>;
   const maxMonthly = Math.max(...irrigation.monthly.map((month) => month.grossM3), 1);
   const routingValid = irrigation.network.routingValid !== false;
   const routingConflictCount = irrigation.network.unroutableLineIds?.length ?? 0;
@@ -5100,18 +5132,23 @@ function WaterPanel({
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
       <div className="panel-intro compact"><span className="eyebrow">{t('water.eyebrow')}</span><h1>{t('water.annual', { value: formatNumber(irrigation.annualWaterM3, 0) })}</h1><p>{t('water.method')}</p></div>
+      {waterTabNavigation}
+      <div id="water-tab-panel" className="planning-tab-panel section-tab-panel" role="tabpanel" aria-labelledby={`water-tab-${waterTab}`} data-testid="water-tab-panel">
+      {waterTab === 'summary' && <>
       <div className="system-water-model" data-testid="system-water-model">
         <div><Sprout size={17} /><span><small>{t('water.systemModelEyebrow')}</small><strong>{t(systemTranslationKey(irrigation.waterModel.system))}</strong></span><b>{formatNumber(irrigation.waterModel.supplementalIrrigationPercent, 0)}%</b></div>
         <p>{t(irrigation.waterModel.system === 'syntropic' ? 'water.systemModelSyntropic' : irrigation.waterModel.system === 'monoculture' ? 'water.systemModelMonoculture' : 'water.systemModelDefault', { target: irrigation.waterModel.matureSupplementalTargetPercent, years: irrigation.waterModel.transitionYears })}</p>
         <small>{t('water.potentialDemand', { value: formatNumber(irrigation.potentialAnnualWaterM3, 0), irrigated: irrigation.irrigatedPlantCount })}</small>
       </div>
-      {sourceConfiguration}
       <div className="metric-grid">
         <Metric label={t('water.gross')} value={`${formatNumber(irrigation.annualGrossMm, 0)} mm`} detail={irrigation.climatePeriod} />
         <Metric label={t('water.peak')} value={`${formatNumber(irrigation.peakDayM3, 1)} m³`} detail={t('water.designFlow')} />
         <Metric label={t('water.zones')} value={String(irrigation.zones)} detail={t('water.activePlants', { active: irrigation.activePlantCount, inactive: irrigation.inactivePlantCount })} />
         <Metric label={t('water.opexYear', { year: irrigation.designYear })} value={currency(irrigation.annualOperation.totalCost, irrigation.economics)} detail={t('water.opexDetail')} />
       </div>
+      </>}
+      {waterTab === 'configuration' && sourceConfiguration}
+      {waterTab === 'network' && <>
       <div className="hydraulic-plan" data-testid="hydraulic-plan">
         <div className="card-heading"><div><Waves size={17} /><span><small>{t('water.hydraulicEyebrow')}</small><strong>{t('water.hydraulicTitle')}</strong></span></div><StatusPill status={irrigation.network.warnings.length ? 'review-required' : 'available'} /></div>
         <div className="hydraulic-metrics">
@@ -5149,10 +5186,16 @@ function WaterPanel({
         return <div key={kind}><span><i className={kind} /><strong>{t(`water.line.${kind}`)}</strong><small>{t('water.lineCountLength', { count: lines.length, length: formatNumber(lines.reduce((sum, line) => sum + line.lengthM, 0), 0) })}</small></span><span>{[...new Set(lines.map((line) => `${line.diameterMm} mm`))].join(' · ')}</span></div>;
       })}</div>
       <div className={`network-bom${routingValid ? '' : ' provisional'}`} data-testid="irrigation-bom" data-procurement-ready={routingValid}><div className="card-heading"><div><Database size={17} /><span><small>{t('water.bomEyebrow')}</small><strong>{t(routingValid ? 'water.bomTitle' : 'water.bomDraftTitle')}</strong></span></div></div>{!routingValid && <p className="bom-conflict">{t('water.bomConflict')}</p>}<div className="network-bom-head"><span>{t('water.component')}</span><span>{t('water.measured')}</span><span>{t('water.purchase')}</span></div>{irrigation.network.components.map((component) => <div className="network-bom-row" key={component.id}><span><strong>{localizedNetworkComponent(component.label, t)}</strong><small>{localizedNetworkSpecification(component.specification, t)}</small></span><span>{formatNumber(component.measuredQuantity, component.unit === 'm' ? 1 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span><span>{formatNumber(component.purchaseQuantity, component.unit === 'm' ? 0 : 0)} {component.unit === 'm' ? 'm' : t('water.each')}</span></div>)}</div>
+      </>}
+      {waterTab === 'summary' &&
       <div className="monthly-chart"><div className="card-heading"><div><Droplets size={17} /><span><small>{t('water.monthlyDemand')}</small><strong>{t('water.monthlyUnit')}</strong></span></div></div><div className="bars">{irrigation.monthly.map((month) => <div key={month.month}><span style={{ height: `${Math.max(3, month.grossM3 / maxMonthly * 100)}%` }} title={`${month.grossM3} m³`} /><small>{monthName(month.month)}</small></div>)}</div></div>
+      }
+      {waterTab === 'verification' && <>
       <div className="satellite-schedule"><div><Satellite size={18} /><span><small>{t('water.satelliteSchedule')}</small><strong>{t('water.nextPulse', { value: signed(irrigation.satelliteScheduling.adjustmentPercent) })}</strong></span><StatusPill status={irrigation.satelliteScheduling.confidence} /></div><p>{localizedIrrigationRecommendation(irrigation, t)}</p><div className="priority-counts"><span className="high">{irrigation.satelliteScheduling.highPrioritySamples} {t('water.priorityHigh')}</span><span className="medium">{irrigation.satelliteScheduling.mediumPrioritySamples} {t('water.priorityMonitor')}</span><span className="low">{irrigation.satelliteScheduling.lowPrioritySamples} {t('water.priorityLow')}</span></div><button className="text-button" onClick={onShowZones}>{t('water.showZones')} <ChevronRight size={14} /></button></div>
       <div className="cost-breakdown"><Row label={t('water.water')} value={currency(irrigation.annualOperation.waterCost, irrigation.economics)} /><Row label={t('water.pumping', { value: formatNumber(irrigation.annualOperation.pumpingKwh, 0) })} value={currency(irrigation.annualOperation.energyCost, irrigation.economics)} /><Row label={t('water.systemCare', { hours: formatNumber(irrigation.annualOperation.managementLaborHours, 1) })} value={currency(irrigation.annualOperation.managementLaborCost, irrigation.economics)} /><Row label={t('water.annualMaintenance')} value={currency(irrigation.annualOperation.maintenanceCost, irrigation.economics)} /><Row label={t('water.installationMaterials')} value={currency(irrigation.installation.materialsCost, irrigation.economics)} strong /><Row label={t('water.installationLabour', { hours: irrigation.installation.laborHours })} value={currency(irrigation.installation.laborCost, irrigation.economics)} /></div>
       {Boolean(profile?.satellite.limitations.length) && <p className="fine-print">{t('water.satelliteLimitation')}</p>}
+      </>}
+      </div>
       </div>
       <div className="panel-action-bar">
         <button className="button primary wide sticky-action" onClick={onCosts}>{t('water.reviewCosts')} <ChevronRight size={18} /></button>
@@ -5163,6 +5206,7 @@ function WaterPanel({
 
 function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare, onSchedule }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onSchedule: () => void }) {
   const { t } = useI18n();
+  const [costTab, setCostTab] = useState<'summary' | 'installation' | 'management' | 'parameters'>('summary');
   const update = (patch: Partial<EconomicConfiguration>) => onConfiguration({
     ...configuration,
     ...patch,
@@ -5177,6 +5221,29 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
     delete plantUnitCostOverrides[speciesId];
     update({ plantUnitCostOverrides });
   };
+  const costTabs = [
+    { id: 'summary', label: t('costs.tab.summary'), icon: ClipboardCheck, issueCount: 0 },
+    { id: 'installation', label: t('costs.tab.installation'), icon: Sprout, issueCount: 0 },
+    { id: 'management', label: t('costs.tab.management'), icon: Clock3, issueCount: 0 },
+    { id: 'parameters', label: t('costs.tab.parameters'), icon: CircleDollarSign, issueCount: configuration.missingLocalRates.length },
+  ] as const;
+  const costTabNavigation = <div className="planning-tabs section-tabs" role="tablist" aria-label={t('costs.tabsLabel')} data-testid="cost-tabs">
+    {costTabs.map(({ id, label, icon: Icon, issueCount }) => {
+      const disabled = (!costs || !irrigation) && id !== 'summary' && id !== 'parameters';
+      return <button
+        key={id}
+        id={`costs-tab-${id}`}
+        type="button"
+        role="tab"
+        aria-selected={costTab === id}
+        aria-controls="costs-tab-panel"
+        className={`${costTab === id ? 'active' : ''}${issueCount ? ' has-alert' : ''}`}
+        disabled={disabled}
+        data-testid={`costs-tab-${id}`}
+        onClick={() => setCostTab(id)}
+      ><Icon size={16} /><span>{label}</span>{issueCount ? <b>{issueCount}</b> : null}</button>;
+    })}
+  </div>;
   const rateConfiguration = <div className="economic-configuration" data-testid="economic-configuration">
     <div className="card-heading"><div><CircleDollarSign size={17} /><span><small>{t('costs.localBasisEyebrow')}</small><strong>{t('costs.localBasisTitle', { country: configuration.countryCode })}</strong></span></div><StatusPill status={configuration.missingLocalRates.length ? 'review-required' : 'available'} /></div>
     <p>{localizedEconomicSummary(configuration.sourceSummary, t)}</p>
@@ -5216,26 +5283,35 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
     </section>
     {configuration.missingLocalRates.length > 0 && <div className="economic-warning"><ShieldCheck size={16} /><span>{t('costs.missingLocalRates', { values: configuration.missingLocalRates.map((value) => localizedEconomicRate(value, t)).join(', ') })}</span></div>}
   </div>;
-  if (!costs || !irrigation) return <div className="panel-body">{rateConfiguration}<EmptyState icon={CircleDollarSign} title={t('costs.emptyTitle')} body={t('costs.emptyBody')} action={t(canCalculate ? 'costs.calculate' : 'costs.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} /></div>;
+  if (!costs || !irrigation) return <div className="panel-body"><div className="panel-scroll-content">{costTabNavigation}<div id="costs-tab-panel" className="planning-tab-panel section-tab-panel" role="tabpanel" aria-labelledby={`costs-tab-${costTab}`}>{costTab === 'parameters' ? rateConfiguration : <EmptyState icon={CircleDollarSign} title={t('costs.emptyTitle')} body={t('costs.emptyBody')} action={t(canCalculate ? 'costs.calculate' : 'costs.openDesign')} onAction={canCalculate ? onCalculate : onPrepare} />}</div></div></div>;
   const speciesMap = new Map(species.map((item) => [item.id, item]));
   return (
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
-      {rateConfiguration}
+      {costTabNavigation}
+      <div id="costs-tab-panel" className="planning-tab-panel section-tab-panel" role="tabpanel" aria-labelledby={`costs-tab-${costTab}`} data-testid="costs-tab-panel">
+      {costTab === 'parameters' && rateConfiguration}
+      {costTab === 'summary' && <>
       {costs.economics.missingLocalRates.length > 0 && <div className="estimate-partial"><strong>{t('costs.partialTitle')}</strong><span>{t('costs.partialBody')}</span></div>}
       <div className="cost-scope-grid">
         <div className="total-cost"><small>{t(costs.economics.missingLocalRates.length ? 'costs.partialEstablishment' : 'costs.establishment')}</small><strong>{currency(costs.totalCost, costs.economics)}</strong><span>{t('costs.capexDetail')}</span></div>
         <div className="total-cost active"><small>{t('costs.activeSystem', { year: costs.activeSystem.designYear })}</small><strong>{currency(costs.activeSystem.totalReplacementCost, costs.economics)}</strong><span>{t('costs.activeSystemDetail', { active: costs.activeSystem.activePlantCount, inactive: costs.activeSystem.inactivePlantCount })}</span></div>
       </div>
+      <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseCost, costs.economics)} /><Row label={t('costs.labourHours', { label: t('costs.labour'), hours: formatNumber(costs.plantingLaborHours, 1) })} value={currency(costs.plantingLaborCost, costs.economics)} /><Row label={t('costs.protection')} value={currency(costs.protectionAndStakesCost, costs.economics)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationCost, costs.economics)} strong /><Row label={t('costs.annualWaterYear', { year: irrigation.designYear })} value={t('costs.perYear', { value: currency(irrigation.annualOperation.totalCost, costs.economics) })} strong /></div>
+      <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>
+      </>}
+      {costTab === 'management' && <>
       <CostTimelineChart costs={costs} irrigation={irrigation} />
       <MaintenanceTimelineChart costs={costs} irrigation={irrigation} />
-      <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseCost, costs.economics)} /><Row label={t('costs.labourHours', { label: t('costs.labour'), hours: formatNumber(costs.plantingLaborHours, 1) })} value={currency(costs.plantingLaborCost, costs.economics)} /><Row label={t('costs.protection')} value={currency(costs.protectionAndStakesCost, costs.economics)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationCost, costs.economics)} strong /><Row label={t('costs.annualWaterYear', { year: irrigation.designYear })} value={t('costs.perYear', { value: currency(irrigation.annualOperation.totalCost, costs.economics) })} strong /></div>
-      <div className="cost-table"><div className="cost-table-head"><span>{t('costs.species')}</span><span>{t('costs.quantity')}</span><span>{t('costs.plant')}</span><span>{t('costs.labourShort')}</span><span>{t('costs.total')}</span></div>{costs.bySpecies.map((item) => {
+      <button className="button schedule-button wide" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} /> {t('schedule.open')}</button>
+      </>}
+      {costTab === 'installation' &&
+      <div className="cost-table" data-testid="cost-installation-table"><div className="cost-table-head"><span>{t('costs.species')}</span><span>{t('costs.quantity')}</span><span>{t('costs.plant')}</span><span>{t('costs.labourShort')}</span><span>{t('costs.total')}</span></div>{costs.bySpecies.map((item) => {
         const entry = speciesMap.get(item.speciesId);
         return <div className="cost-table-row" key={item.speciesId}><span><strong>{entry ? speciesDisplayName(entry, t) : item.speciesId}</strong><i>{entry?.scientificName}</i></span><span>{item.count}</span><span>{currency(item.unitPlantCost, costs.economics)}</span><span>{formatNumber(item.unitLaborHours, 2)} h</span><span>{currency(item.subtotalCost, costs.economics)}</span></div>;
       })}</div>
-      <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>
-      <button className="button schedule-button wide" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} /> {t('schedule.open')}</button>
+      }
+      </div>
       </div>
       <div className="panel-action-bar">
         <button className="button primary wide sticky-action" onClick={onCalculate}>{t('costs.recalculate')} <ChevronRight size={18} /></button>

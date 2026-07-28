@@ -122,6 +122,11 @@ test('isolates supply pipes and drip laterals before irrigation geometry editing
   await page.getByTestId('step-species').click();
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
   await page.getByRole('button', { name: 'Size water + calculate costs' }).click();
+  await expect(page.getByTestId('water-tabs').getByRole('tab')).toHaveCount(4);
+  await expect(page.getByTestId('water-tab-summary')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('water-tab-verification').click();
+  await expect(page.getByText('Current satellite scheduling')).toBeVisible();
+  await page.getByTestId('water-tab-network').click();
 
   const controls = page.getByTestId('irrigation-layer-controls');
   const supplyPipes = controls.getByRole('button', { name: /Supply pipes/ });

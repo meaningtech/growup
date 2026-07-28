@@ -24,12 +24,18 @@ test('switches English and Italian through an extensible persisted locale', asyn
 
   await page.getByTestId('step-water').click();
   await expect(page.getByRole('heading', { name: 'Impianto irriguo non dimensionato' })).toBeVisible();
+  await expect(page.getByTestId('water-tabs').getByRole('tab')).toHaveCount(4);
+  await page.getByTestId('water-tab-configuration').click();
+  await expect(page.getByTestId('water-configuration')).toBeVisible();
 
   await page.getByTestId('step-costs').click();
+  await expect(page.getByTestId('cost-tabs').getByRole('tab')).toHaveCount(4);
+  await page.getByTestId('costs-tab-parameters').click();
   await expect(page.getByTestId('economic-configuration')).toContainText('Profilo economico · XX');
   await expect(page.getByLabel('Codice valuta')).toHaveValue('USD');
   await expect(page.getByLabel('Costo manodopera')).toHaveValue('18');
   await expect(page.getByText(/Tariffe di pianificazione stimate per l’area del progetto/)).toBeVisible();
+  await page.getByTestId('costs-tab-summary').click();
   await expect(page.getByRole('heading', { name: 'Nessun piano dei costi' })).toBeVisible();
 
   await page.getByTestId('step-species').click();

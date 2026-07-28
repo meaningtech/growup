@@ -33,6 +33,7 @@ test('renders canopy-scale woody ellipses and rejects or routes around them', as
       }
     }
   }
+  await page.getByTestId('water-tab-network').click();
   await expect(page.getByTestId('hydraulic-plan')).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1_000);
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-obstacle-routing.png', fullPage: false });
