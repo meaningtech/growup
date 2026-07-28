@@ -47,6 +47,7 @@ test('opens a full-page searchable project library and archives projects reversi
   await expect(page).toHaveURL(/\/projects$/);
   const library = page.getByTestId('projects-page');
   await expect(library).toBeVisible();
+  await expect(library.getByRole('button', { name: 'New project' })).toBeVisible();
   await expect(library).not.toHaveAttribute('role', 'dialog');
   const pageBox = await library.boundingBox();
   expect(pageBox).not.toBeNull();
@@ -79,8 +80,14 @@ test('opens a full-page searchable project library and archives projects reversi
     content: document.documentElement.scrollWidth,
   }));
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
+  await expect(library.getByRole('button', { name: 'New project' })).toBeVisible();
+  await expect(library.getByRole('button', { name: 'New project' })).toContainText('New project');
 
-  await page.getByRole('button', { name: 'Close projects' }).click();
+  await library.getByRole('button', { name: 'New project' }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(library).toHaveCount(0);
+  await expect(page.getByTestId('step-site')).toHaveAttribute('class', /active/);
+  await page.getByRole('button', { name: 'Projects' }).click();
+  await page.getByRole('button', { name: 'Close projects' }).click();
+  await expect(page).toHaveURL(/\/$/);
 });

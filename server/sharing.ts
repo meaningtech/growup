@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { ProjectState } from '../src/types.js';
+import type { IrrigationEstimate, SharedIrrigationEstimate, ProjectState, SharedProjectState } from '../src/types.js';
 import type { AuthConfig } from './auth.js';
 
 type ShareTokenPayload = {
@@ -46,18 +46,59 @@ export function verifyProjectShareToken(token: string, config: AuthConfig = {}):
   }
 }
 
-export function publicProject(project: ProjectState) {
+export function publicProject(project: ProjectState): SharedProjectState {
+  const includeCosts = project.collaboration.share.includeCosts;
   return {
     ...project,
+    economicConfiguration: includeCosts ? project.economicConfiguration : null,
+    irrigation: includeCosts ? project.irrigation : publicIrrigation(project.irrigation),
+    costs: includeCosts ? project.costs : null,
     collaboration: {
       ...project.collaboration,
       share: {
         enabled: project.collaboration.share.enabled,
         mode: project.collaboration.share.mode,
+        includeCosts,
         createdAt: project.collaboration.share.createdAt,
         expiresAt: project.collaboration.share.expiresAt,
       },
     },
+  };
+}
+
+function publicIrrigation(irrigation: IrrigationEstimate | null): SharedIrrigationEstimate | null {
+  if (!irrigation) return null;
+  const {
+    economics: _economics,
+    installation,
+    annualOperation,
+    systemMaintenance,
+    network,
+    monthly,
+    assumptions,
+    ...shared
+  } = irrigation;
+  const { materialsCost: _materialsCost, laborCost: _laborCost, totalCost: _installationTotalCost, ...sharedInstallation } = installation;
+  const {
+    waterCost: _waterCost,
+    energyCost: _energyCost,
+    maintenanceCost: _maintenanceCost,
+    managementLaborCost: _managementLaborCost,
+    totalCost: _annualTotalCost,
+    ...sharedAnnualOperation
+  } = annualOperation;
+  const { laborCostPerHour: _laborCostPerHour, totalCost: _maintenanceTotalCost, tasks, ...sharedMaintenance } = systemMaintenance;
+  const sharedTasks = tasks.map(({ cost: _cost, ...task }) => task);
+  const sharedComponents = network.components.map(({ unitCost: _unitCost, totalCost: _componentTotalCost, ...component }) => component);
+  const sharedMonthly = monthly.map(({ cost: _cost, ...month }) => month);
+  return {
+    ...shared,
+    network: { ...network, components: sharedComponents },
+    installation: sharedInstallation,
+    annualOperation: sharedAnnualOperation,
+    systemMaintenance: { ...sharedMaintenance, tasks: sharedTasks },
+    assumptions: assumptions.filter((assumption) => !/(cost|price|tariff|rate|currency|labour|labor)/i.test(`${assumption.label} ${assumption.value}`)),
+    monthly: sharedMonthly,
   };
 }
 

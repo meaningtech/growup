@@ -67,7 +67,7 @@ import { growthState } from './lib/growth';
 import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
-import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration } from './lib/layout';
+import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculateLayoutMetrics } from './lib/layout';
 import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
@@ -112,6 +112,7 @@ import type {
   LayoutVariant,
   LocationSearchResult,
   ProjectState,
+  SharedProjectState,
   ProjectAnalysisReport,
   ProjectCollaboration,
   FireOperationsPlan,
@@ -130,7 +131,7 @@ import type {
 } from './types';
 
 type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
-type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'path' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
+type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
 type AssistantTurnStatus = 'pending' | 'applied' | 'dismissed' | 'replaced';
 type AssistantActivity = 'asking' | 'applying' | null;
 type AssistantApplyStage = 'preparing' | 'layout' | 'calculations' | 'finalizing';
@@ -168,6 +169,7 @@ type ProjectSummary = Pick<ProjectState, 'id' | 'name' | 'updatedAt'> & { archiv
 type ShareResponse = {
   enabled: boolean;
   mode?: 'view' | 'review';
+  includeCosts?: boolean;
   expiresAt?: string | null;
   path?: string;
   project: ProjectState;
@@ -227,9 +229,27 @@ export default function App() {
   return sharedToken ? <SharedProjectPage token={sharedToken} /> : <WorkspaceApp />;
 }
 
+type SharedSection = WorkspaceSection;
+type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'moisture' | 'wind' | 'solar' | 'comments';
+
+const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
+  boundary: true,
+  constraints: true,
+  infrastructure: true,
+  vegetation: false,
+  plants: true,
+  machinery: false,
+  firebreak: true,
+  irrigation: true,
+  moisture: false,
+  wind: false,
+  solar: false,
+  comments: true,
+};
+
 function SharedProjectPage({ token }: { token: string }) {
   const { t, locale } = useI18n();
-  const [project, setProject] = useState<ProjectState | null>(null);
+  const [project, setProject] = useState<SharedProjectState | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -237,123 +257,301 @@ function SharedProjectPage({ token }: { token: string }) {
   const [message, setMessage] = useState('');
   const [reviewNote, setReviewNote] = useState('');
   const [commentCoordinate, setCommentCoordinate] = useState<Coordinate | null>(null);
+  const [section, setSection] = useState<SharedSection>('site');
+  const [layers, setLayers] = useState(DEFAULT_SHARED_LAYERS);
+  const [layersOpen, setLayersOpen] = useState(true);
+  const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
+  const [solarMonth, setSolarMonth] = useState(6);
+  const [solarHour, setSolarHour] = useState(12);
+  const [mapReady, setMapReady] = useState(false);
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
 
   useEffect(() => {
-    Promise.all([api<AppConfig>('/api/config'), api<ProjectState>(`/api/shared/projects/${token}`)])
+    Promise.all([api<AppConfig>('/api/config'), api<SharedProjectState>(`/api/shared/projects/${token}`)])
       .then(([appConfig, sharedProject]) => {
         setConfig(appConfig);
         setProject(sharedProject);
+        if (sharedProject.collaboration.share.mode === 'review') setSection('analysis');
       })
       .catch((loadError) => setError(messageOf(loadError)));
   }, [token]);
 
+  const variant = useMemo(
+    () => project?.variants.find((item) => item.id === project.selectedVariantId) ?? project?.variants[0] ?? null,
+    [project],
+  );
+  const species = useMemo(
+    () => (variant?.trees ?? []).map((tree) => DESIGN_SPECIES_BY_ID.get(tree.speciesId)).filter((item, index, items): item is DesignSpecies => Boolean(item) && items.findIndex((candidate) => candidate?.id === item?.id) === index),
+    [variant],
+  );
+  const dailySolarExposure = useMemo(
+    () => project?.siteProfile && variant
+      ? simulateDailyPlantExposure(project.siteProfile, variant, species, solarMonth, project.timelineYear)
+      : null,
+    [project?.siteProfile, project?.timelineYear, solarMonth, species, variant],
+  );
+  const selectedSolarHour = useMemo(
+    () => dailySolarExposure?.hours.find((hour) => hour.localSolarHour === solarHour) ?? null,
+    [dailySolarExposure, solarHour],
+  );
+  const selectedTree = variant?.trees.find((tree) => tree.id === selectedTreeId) ?? null;
+  const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) ?? null : null;
+
   useEffect(() => {
-    if (!config || !project || !mapElementRef.current) return;
+    if (!config || !project || !mapElementRef.current || mapRef.current) return;
     let cancelled = false;
     loadGoogleMaps(config.googleMapsApiKey).then((maps) => {
       if (cancelled || !mapElementRef.current) return;
       const map = new maps.Map(mapElementRef.current, {
         mapTypeId: 'satellite',
-        mapTypeControl: false,
+        mapTypeControl: true,
         streetViewControl: false,
-        fullscreenControl: false,
+        fullscreenControl: true,
+        scaleControl: true,
+        zoomControl: true,
+        clickableIcons: false,
         gestureHandling: 'greedy',
       });
-      mapRef.current = map;
-      overlaysRef.current.push(new maps.Polygon({
-        map,
-        paths: project.site.polygon,
-        strokeColor: '#f7f2df',
-        strokeOpacity: 1,
-        strokeWeight: 3,
-        fillColor: '#96aa49',
-        fillOpacity: 0.16,
-      }));
-      const variant = project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0];
-      for (const tree of variant?.trees ?? []) {
-        const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
-        if (!species) continue;
-        const displayName = speciesDisplayName(species, t);
-        const plantCode = plantPositionCode(tree);
-        overlaysRef.current.push(new maps.Circle({
-          map,
-          center: tree.coordinate,
-          radius: 1.2,
-          strokeColor: '#ffffff',
-          strokeOpacity: 0.8,
-          strokeWeight: 1,
-          fillColor: species.color,
-          fillOpacity: 0.82,
-          clickable: false,
-        }));
-        overlaysRef.current.push(new maps.Marker({
-          map,
-          position: tree.coordinate,
-          clickable: false,
-          title: `${plantCode} · ${displayName} · ${species.scientificName}`,
-          label: {
-            text: plantSpeciesInitials(displayName, locale),
-            color: plantMarkerLabelColor(species.color),
-            fontFamily: 'DM Mono, monospace',
-            fontSize: '9px',
-            fontWeight: '800',
-          },
-          icon: {
-            path: maps.SymbolPath.CIRCLE,
-            scale: 9,
-            fillColor: species.color,
-            fillOpacity: 0.96,
-            strokeColor: '#ffffff',
-            strokeOpacity: 0.95,
-            strokeWeight: 1.5,
-          },
-          zIndex: 32,
-        }));
-      }
-      for (const line of variant?.firebreak?.lines ?? []) {
-        overlaysRef.current.push(new maps.Polygon({
-          map,
-          paths: corridorSegmentPolygon(line.points[0], line.points[line.points.length - 1], line.widthM),
-          strokeColor: '#ffb15c',
-          strokeOpacity: 0.95,
-          strokeWeight: 2,
-          fillColor: '#ef6a3b',
-          fillOpacity: 0.42,
-          clickable: false,
-        }));
-      }
-      for (const comment of project.collaboration.comments.filter((item) => item.coordinate)) {
-        overlaysRef.current.push(new maps.Marker({
-          map,
-          position: comment.coordinate,
-          title: `${comment.authorName}: ${comment.message}`,
-          label: { text: '●', color: '#ffffff', fontSize: '11px' },
-        }));
-      }
-      map.fitBounds(sitePreviewBounds(project.site.polygon));
+      map.fitBounds(sitePreviewBounds(project.site.polygon), 56);
       if (project.collaboration.share.mode === 'review') {
         map.addListener('click', (event: any) => event.latLng && setCommentCoordinate(coordinateFromLatLng(event.latLng)));
       }
+      mapRef.current = map;
+      setMapReady(true);
     }).catch((mapError) => setError(messageOf(mapError)));
     return () => {
       cancelled = true;
       overlaysRef.current.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
+      mapRef.current = null;
     };
-  }, [config, locale, project, t]);
+  }, [config, project?.id]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps || !project) return;
+    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    overlaysRef.current = [];
+    const add = (overlay: any) => {
+      overlaysRef.current.push(overlay);
+      return overlay;
+    };
+
+    if (layers.boundary) {
+      sitePolygons(project.site).forEach((polygon) => add(new maps.Polygon({
+        map,
+        paths: polygon,
+        strokeColor: '#f7f2df',
+        strokeOpacity: 1,
+        strokeWeight: 3,
+        fillColor: '#96aa49',
+        fillOpacity: 0.15,
+        clickable: false,
+        zIndex: 10,
+      })));
+    }
+    if (layers.constraints) {
+      project.site.holes.forEach((polygon) => add(new maps.Polygon({ map, paths: polygon, strokeColor: '#e7a84d', strokeOpacity: 1, strokeWeight: 2, fillColor: '#6e4d1f', fillOpacity: 0.32, clickable: false, zIndex: 12 })));
+      project.site.exclusions.forEach((polygon) => add(new maps.Polygon({ map, paths: polygon, strokeColor: '#ef775d', strokeOpacity: 1, strokeWeight: 2, fillColor: '#b94031', fillOpacity: 0.32, clickable: false, zIndex: 12 })));
+      project.site.paths.forEach((path) => add(new maps.Polyline({ map, path: path.points, strokeColor: '#f7e6a5', strokeOpacity: 0.95, strokeWeight: Math.max(3, Math.min(12, path.widthM * 1.7)), clickable: false, zIndex: 13 })));
+    }
+    if (layers.infrastructure) {
+      [
+        ...project.site.accessPoints.map((point) => ({ point, label: 'A', color: '#f0c36b' })),
+        ...project.site.waterPoints.map((point) => ({ point, label: 'W', color: '#62c8bd' })),
+        ...project.site.existingTrees.map((point) => ({ point, label: 'T', color: '#d7ff83' })),
+      ].forEach(({ point, label, color }) => add(new maps.Marker({
+        map,
+        position: point.coordinate,
+        title: point.name,
+        label: { text: label, color: '#17351f', fontSize: '9px', fontWeight: '700' },
+        icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: color, fillOpacity: 1, strokeColor: '#17351f', strokeWeight: 2 },
+        zIndex: 15,
+      })));
+    }
+    if (layers.vegetation) {
+      project.siteProfile?.satellite.existingVegetation.patches.forEach((patch, index) => {
+        add(new maps.Polygon({ map, paths: patch.polygon, strokeColor: patch.confidence === 'high' ? '#d7ff83' : '#f0c36b', strokeOpacity: 1, strokeWeight: 3, fillColor: '#153f2c', fillOpacity: 0.55, clickable: false, zIndex: 16 }));
+        add(new maps.Marker({
+          map,
+          position: patch.centroid,
+          clickable: false,
+          label: { text: `E${index + 1}`, color: '#17351f', fontFamily: 'DM Mono, monospace', fontSize: '9px', fontWeight: '700' },
+          icon: { path: maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#d7ff83', fillOpacity: 1, strokeColor: '#17351f', strokeWeight: 2 },
+          zIndex: 18,
+        }));
+      });
+    }
+    if (layers.machinery && variant?.machinery.enabled) {
+      [...(variant.machinery.perimeterLoops ?? []), ...variant.machinery.corridors].forEach((corridor) => {
+        for (let index = 0; index < corridor.points.length - 1; index += 1) {
+          add(new maps.Polygon({
+            map,
+            paths: corridorSegmentPolygon(corridor.points[index], corridor.points[index + 1], corridor.widthM),
+            strokeColor: '#7c481d',
+            strokeOpacity: 0.9,
+            strokeWeight: 1,
+            fillColor: '#f0c36b',
+            fillOpacity: 0.4,
+            clickable: false,
+            zIndex: 16,
+          }));
+        }
+      });
+      variant.machinery.turningAreas.forEach((area) => add(new maps.Circle({ map, center: area.center, radius: area.radiusM, strokeColor: '#10281e', strokeOpacity: 0.95, strokeWeight: 2, fillColor: '#ff6b3d', fillOpacity: 0.46, clickable: false, zIndex: 18 })));
+      (variant.machinery.manoeuvreRoutes ?? []).forEach((route) => add(new maps.Polyline({
+        map,
+        path: route.points,
+        strokeColor: route.clearanceSatisfied ? '#c7e36f' : '#ffcab8',
+        strokeOpacity: 0.96,
+        strokeWeight: 4,
+        icons: [{ icon: { path: 'M -2,-1 0,1 2,-1', strokeColor: '#10281e', strokeOpacity: 1, strokeWeight: 1.6, scale: 1.55 }, offset: '14px', repeat: '34px' }],
+        clickable: false,
+        zIndex: 21,
+      })));
+    }
+    if (layers.firebreak && variant?.firebreak.enabled) {
+      variant.firebreak.lines.forEach((line) => add(new maps.Polygon({
+        map,
+        paths: corridorSegmentPolygon(line.points[0], line.points[line.points.length - 1], line.widthM),
+        strokeColor: line.priority === 'windward' ? '#7d2917' : '#613b12',
+        strokeOpacity: 0.95,
+        strokeWeight: 2,
+        fillColor: line.priority === 'windward' ? '#f06f3c' : '#e9b44c',
+        fillOpacity: 0.48,
+        clickable: false,
+        zIndex: 17,
+      })));
+    }
+    if (layers.irrigation && project.irrigation) {
+      project.irrigation.network.lines.forEach((line) => add(new maps.Polyline({
+        map,
+        path: line.points,
+        strokeColor: line.routingStatus === 'blocked' ? '#d24f3d' : line.kind === 'mainline' ? '#1c5f88' : line.kind === 'submain' ? '#278c9e' : line.kind === 'protected-crossing' ? '#f0a536' : '#61b9c7',
+        strokeOpacity: 0.92,
+        strokeWeight: line.kind === 'mainline' ? 5 : line.kind === 'submain' ? 4 : line.kind === 'protected-crossing' ? 7 : 2,
+        clickable: false,
+        zIndex: 30,
+      })));
+      add(new maps.Marker({
+        map,
+        position: project.irrigation.network.source.coordinate,
+        title: t('map.waterSource'),
+        label: { text: 'S', color: '#ffffff', fontFamily: 'DM Mono, monospace', fontSize: '10px', fontWeight: '700' },
+        icon: { path: maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#15557a', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
+        zIndex: 38,
+      }));
+    }
+    if (layers.moisture) {
+      const ndmiUrl = project.siteProfile?.satellite.optical.ndmiPreviewUrl;
+      if (ndmiUrl) {
+        const ndmi = add(new maps.GroundOverlay(ndmiUrl, sitePreviewBounds(project.site.polygon), { opacity: 0.65, clickable: false }));
+        ndmi.setMap(map);
+      }
+      project.siteProfile?.satellite.optical.waterSamples.forEach((sample) => add(new maps.Circle({
+        map,
+        center: sample.coordinate,
+        radius: 4.8,
+        strokeColor: '#10251c',
+        strokeOpacity: 0.75,
+        strokeWeight: 1,
+        fillColor: sample.irrigationPriority === 'high' ? '#ed7047' : sample.irrigationPriority === 'medium' ? '#f1c75b' : '#62c8bd',
+        fillOpacity: 0.8,
+        clickable: false,
+        zIndex: 35,
+      })));
+    }
+    const windDirection = project.siteProfile?.solar.prevailingWindDirectionDegrees;
+    if (layers.wind && project.siteProfile?.solar.status === 'available' && windDirection !== null && windDirection !== undefined) {
+      const [source, destination] = windVectorCoordinates(project.siteProfile.centroid, windDirection, Math.max(35, Math.sqrt(project.siteProfile.areaM2) * 0.75));
+      add(new maps.Polyline({
+        map,
+        path: [source, destination],
+        strokeColor: '#1f7f89',
+        strokeOpacity: 0.94,
+        strokeWeight: 5,
+        icons: [{ icon: { path: maps.SymbolPath.FORWARD_CLOSED_ARROW, fillColor: '#d7ff83', fillOpacity: 1, strokeColor: '#113c39', strokeOpacity: 1, strokeWeight: 1.5, scale: 5 }, offset: '100%' }],
+        clickable: false,
+        zIndex: 20,
+      }));
+    }
+    if (layers.solar && selectedSolarHour && selectedSolarHour.elevationDegrees > 0) {
+      selectedSolarHour.plants.forEach((plant) => {
+        if (plant.shadowPolygon.length >= 3) add(new maps.Polygon({
+          map,
+          paths: plant.shadowPolygon,
+          strokeColor: '#183242',
+          strokeOpacity: 0.34,
+          strokeWeight: 1,
+          fillColor: '#1b2b3a',
+          fillOpacity: plant.status === 'shaded' ? 0.24 : 0.15,
+          clickable: false,
+          zIndex: 14,
+        }));
+      });
+    }
+    if (layers.plants && variant) {
+      variant.trees.forEach((tree) => {
+        const item = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+        if (!item) return;
+        const state = growthState(item, tree, project.timelineYear);
+        if (!state.active) return;
+        const selected = tree.id === selectedTreeId;
+        const name = speciesDisplayName(item, t);
+        const selectTree = () => setSelectedTreeId(tree.id);
+        const crown = add(new maps.Circle({
+          map,
+          center: tree.coordinate,
+          radius: Math.max(0.35, state.crownDiameterM / 2),
+          strokeColor: selected ? '#ffffff' : item.color,
+          strokeOpacity: 1,
+          strokeWeight: selected ? 3 : 1,
+          fillColor: item.color,
+          fillOpacity: selected ? 0.78 : 0.5,
+          clickable: true,
+          zIndex: selected ? 45 : 24,
+        }));
+        crown.addListener('click', selectTree);
+        const marker = add(new maps.Marker({
+          map,
+          position: tree.coordinate,
+          clickable: true,
+          title: `${plantPositionCode(tree)} · ${name} · ${item.scientificName}`,
+          label: { text: plantSpeciesInitials(name, locale), color: plantMarkerLabelColor(item.color), fontFamily: 'DM Mono, monospace', fontSize: selected ? '10px' : '9px', fontWeight: '800' },
+          icon: { path: maps.SymbolPath.CIRCLE, scale: selected ? 11 : 9, fillColor: item.color, fillOpacity: 0.98, strokeColor: selected ? '#ffffff' : '#17351f', strokeOpacity: 1, strokeWeight: selected ? 3 : 1.5 },
+          zIndex: selected ? 65 : 38,
+        }));
+        marker.addListener('click', selectTree);
+      });
+    }
+    if (layers.comments) {
+      project.collaboration.comments.filter((comment) => comment.coordinate).forEach((comment) => add(new maps.Marker({
+        map,
+        position: comment.coordinate,
+        title: `${comment.authorName}: ${comment.message}`,
+        label: { text: '●', color: '#ffffff', fontSize: '11px' },
+        icon: { path: maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#705ac8', fillOpacity: 0.95, strokeColor: '#ffffff', strokeWeight: 2 },
+        zIndex: 70,
+      })));
+    }
+    return () => {
+      overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+      overlaysRef.current = [];
+    };
+  }, [layers, locale, mapReady, project, selectedSolarHour, selectedTreeId, t, variant]);
 
   async function submitComment() {
     if (!reviewerName.trim() || !message.trim()) return;
     setBusy(true);
     try {
-      const updated = await api<ProjectState>(`/api/shared/projects/${token}/comments`, post({
+      const updated = await api<SharedProjectState>(`/api/shared/projects/${token}/comments`, post({
         authorName: reviewerName,
         message,
         coordinate: commentCoordinate,
-        target: commentCoordinate ? 'general' : 'general',
+        target: 'general',
       }));
       setProject(updated);
       setMessage('');
@@ -369,7 +567,7 @@ function SharedProjectPage({ token }: { token: string }) {
     if (!reviewerName.trim()) return;
     setBusy(true);
     try {
-      setProject(await api<ProjectState>(`/api/shared/projects/${token}/review`, post({ status, reviewerName, note: reviewNote })));
+      setProject(await api<SharedProjectState>(`/api/shared/projects/${token}/review`, post({ status, reviewerName, note: reviewNote })));
     } catch (submitError) {
       setError(messageOf(submitError));
     } finally {
@@ -379,25 +577,249 @@ function SharedProjectPage({ token }: { token: string }) {
 
   if (error && !project) return <main className="shared-error"><Sprout size={28} /><h1>{t('shared.unavailable')}</h1><p>{error}</p></main>;
   if (!project) return <main className="shared-loading"><LoaderCircle className="spin" size={26} /><span>{t('busy.loading')}</span></main>;
-  const variant = project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0] ?? null;
   const canReview = project.collaboration.share.mode === 'review';
-  return <main className="shared-project">
-    <header><span className="brand-mark"><Sprout size={21} /></span><span><small>{t('shared.eyebrow')}</small><strong>{project.name}</strong></span><i>r{project.revision ?? 0}</i></header>
-    <section className="shared-map"><div ref={mapElementRef} /><span><MousePointer2 size={14} />{canReview ? t('shared.mapHint') : t('shared.readOnly')}</span></section>
-    <aside>
-      <div className="shared-summary"><small>{t('shared.summary')}</small><h1>{project.site.name}</h1><p>{project.siteProfile?.location.displayName ?? t('shared.locationUnavailable')}</p><div><span><strong>{variant?.trees.length ?? 0}</strong><small>{t('shared.plants')}</small></span><span><strong>{variant?.firebreak?.enabled ? `${formatNumber(variant.firebreak.plannedWidthM, 1)} m` : '—'}</strong><small>{t('shared.firebreak')}</small></span><span><strong>{project.timelineYear}</strong><small>{t('timeline.year')}</small></span></div></div>
-      {project.collaboration.review && <div className={`shared-decision ${project.collaboration.review.status}`}><ClipboardCheck size={18} /><span><small>{t('sharing.reviewStatus')}</small><strong>{t(`sharing.status.${project.collaboration.review.status}`)}</strong><p>{project.collaboration.review.reviewerName} · {shortDate(project.collaboration.review.updatedAt, locale)}</p></span></div>}
-      <div className="shared-comments"><header><strong>{t('sharing.comments')}</strong><small>{project.collaboration.comments.length}</small></header>{project.collaboration.comments.map((comment) => <article key={comment.id}><span><strong>{comment.authorName}</strong><small>r{comment.revision} · {shortDate(comment.createdAt, locale)}</small></span><p>{comment.message}</p>{comment.coordinate && <i><MapIcon size={12} />{t('shared.pinned')}</i>}</article>)}</div>
-      {canReview && <div className="shared-review-form">
-        <label><span>{t('shared.yourName')}</span><input maxLength={100} value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} /></label>
-        <label><span>{t('shared.comment')}</span><textarea maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} /></label>
-        {commentCoordinate && <small className="shared-pin"><LocateFixed size={13} />{t('shared.pinReady')}</small>}
-        <button disabled={busy || !reviewerName.trim() || !message.trim()} onClick={() => void submitComment()}><Send size={14} />{t('shared.addComment')}</button>
-        <label><span>{t('shared.reviewNote')}</span><textarea maxLength={2000} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label>
-        <div><button className="request" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('changes-requested')}>{t('sharing.requestChanges')}</button><button className="approve" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('approved')}><Check size={14} />{t('sharing.approve')}</button></div>
+  const availableSections = STEPS.filter((step) => step.id !== 'costs' || project.collaboration.share.includeCosts);
+  const layerDefinitions: Array<{ id: SharedLayerId; icon: typeof MapIcon }> = [
+    { id: 'boundary', icon: ScanLine },
+    { id: 'constraints', icon: Ban },
+    { id: 'infrastructure', icon: LocateFixed },
+    { id: 'vegetation', icon: TreePine },
+    { id: 'plants', icon: Leaf },
+    { id: 'machinery', icon: Tractor },
+    { id: 'firebreak', icon: Flame },
+    { id: 'irrigation', icon: Waves },
+    { id: 'moisture', icon: Droplets },
+    { id: 'wind', icon: WindIcon },
+    { id: 'solar', icon: CloudSun },
+    { id: 'comments', icon: ClipboardCheck },
+  ];
+  return <main className="shared-project" data-testid="shared-project">
+    <header>
+      <span className="brand-mark"><Sprout size={21} /></span>
+      <span><small>{t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
+      <b><Eye size={14} />{t('shared.readOnlyBadge')}</b>
+      <i>r{project.revision ?? 0}</i>
+    </header>
+    <section className="shared-map">
+      <div ref={mapElementRef} data-testid="shared-map" />
+      <button className="shared-layer-trigger" aria-expanded={layersOpen} aria-label={t('shared.layers')} onClick={() => setLayersOpen((open) => !open)}><Layers3 size={17} /><span>{t('shared.layers')}</span></button>
+      {layersOpen && <div className="shared-layer-panel" data-testid="shared-layer-panel">
+        <header><span><small>{t('shared.mapControls')}</small><strong>{t('shared.layers')}</strong></span><button aria-label={t('actions.close')} onClick={() => setLayersOpen(false)}><X size={15} /></button></header>
+        <div>{layerDefinitions.map(({ id, icon: Icon }) => <button key={id} aria-label={t(`shared.layer.${id}`)} aria-pressed={layers[id]} className={layers[id] ? 'active' : ''} onClick={() => setLayers((current) => ({ ...current, [id]: !current[id] }))}><Icon size={15} /><span>{t(`shared.layer.${id}`)}</span>{layers[id] ? <Eye size={14} /> : <EyeOff size={14} />}</button>)}</div>
+        {layers.solar && <div className="shared-solar-controls"><label><span>{t('shared.solarMonth')}</span><input aria-label={t('shared.solarMonth')} type="range" min="1" max="12" value={solarMonth} onChange={(event) => setSolarMonth(Number(event.target.value))} /><b>{monthName(solarMonth)}</b></label><label><span>{t('shared.solarHour')}</span><input aria-label={t('shared.solarHour')} type="range" min="5" max="20" value={solarHour} onChange={(event) => setSolarHour(Number(event.target.value))} /><b>{solarHour}:00</b></label></div>}
       </div>}
+      {selectedTree && selectedTreeSpecies && <div className="shared-tree-detail" data-testid="shared-tree-detail"><button aria-label={t('actions.close')} onClick={() => setSelectedTreeId(null)}><X size={14} /></button><span className="tree-dot" style={{ background: selectedTreeSpecies.color }} /><span><small>{plantPositionCode(selectedTree)}</small><strong>{speciesDisplayName(selectedTreeSpecies, t)}</strong><i>{selectedTreeSpecies.scientificName}</i></span></div>}
+      <span className="shared-map-hint"><MousePointer2 size={14} />{canReview ? t('shared.mapHint') : t('shared.readOnly')}</span>
+    </section>
+    <aside>
+      <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}><Icon size={16} /><span>{t(`nav.${id}`)}</span></button>)}</nav>
+      <div className="shared-section-content">
+        <SharedProjectSection project={project} variant={variant} species={species} section={section} />
+        {section === 'analysis' && <>
+          {project.collaboration.review && <div className={`shared-decision ${project.collaboration.review.status}`}><ClipboardCheck size={18} /><span><small>{t('sharing.reviewStatus')}</small><strong>{t(`sharing.status.${project.collaboration.review.status}`)}</strong><p>{project.collaboration.review.reviewerName} · {shortDate(project.collaboration.review.updatedAt, locale)}</p></span></div>}
+          <div className="shared-comments"><header><strong>{t('sharing.comments')}</strong><small>{project.collaboration.comments.length}</small></header>{project.collaboration.comments.length ? project.collaboration.comments.map((comment) => <article key={comment.id}><span><strong>{comment.authorName}</strong><small>r{comment.revision} · {shortDate(comment.createdAt, locale)}</small></span><p>{comment.message}</p>{comment.coordinate && <i><MapIcon size={12} />{t('shared.pinned')}</i>}</article>) : <p className="inline-empty">{t('sharing.noComments')}</p>}</div>
+          {canReview && <div className="shared-review-form">
+            <label><span>{t('shared.yourName')}</span><input maxLength={100} value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} /></label>
+            <label><span>{t('shared.comment')}</span><textarea maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} /></label>
+            {commentCoordinate && <small className="shared-pin"><LocateFixed size={13} />{t('shared.pinReady')}</small>}
+            <button disabled={busy || !reviewerName.trim() || !message.trim()} onClick={() => void submitComment()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}{t('shared.addComment')}</button>
+            <label><span>{t('shared.reviewNote')}</span><textarea maxLength={2000} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label>
+            <div><button className="request" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('changes-requested')}>{t('sharing.requestChanges')}</button><button className="approve" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('approved')}><Check size={14} />{t('sharing.approve')}</button></div>
+          </div>}
+        </>}
+      </div>
     </aside>
   </main>;
+}
+
+function SharedProjectSection({ project, variant, species, section }: {
+  project: SharedProjectState;
+  variant: LayoutVariant | null;
+  species: DesignSpecies[];
+  section: SharedSection;
+}) {
+  const { t, locale } = useI18n();
+  const profile = project.siteProfile;
+  const speciesCounts = variant ? [...variant.trees.reduce((counts, tree) => counts.set(tree.speciesId, (counts.get(tree.speciesId) ?? 0) + 1), new Map<string, number>())] : [];
+  if (section === 'site') return <SharedSectionFrame eyebrow={t('shared.section.siteEyebrow')} title={project.site.name} body={profile?.location.displayName ?? t('shared.locationUnavailable')}>
+    <div className="shared-metric-grid">
+      <SharedMetric label={t('shared.area')} value={profile ? `${formatNumber(profile.areaM2 / 10_000, 2)} ha` : '—'} />
+      <SharedMetric label={t('shared.perimeter')} value={profile ? `${formatNumber(profile.perimeterM, 0)} m` : '—'} />
+      <SharedMetric label={t('shared.constraints')} value={String(project.site.holes.length + project.site.exclusions.length)} />
+      <SharedMetric label={t('shared.accessPoints')} value={String(project.site.accessPoints.length)} />
+    </div>
+    <SharedDataCard title={t('shared.geometry')} icon={ScanLine}>
+      <SharedRow label={t('shared.polygons')} value={String(1 + project.site.additionalPolygons.length)} />
+      <SharedRow label={t('shared.managementPaths')} value={String(project.site.paths.length)} />
+      <SharedRow label={t('shared.waterPoints')} value={String(project.site.waterPoints.length)} />
+      <SharedRow label={t('shared.existingTrees')} value={String(project.site.existingTrees.length)} />
+      <SharedRow label={t('shared.setback')} value={`${formatNumber(project.site.setbackM, 1)} m`} />
+    </SharedDataCard>
+  </SharedSectionFrame>;
+  if (section === 'profile') return <SharedSectionFrame eyebrow={t('shared.section.profileEyebrow')} title={t('shared.section.profileTitle')} body={t('shared.section.profileBody')}>
+    {profile ? <>
+      <div className="shared-metric-grid">
+        <SharedMetric label={t('profile.ph')} value={profile.soil.ph === null ? '—' : formatNumber(profile.soil.ph, 1)} detail={profile.soil.reactionClass ? t(`profile.soilReaction.${profile.soil.reactionClass}`) : undefined} />
+        <SharedMetric label={t('profile.texture')} value={profile.soil.textureClass ?? '—'} />
+        <SharedMetric label={t('profile.rain')} value={`${formatNumber(profile.climate.annualPrecipitationMm, 0)} mm`} />
+        <SharedMetric label={t('profile.slope')} value={`${formatNumber(profile.terrain.slopePercent, 1)}%`} />
+      </div>
+      <SharedDataCard title={t('shared.soilComposition')} icon={FlaskConical}>
+        <SharedRow label={t('profile.sand')} value={profile.soil.sandPercent === null ? '—' : `${formatNumber(profile.soil.sandPercent, 0)}%`} />
+        <SharedRow label={t('profile.silt')} value={profile.soil.siltPercent === null ? '—' : `${formatNumber(profile.soil.siltPercent, 0)}%`} />
+        <SharedRow label={t('profile.clay')} value={profile.soil.clayPercent === null ? '—' : `${formatNumber(profile.soil.clayPercent, 0)}%`} />
+        <SharedRow label={t('profile.organicCarbon')} value={profile.soil.organicCarbonGKg === null ? '—' : `${formatNumber(profile.soil.organicCarbonGKg, 1)} g/kg`} />
+      </SharedDataCard>
+      <SharedDataCard title={t('shared.climateTerrain')} icon={CloudSun}>
+        <SharedRow label={t('profile.temperature')} value={`${formatNumber(profile.climate.meanTemperatureC, 1)} °C`} />
+        <SharedRow label={t('profile.elevation')} value={`${formatNumber(profile.terrain.elevationMeanM, 0)} m`} />
+        <SharedRow label={t('shared.aspect')} value={`${profile.terrain.aspectLabel} · ${formatNumber(profile.terrain.aspectDegrees, 0)}°`} />
+        <SharedRow label={t('shared.prevailingWind')} value={profile.solar.prevailingWindDirectionDegrees === null ? '—' : `${formatNumber(profile.solar.prevailingWindDirectionDegrees, 0)}° · ${formatNumber(profile.solar.meanWindSpeedMs ?? 0, 1)} m/s`} />
+      </SharedDataCard>
+      <SharedEvidenceList profile={profile} />
+    </> : <p className="inline-empty">{t('shared.noEvidence')}</p>}
+  </SharedSectionFrame>;
+  if (section === 'species') return <SharedSectionFrame eyebrow={t('shared.section.speciesEyebrow')} title={t('shared.section.speciesTitle')} body={t('shared.section.speciesBody')}>
+    <div className="shared-metric-grid">
+      <SharedMetric label={t('shared.species')} value={String(speciesCounts.length)} />
+      <SharedMetric label={t('shared.plants')} value={String(variant?.trees.length ?? 0)} />
+      <SharedMetric label={t('shared.productive')} value={variant ? `${formatNumber(variant.composition.productivePercent, 0)}%` : '—'} />
+      <SharedMetric label={t('shared.nitrogenFixers')} value={variant ? `${formatNumber(variant.composition.nitrogenFixerPercent, 0)}%` : '—'} />
+    </div>
+    <div className="shared-species-list">{speciesCounts.map(([speciesId, count]) => {
+      const item = DESIGN_SPECIES_BY_ID.get(speciesId);
+      const percent = variant?.trees.length ? count / variant.trees.length * 100 : 0;
+      return <article key={speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : speciesId}</strong><small>{item?.scientificName ?? speciesId}</small></span><b>{count}</b><i>{formatNumber(percent, 1)}%</i></article>;
+    })}</div>
+    {variant && <SharedDataCard title={t('shared.succession')} icon={Waypoints}>{Object.entries(variant.composition.bySuccession).map(([phase, percent]) => <SharedRow key={phase} label={translatedStatus(phase, t)} value={`${formatNumber(percent ?? 0, 0)}%`} />)}</SharedDataCard>}
+  </SharedSectionFrame>;
+  if (section === 'layout') return <SharedSectionFrame eyebrow={t('shared.section.layoutEyebrow')} title={variant?.name ?? t('shared.noDesign')} body={variant?.description ?? t('shared.noDesignBody')}>
+    {variant ? <>
+      <div className="shared-metric-grid">
+        <SharedMetric label={t('shared.plants')} value={String(variant.metrics.totalTrees)} />
+        <SharedMetric
+          label={t('shared.density')}
+          value={`${formatNumber(variant.metrics.treesPerHectare, 0)}/ha`}
+          detail={t('layout.densityBasis', {
+            count: variant.metrics.totalTrees,
+            area: formatNumber(layoutDensityBasisAreaM2(variant) / 10_000, 3),
+          })}
+        />
+        <SharedMetric label={t('shared.rowSpacing')} value={`${formatNumber(variant.rowSpacingM, 1)} m`} />
+        <SharedMetric label={t('shared.treeSpacing')} value={`${formatNumber(variant.treeSpacingM, 1)} m`} />
+      </div>
+      <SharedDataCard title={t('shared.machinery')} icon={Tractor}>
+        <SharedRow label={t('shared.operational')} value={variant.machinery.enabled ? t('shared.enabled') : t('shared.disabled')} />
+        <SharedRow label={t('shared.corridorWidth')} value={`${formatNumber(variant.machinery.requiredCorridorWidthM, 1)} m`} />
+        <SharedRow label={t('shared.turningAreas')} value={String(variant.machinery.turningAreas.length)} />
+        <SharedRow label={t('shared.manoeuvreRoutes')} value={String(variant.machinery.manoeuvreRoutes?.length ?? 0)} />
+        <SharedRow label={t('shared.clearance')} value={variant.machinery.clearanceSatisfied ? t('shared.satisfied') : t('shared.reviewRequired')} />
+      </SharedDataCard>
+      <SharedDataCard title={t('shared.canopyProjection')} icon={TreePine}>
+        <SharedRow label={t('shared.year10')} value={`${formatNumber(variant.metrics.projectedCanopyYear10Percent, 0)}%`} />
+        <SharedRow label={t('shared.year20')} value={`${formatNumber(variant.metrics.projectedCanopyYear20Percent, 0)}%`} />
+        <SharedRow label={t('shared.solarScore')} value={variant.solar.cropSolarAccessPercent === null ? '—' : `${formatNumber(variant.solar.cropSolarAccessPercent, 0)}%`} />
+        <SharedRow label={t('shared.orientation')} value={`${formatNumber(variant.directionDegrees, 0)}°`} />
+      </SharedDataCard>
+    </> : <p className="inline-empty">{t('shared.noDesignBody')}</p>}
+  </SharedSectionFrame>;
+  if (section === 'water') return <SharedSectionFrame eyebrow={t('shared.section.waterEyebrow')} title={t('shared.section.waterTitle')} body={t('shared.section.waterBody')}>
+    {project.irrigation ? <>
+      <div className="shared-metric-grid">
+        <SharedMetric label={t('shared.annualWater')} value={`${formatNumber(project.irrigation.annualWaterM3, 0)} m³`} />
+        <SharedMetric label={t('water.peak')} value={`${formatNumber(project.irrigation.peakDayM3, 1)} m³`} />
+        <SharedMetric label={t('water.zones')} value={String(project.irrigation.zones)} />
+        <SharedMetric label={t('shared.irrigatedPlants')} value={String(project.irrigation.irrigatedPlantCount)} />
+      </div>
+      <SharedDataCard title={t('water.hydraulicTitle')} icon={Waves}>
+        <SharedRow label={t('water.requiredFlow')} value={`${formatNumber(project.irrigation.network.requiredFlowM3Hour, 2)} m³/h`} />
+        <SharedRow label={t('water.dynamicHead')} value={`${formatNumber(project.irrigation.network.requiredDynamicHeadM, 1)} m`} />
+        <SharedRow label={t('water.pipeMeasured')} value={`${formatNumber(project.irrigation.network.totalMeasuredPipeM, 0)} m`} />
+        <SharedRow label={t('water.pump')} value={project.irrigation.network.pumpRequired ? `${formatNumber(project.irrigation.network.pumpPowerKw, 2)} kW` : t('water.notRequired')} />
+        <SharedRow label={t('shared.routing')} value={project.irrigation.network.routingValid ? t('shared.valid') : t('shared.reviewRequired')} />
+      </SharedDataCard>
+      <SharedDataCard title={t('shared.satelliteWater')} icon={Satellite}>
+        <p>{localizedIrrigationRecommendation(project.irrigation, t)}</p>
+        <SharedRow label={t('shared.adjustment')} value={signed(project.irrigation.satelliteScheduling.adjustmentPercent)} />
+        <SharedRow label={t('shared.highPrioritySamples')} value={String(project.irrigation.satelliteScheduling.highPrioritySamples)} />
+      </SharedDataCard>
+    </> : <p className="inline-empty">{t('shared.noWaterPlan')}</p>}
+  </SharedSectionFrame>;
+  if (section === 'fire') return <SharedSectionFrame eyebrow={t('shared.section.fireEyebrow')} title={t('shared.section.fireTitle')} body={t('shared.section.fireBody')}>
+    {variant?.firebreak.enabled ? <>
+      <div className="shared-metric-grid">
+        <SharedMetric label={t('shared.firebreakWidth')} value={`${formatNumber(variant.firebreak.plannedWidthM, 1)} m`} />
+        <SharedMetric label={t('shared.firebreakLength')} value={`${formatNumber(variant.firebreak.totalLengthM, 0)} m`} />
+        <SharedMetric label={t('shared.flameLength')} value={`${formatNumber(variant.firebreak.expectedFlameLengthM, 1)} m`} />
+        <SharedMetric label={t('shared.lines')} value={String(variant.firebreak.lines.length)} />
+      </div>
+      <SharedDataCard title={t('shared.firebreakPlan')} icon={Flame}>
+        <SharedRow label={t('shared.fuelModel')} value={translatedStatus(variant.firebreak.fuelModel, t)} />
+        <SharedRow label={t('shared.treatment')} value={translatedStatus(variant.firebreak.treatment, t)} />
+        <SharedRow label={t('shared.vehicleAccess')} value={variant.firebreak.supportVehicleAccess ? t('shared.yes') : t('shared.no')} />
+        <SharedRow label={t('shared.pipeCrossings')} value={variant.firebreak.protectPipeCrossings ? t('shared.protected') : t('shared.reviewRequired')} />
+      </SharedDataCard>
+    </> : <p className="inline-empty">{t('shared.noFirebreak')}</p>}
+    <SharedDataCard title={t('shared.fireOperations')} icon={ClipboardCheck}>
+      {project.fireOperations.tasks.map((task) => <SharedRow key={task.id} label={t(`fireOperations.task.${task.id}`)} value={translatedStatus(task.status, t)} />)}
+      <p>{project.fireOperations.notes || t('shared.noOperationsNotes')}</p>
+      <a href={project.fireOperations.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{project.fireOperations.sourceSnapshot.provider} · {project.fireOperations.sourceSnapshot.layer} · {shortDate(project.fireOperations.sourceSnapshot.forecastDate, locale)}</a>
+    </SharedDataCard>
+  </SharedSectionFrame>;
+  if (section === 'costs') return <SharedSectionFrame eyebrow={t('shared.section.costsEyebrow')} title={t('shared.section.costsTitle')} body={t('shared.section.costsBody')}>
+    {project.costs && project.economicConfiguration ? <>
+      <div className="shared-cost-hero"><small>{t('costs.establishment')}</small><strong>{currency(project.costs.totalCost, project.economicConfiguration)}</strong><span>{project.economicConfiguration.currencyCode} · {translatedStatus(project.economicConfiguration.pricingStatus, t)}</span></div>
+      <SharedDataCard title={t('shared.costBreakdown')} icon={CircleDollarSign}>
+        <SharedRow label={t('costs.plants')} value={currency(project.costs.plantPurchaseCost, project.economicConfiguration)} />
+        <SharedRow label={t('costs.labour')} value={currency(project.costs.plantingLaborCost, project.economicConfiguration)} />
+        <SharedRow label={t('costs.protection')} value={currency(project.costs.protectionAndStakesCost, project.economicConfiguration)} />
+        <SharedRow label={t('costs.irrigation')} value={currency(project.costs.irrigationInstallationCost, project.economicConfiguration)} />
+      </SharedDataCard>
+      <div className="shared-species-list">{project.costs.bySpecies.map((entry) => {
+        const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+        return <article key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : entry.speciesId}</strong><small>{entry.count} × {currency(entry.unitPlantCost, project.economicConfiguration!)}</small></span><b>{currency(entry.subtotalCost, project.economicConfiguration!)}</b></article>;
+      })}</div>
+    </> : <p className="inline-empty">{t('shared.noCosts')}</p>}
+  </SharedSectionFrame>;
+  return <SharedSectionFrame eyebrow={t('shared.section.analysisEyebrow')} title={t('shared.section.analysisTitle')} body={t('shared.section.analysisBody')}>
+    {project.analysis ? <>
+      <div className={`shared-analysis-verdict ${project.analysis.verdict}`}><ClipboardCheck size={22} /><span><small>{translatedStatus(project.analysis.verdict, t)}</small><strong>{project.analysis.overallScore}/100</strong></span></div>
+      <p className="shared-executive-summary">{project.analysis.executiveSummary}</p>
+      <div className="shared-analysis-dimensions">{project.analysis.dimensions.map((dimension) => <article key={dimension.id}><span><strong>{translatedStatus(dimension.id, t)}</strong><b>{dimension.score}/100</b></span><p>{dimension.summary}</p></article>)}</div>
+      <SharedDataCard title={t('shared.findings')} icon={ClipboardCheck}>{project.analysis.findings.map((finding) => <article className="shared-finding" key={finding.id}><small>{translatedStatus(finding.severity, t)}</small><strong>{finding.title}</strong><p>{finding.explanation}</p>{finding.recommendation && <span>{finding.recommendation}</span>}</article>)}</SharedDataCard>
+      {project.analysis.limitations.length > 0 && <SharedDataCard title={t('shared.limitations')} icon={Info}>{project.analysis.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</SharedDataCard>}
+    </> : <p className="inline-empty">{t('shared.noAnalysis')}</p>}
+  </SharedSectionFrame>;
+}
+
+function SharedSectionFrame({ eyebrow, title, body, children }: { eyebrow: string; title: string; body: string; children: ReactNode }) {
+  return <section className="shared-section-frame"><header><small>{eyebrow}</small><h1>{title}</h1><p>{body}</p></header>{children}</section>;
+}
+
+function SharedMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return <span><small>{label}</small><strong>{value}</strong>{detail && <i>{detail}</i>}</span>;
+}
+
+function SharedDataCard({ title, icon: Icon, children }: { title: string; icon: typeof MapIcon; children: ReactNode }) {
+  return <section className="shared-data-card"><header><Icon size={16} /><strong>{title}</strong></header><div>{children}</div></section>;
+}
+
+function SharedRow({ label, value }: { label: string; value: string }) {
+  return <span className="shared-data-row"><small>{label}</small><strong>{value}</strong></span>;
+}
+
+function SharedEvidenceList({ profile }: { profile: SiteProfile }) {
+  const { t, locale } = useI18n();
+  const evidence = [
+    profile.location.evidence,
+    profile.terrain.evidence,
+    profile.climate.evidence,
+    profile.solar.evidence,
+    profile.soil.evidence,
+    profile.landCover.evidence,
+    ...profile.satellite.evidence,
+  ].filter((item, index, items) => item?.source && items.findIndex((candidate) => candidate?.sourceUrl === item.sourceUrl && candidate?.version === item.version) === index);
+  return <SharedDataCard title={t('shared.sources')} icon={Database}>{evidence.map((item) => <a className="shared-evidence-source" key={`${item.sourceUrl}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span><strong>{item.source}</strong><small>{item.version} · {shortDate(item.observedAt, locale)}</small></span><b>{translatedStatus(item.confidence, t)}</b></a>)}</SharedDataCard>;
 }
 
 function WorkspaceApp() {
@@ -431,6 +853,7 @@ function WorkspaceApp() {
   const [draftPoints, setDraftPoints] = useState<Coordinate[]>([]);
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
   const [selectedTreeIds, setSelectedTreeIds] = useState<string[]>([]);
+  const [hoveredTreeId, setHoveredTreeId] = useState<string | null>(null);
   const [treeSpeciesId, setTreeSpeciesId] = useState<string>('');
   const [showNdmi, setShowNdmi] = useState(false);
   const [showWaterSamples, setShowWaterSamples] = useState(false);
@@ -541,6 +964,8 @@ function WorkspaceApp() {
     [dailySolarExposure, solarHour],
   );
   const selectedTree = selectedVariant?.trees.find((tree) => tree.id === selectedTreeId) ?? null;
+  const mapTooltipTree = selectedVariant?.trees.find((tree) => tree.id === hoveredTreeId) ?? selectedTree;
+  const mapTooltipSpecies = mapTooltipTree ? DESIGN_SPECIES_BY_ID.get(mapTooltipTree.speciesId) ?? null : null;
 
   useEffect(() => {
     Promise.all([api<AppConfig>('/api/config'), api<CatalogueStats>('/api/catalog/stats'), api<AuthSession>('/api/auth/session')])
@@ -914,7 +1339,7 @@ function WorkspaceApp() {
     draftPointOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     draftPointOverlaysRef.current = [];
     if (draftPoints.length) {
-      draftOverlayRef.current = drawMode !== 'path' && draftPoints.length >= 3
+      draftOverlayRef.current = draftPoints.length >= 3
         ? new maps.Polygon({ map, paths: draftPoints, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#ffffff', fillOpacity: 0.12, zIndex: 50 })
         : new maps.Polyline({ map, path: draftPoints, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 50 });
       draftPointOverlaysRef.current = draftPoints.map((point, index) => new maps.Marker({
@@ -1226,6 +1651,8 @@ function WorkspaceApp() {
         setTreeSpeciesId(tree.speciesId);
         setSection('layout');
       };
+      const showMapTree = () => setHoveredTreeId(tree.id);
+      const hideMapTree = () => setHoveredTreeId((id) => id === tree.id ? null : id);
       const crown = new maps.Circle({
         map,
         center: tree.coordinate,
@@ -1239,6 +1666,8 @@ function WorkspaceApp() {
         zIndex: selected ? 45 : 20 + stratumOrder(species.stratum),
       });
       crown.addListener('click', selectMapTree);
+      crown.addListener('mouseover', showMapTree);
+      crown.addListener('mouseout', hideMapTree);
       const point = new maps.Marker({
         map,
         position: tree.coordinate,
@@ -1263,6 +1692,8 @@ function WorkspaceApp() {
         zIndex: selected ? 65 : 35 + stratumOrder(species.stratum),
       });
       point.addListener('click', selectMapTree);
+      point.addListener('mouseover', showMapTree);
+      point.addListener('mouseout', hideMapTree);
       treeOverlaysRef.current.push(crown, point);
     }
     return () => treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
@@ -1364,7 +1795,7 @@ function WorkspaceApp() {
   }, [showNdmi, siteProfile?.satellite.optical.ndmiPreviewUrl, site?.polygon]);
 
   mapClickRef.current = (coordinate) => {
-    if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion' || drawMode === 'path') {
+    if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion') {
       setDraftPoints((points) => [...points, coordinate]);
       return;
     }
@@ -1442,7 +1873,7 @@ function WorkspaceApp() {
   }
 
   function finishDraft() {
-    const minimumPoints = drawMode === 'path' ? 2 : 3;
+    const minimumPoints = 3;
     if (draftPoints.length < minimumPoints) {
       setError(t('errors.minimumPoints', { count: minimumPoints }));
       return;
@@ -1463,7 +1894,6 @@ function WorkspaceApp() {
     }
     if (drawMode === 'hole') invalidateSite({ ...site, holes: [...site.holes, draftPoints] });
     if (drawMode === 'exclusion') invalidateSite({ ...site, exclusions: [...site.exclusions, draftPoints] });
-    if (drawMode === 'path') invalidateSite({ ...site, paths: [...site.paths, { id: `path-${crypto.randomUUID()}`, name: t('site.newPath', { count: site.paths.length + 1 }), points: draftPoints, widthM: 3 }] });
     setDraftPoints([]);
     setDrawMode('idle');
   }
@@ -1500,10 +1930,23 @@ function WorkspaceApp() {
     if (!site) return;
     siteUndoRef.current.push(cloneSite(site));
     siteRedoRef.current = [];
+    resetProjectWorkspace(false);
+    setClearSiteOpen(false);
+    setNotice(t('site.clearedNotice'));
+  }
+
+  function resetProjectWorkspace(freshConfiguration: boolean) {
     setSite(null);
     fittedSiteRef.current = null;
     setSiteValidation(null);
     clearDerivedSiteState();
+    if (freshConfiguration) {
+      siteUndoRef.current = [];
+      siteRedoRef.current = [];
+      setDesignConfiguration(DEFAULT_DESIGN_CONFIGURATION);
+      setIrrigationConfiguration(DEFAULT_IRRIGATION_CONFIGURATION);
+      setTimelineYear(5);
+    }
     setSelectedSpeciesIds([]);
     setTreeSpeciesId('');
     setSelectedTreeId(null);
@@ -1526,9 +1969,7 @@ function WorkspaceApp() {
     projectNameEditedRef.current = false;
     setProjectName(t('project.newTitle'));
     createdAtRef.current = new Date().toISOString();
-    setClearSiteOpen(false);
     setSection('site');
-    setNotice(t('site.clearedNotice'));
   }
 
   function clearDerivedSiteState() {
@@ -1548,7 +1989,6 @@ function WorkspaceApp() {
     setDraftPoints([]);
     if (mode === 'site' || mode === 'edit-site') setShowBoundary(true);
     if (mode === 'hole' || mode === 'exclusion') setShowNoPlantAreas(true);
-    if (mode === 'path') setShowManagementPaths(true);
     if (mode === 'access-point' || mode === 'water-point') setShowInfrastructure(true);
     if (mode === 'existing-tree') setShowObservedTrees(true);
     if (mode === 'add-tree' || mode === 'move-tree') setShowPlannedTrees(true);
@@ -2046,13 +2486,20 @@ function WorkspaceApp() {
     suppressDirtyRef.current = true;
     const revision = project.revision ?? 0;
     const normalizedDesign = normalizeDesignConfiguration(project.designConfiguration);
+    const normalizedSite = normalizeSiteBoundary(project.site);
+    const projectSpecies = project.selectedSpeciesIds
+      .map((id) => DESIGN_SPECIES_BY_ID.get(id))
+      .filter((item): item is DesignSpecies => Boolean(item));
     const normalizedVariants = project.variants.map((variant) => {
       const variantDesign = normalizeDesignConfiguration(variant.design);
-      return {
+      const normalizedVariant = {
         ...variant,
         design: variantDesign,
         firebreak: variant.firebreak ?? disabledFirebreakPlan(variantDesign.firebreak),
       };
+      return project.siteProfile
+        ? { ...normalizedVariant, metrics: recalculateLayoutMetrics(normalizedSite, project.siteProfile, projectSpecies, normalizedVariant) }
+        : normalizedVariant;
     });
     projectRevisionRef.current = revision;
     setProjectRevision(revision);
@@ -2060,7 +2507,7 @@ function WorkspaceApp() {
     setProjectName(project.name);
     projectNameEditedRef.current = true;
     createdAtRef.current = project.createdAt;
-    setSite(normalizeSiteBoundary(project.site));
+    setSite(normalizedSite);
     setSiteProfile(project.siteProfile);
     setSelectedSpeciesIds(project.selectedSpeciesIds);
     setTreeSpeciesId(project.selectedSpeciesIds[0] ?? '');
@@ -2113,6 +2560,14 @@ function WorkspaceApp() {
     if (window.location.pathname === '/projects') window.history.pushState({}, '', '/');
   }
 
+  async function startNewProject() {
+    const snapshot = currentProjectState(new Date().toISOString());
+    if (snapshot && authUser) await queueProjectSave(snapshot, dirtySerialRef.current);
+    resetProjectWorkspace(true);
+    closeProjectsPage();
+    setNotice(t('projects.newReady'));
+  }
+
   async function toggleProjectArchive(id: string, archived: boolean) {
     setProjectArchiveBusyId(id);
     try {
@@ -2148,11 +2603,11 @@ function WorkspaceApp() {
     }
   }
 
-  async function createProjectReadOnlyShare(expiresAt: string | null) {
+  async function createProjectReadOnlyShare(expiresAt: string | null, includeCosts: boolean) {
     if (!projectShareTarget) return;
     setProjectShareBusy(true);
     try {
-      const response = await api<ShareResponse>(`/api/projects/${projectShareTarget.id}/share`, post({ mode: 'view', expiresAt }));
+      const response = await api<ShareResponse>(`/api/projects/${projectShareTarget.id}/share`, post({ mode: 'view', expiresAt, includeCosts }));
       setProjectShareTarget((target) => target ? { ...target, response } : null);
       if (projectShareTarget.id === projectId) applySharedProjectResponse(response);
       else await refreshProjects();
@@ -2348,7 +2803,14 @@ function WorkspaceApp() {
     setVariants((items) => items.map((item) => item.id === selectedVariant.id ? {
       ...item,
       trees: nextTrees,
-      metrics: { ...item.metrics, totalTrees: nextTrees.length, speciesCount: new Set(nextTrees.map((tree) => tree.speciesId)).size },
+      metrics: site && siteProfile
+        ? recalculateLayoutMetrics(site, siteProfile, selectedSpecies, item, nextTrees)
+        : {
+          ...item.metrics,
+          totalTrees: nextTrees.length,
+          speciesCount: new Set(nextTrees.map((tree) => tree.speciesId)).size,
+          treesPerHectare: Math.round(nextTrees.length / (Math.max(1, item.metrics.densityBasisAreaM2) / 10_000)),
+        },
     } : item));
     setIrrigation(null);
     setCosts(null);
@@ -2487,7 +2949,7 @@ function WorkspaceApp() {
     }
   }
 
-  async function enableProjectSharing(mode: 'view' | 'review', expiresAt: string | null) {
+  async function enableProjectSharing(mode: 'view' | 'review', expiresAt: string | null, includeCosts: boolean) {
     if (!site) return;
     if (!authUser) {
       setAuthOpen(true);
@@ -2497,7 +2959,7 @@ function WorkspaceApp() {
     try {
       const snapshot = currentProjectState(new Date().toISOString());
       if (snapshot) await queueProjectSave(snapshot, dirtySerialRef.current);
-      const response = await api<ShareResponse>(`/api/projects/${projectId}/share`, post({ mode, expiresAt }));
+      const response = await api<ShareResponse>(`/api/projects/${projectId}/share`, post({ mode, expiresAt, includeCosts }));
       applySharedProjectResponse(response);
       setNotice(t('sharing.linkReady'));
     } catch (shareError) {
@@ -2663,7 +3125,7 @@ function WorkspaceApp() {
           {isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
             <span><PencilRuler size={15} />{t(`map.drawMode.${drawMode}`)}</span>
             <strong>{t('map.pointsPlaced', { count: draftPoints.length })}</strong>
-            <small>{draftPoints.length < (drawMode === 'path' ? 2 : 3) ? t('map.pointsRemaining', { count: (drawMode === 'path' ? 2 : 3) - draftPoints.length }) : t('map.readyToFinish')}</small>
+            <small>{draftPoints.length < 3 ? t('map.pointsRemaining', { count: 3 - draftPoints.length }) : t('map.readyToFinish')}</small>
           </div>}
           <div className="map-toolbar">
             <MapToolbarButton icon={MousePointer2} label={t('map.editSite')} hint={t('map.tooltip.editSite')} active={drawMode === 'edit-site'} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} />
@@ -2671,7 +3133,6 @@ function WorkspaceApp() {
             <MapToolbarButton icon={PencilRuler} label={t('map.drawSite')} hint={t('map.tooltip.drawSite')} active={drawMode === 'site'} onClick={() => activateDrawMode('site')} />
             <MapToolbarButton icon={CircleOff} label={t('map.drawHole')} hint={t('map.tooltip.drawHole')} active={drawMode === 'hole'} onClick={() => activateDrawMode('hole')} />
             <MapToolbarButton icon={Ban} label={t('map.drawExclusion')} hint={t('map.tooltip.drawExclusion')} active={drawMode === 'exclusion'} onClick={() => activateDrawMode('exclusion')} />
-            <MapToolbarButton icon={Tractor} label={t('map.drawPath')} hint={t('map.tooltip.drawPath')} active={drawMode === 'path'} onClick={() => activateDrawMode('path')} />
             {isGeometryDrawMode(drawMode) && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
             <span />
             <MapToolbarButton icon={Layers3} label={t('map.layers')} hint={t('map.tooltip.layers')} active={showLayerPanel} className="layers" expanded={showLayerPanel} onClick={() => setShowLayerPanel((value) => !value)} />
@@ -2706,12 +3167,6 @@ function WorkspaceApp() {
               <div className="timeline-marks"><span>{t('timeline.planting')}</span><span>{t('timeline.establishment')}</span><span>{t('timeline.maturity')}</span></div>
             </div>
           )}
-          {showExistingVegetation && Boolean(siteProfile?.satellite.existingVegetation.patches.length) && (
-            <div className="vegetation-legend">
-              <span><i /> {t('map.existingVegetation')}</span>
-              <small>{t('map.protectedZone')}</small>
-            </div>
-          )}
           {showWaterSamples && siteProfile?.satellite.optical.latest && (
             <div className="satellite-legend">
               <span><i className="dry" /> {t('map.priorityHigh')}</span>
@@ -2733,6 +3188,36 @@ function WorkspaceApp() {
                 && selectedSolarExposureHour.estimatedHorizontalWm2 >= 5
                 ? t('solar.mapSummary', { elevation: formatNumber(selectedSolarExposureHour.elevationDegrees, 0), sunlit: selectedSolarExposureHour.sunlitCount, shaded: selectedSolarExposureHour.shadedCount })
                 : t('solar.night')}</b></span>
+            </div>
+          )}
+          {mapTooltipTree && mapTooltipSpecies && showPlannedTrees && !hiddenPlannedSpeciesIds.includes(mapTooltipTree.speciesId) && (
+            <div
+              className="map-plant-tooltip"
+              data-testid="map-plant-tooltip"
+              data-plant-code={plantPositionCode(mapTooltipTree)}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="map-plant-tooltip-swatch" style={{ background: mapTooltipSpecies.color }}>
+                <b>{plantSpeciesInitials(speciesDisplayName(mapTooltipSpecies, t), locale)}</b>
+              </span>
+              <span className="map-plant-tooltip-copy">
+                <small>{t(hoveredTreeId === mapTooltipTree.id ? 'map.plantUnderPointer' : 'map.selectedPlant')}</small>
+                <strong><b>{plantPositionCode(mapTooltipTree)}</b>{speciesDisplayName(mapTooltipSpecies, t)}</strong>
+                <em>{mapTooltipSpecies.scientificName}</em>
+                <span>{t('layout.plantPosition', { row: plantingRowLabel(mapTooltipTree.rowIndex), position: mapTooltipTree.positionIndex + 1 })}</span>
+              </span>
+              <button
+                type="button"
+                aria-label={t('map.closePlantTooltip')}
+                onClick={() => {
+                  setHoveredTreeId(null);
+                  setSelectedTreeId(null);
+                  setSelectedTreeIds([]);
+                }}
+              >
+                <X size={15} />
+              </button>
             </div>
           )}
         </section>
@@ -2877,6 +3362,7 @@ function WorkspaceApp() {
         projects={projects}
         activeProjectId={projectId}
         archiveBusyId={projectArchiveBusyId}
+        onNew={() => void startNewProject()}
         onOpen={(id) => { closeProjectsPage(); void openProject(id); }}
         onArchive={(id, archived) => void toggleProjectArchive(id, archived)}
         onShare={(id, name) => void openProjectReadOnlyShare(id, name)}
@@ -3382,7 +3868,6 @@ function SitePanel({
         <button disabled={!site} className={drawMode === 'edit-constraints' ? 'active' : ''} onClick={() => onDrawMode('edit-constraints')}><MousePointer2 size={15} /><span>{t('site.editFeatures')}<small>{t('site.dragVertices')}</small></span></button>
         <button disabled={!site} className={drawMode === 'hole' ? 'active' : ''} onClick={() => onDrawMode('hole')}><CircleOff size={15} /><span>{t('site.hole')}<small>{t('site.holeDetail')}</small></span></button>
         <button disabled={!site} className={drawMode === 'exclusion' ? 'active' : ''} onClick={() => onDrawMode('exclusion')}><Layers3 size={15} /><span>{t('site.exclusion')}<small>{t('site.exclusionDetail')}</small></span></button>
-        <button disabled={!site} className={drawMode === 'path' ? 'active' : ''} onClick={() => onDrawMode('path')}><Route size={15} /><span>{t('site.path')}<small>{t('site.pathDetail')}</small></span></button>
         <button disabled={!site} className={drawMode === 'access-point' ? 'active' : ''} onClick={() => onDrawMode('access-point')}><LocateFixed size={15} /><span>{t('site.access')}<small>{t('site.accessDetail')}</small></span></button>
         <button disabled={!site} className={drawMode === 'water-point' ? 'active' : ''} onClick={() => onDrawMode('water-point')}><Droplets size={15} /><span>{t('site.water')}<small>{t('site.waterDetail')}</small></span></button>
         <button disabled={!site} className={drawMode === 'existing-tree' ? 'active' : ''} onClick={() => onDrawMode('existing-tree')}><TreePine size={15} /><span>{t('site.existingTree')}<small>{t('site.existingTreeDetail')}</small></span></button>
@@ -3398,8 +3883,6 @@ function SitePanel({
         {site.waterPoints.map((point) => <span key={point.id}><i>W</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, waterPoints: site.waterPoints.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
         {site.existingTrees.map((point) => <span key={point.id}><i>T</i><strong>{point.name}</strong><button aria-label={t('site.removeFeature', { name: point.name })} onClick={() => onUpdate({ ...site, existingTrees: site.existingTrees.filter((item) => item.id !== point.id) })}><X size={13} /></button></span>)}
       </div>}
-      <div className="callout"><CloudSun size={18} /><div><strong>{t('site.climateTitle')}</strong><span>{t('site.climateBody')}</span></div></div>
-      <p className="fine-print">{t('site.executionNote')}</p>
       </div>
       <div className="panel-action-bar">
         <button className="button primary wide sticky-action analyse-site-action" onClick={onAnalyze} disabled={!site || !validation?.valid || busy}>{profile ? t('actions.refresh') : t('actions.analyse')}<ChevronRight size={18} /></button>
@@ -3619,7 +4102,6 @@ function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun,
           <header><span>{t(`projectAnalysis.severity.${finding.severity}`)}</span><small>{t(`projectAnalysis.dimension.${finding.area}`)}</small></header>
           <strong>{finding.title}</strong>
           <p>{finding.explanation}</p>
-          {finding.evidence.length > 0 && <div>{finding.evidence.map((item) => <code key={item}>{item}</code>)}</div>}
           <footer><Check size={13} /><span>{finding.recommendation}</span></footer>
         </article>) : <p className="review-empty">{t('projectAnalysis.noFindings')}</p>}
       </section>
@@ -3631,10 +4113,11 @@ function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun,
   </div>;
 }
 
-function ProjectsPage({ projects, activeProjectId, archiveBusyId, onOpen, onArchive, onShare, onClose }: {
+function ProjectsPage({ projects, activeProjectId, archiveBusyId, onNew, onOpen, onArchive, onShare, onClose }: {
   projects: ProjectSummary[];
   activeProjectId: string;
   archiveBusyId: string | null;
+  onNew: () => void;
   onOpen: (id: string) => void;
   onArchive: (id: string, archived: boolean) => void;
   onShare: (id: string, name: string) => void;
@@ -3655,7 +4138,10 @@ function ProjectsPage({ projects, activeProjectId, archiveBusyId, onOpen, onArch
       <header>
         <span className="projects-page-mark"><FolderOpen size={22} /></span>
         <span><small>{t('projects.eyebrow')}</small><h2 id="projects-page-title">{t('projects.title')}</h2><p>{t('projects.body')}</p></span>
-        <button aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>
+        <div className="projects-page-actions">
+          <button className="projects-new-action" onClick={onNew}><Plus size={17} /><span>{t('projects.new')}</span></button>
+          <button className="projects-close-action" aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>
+        </div>
       </header>
       <section className="projects-toolbar">
         <label><Search size={17} /><input aria-label={t('projects.search')} placeholder={t('projects.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button aria-label={t('projects.clearSearch')} onClick={() => setQuery('')}><X size={14} /></button>}</label>
@@ -3695,12 +4181,13 @@ function ProjectReadOnlyShareDialog({ projectName, configured, response, busy, o
   configured: boolean;
   response: ShareResponse | null;
   busy: boolean;
-  onCreate: (expiresAt: string | null) => Promise<void>;
+  onCreate: (expiresAt: string | null, includeCosts: boolean) => Promise<void>;
   onDisable: () => Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useI18n();
   const [expiryDays, setExpiryDays] = useState('30');
+  const [includeCosts, setIncludeCosts] = useState(response?.includeCosts ?? response?.project.collaboration.share.includeCosts ?? false);
   const expiresAt = new Date(Date.now() + Number(expiryDays) * 24 * 60 * 60_000).toISOString();
   const shareUrl = response?.path ? `${window.location.origin}${response.path}` : '';
   const readOnlyActive = response?.enabled && response.mode === 'view';
@@ -3709,10 +4196,13 @@ function ProjectReadOnlyShareDialog({ projectName, configured, response, busy, o
       <header><span className="project-share-mark"><Share2 size={20} /></span><span><small>{t('sharing.readOnlyEyebrow')}</small><h2 id="project-read-only-share-title">{t('sharing.readOnlyTitle')}</h2><p>{projectName}</p></span><button aria-label={t('actions.close')} onClick={onClose}><X size={18} /></button></header>
       <div className="read-only-assurance"><ShieldCheck size={19} /><span><strong>{t('sharing.readOnlyAssurance')}</strong><small>{t('sharing.readOnlyAssuranceBody')}</small></span></div>
       {!configured ? <div className="sharing-gate"><ShieldCheck size={22} /><strong>{t('sharing.unavailableTitle')}</strong><p>{t('sharing.unavailableBody')}</p></div> : <>
-        <label className="read-only-expiry"><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
+        <div className="read-only-share-options">
+          <label className="read-only-expiry"><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
+          <label className="share-cost-choice"><input type="checkbox" checked={includeCosts} onChange={(event) => setIncludeCosts(event.target.checked)} /><span><strong>{t('sharing.includeCosts')}</strong><small>{t('sharing.includeCostsBody')}</small></span></label>
+        </div>
         {response?.enabled && response.mode === 'review' && <div className="read-only-warning"><Info size={16} />{t('sharing.reviewLinkWarning')}</div>}
-        <button className="button primary wide" disabled={busy} onClick={() => void onCreate(expiresAt)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Share2 size={15} />}{readOnlyActive ? t('sharing.refreshReadOnlyLink') : t('sharing.createReadOnlyLink')}</button>
-        {readOnlyActive && shareUrl && <div className="read-only-link"><span><small>{t('sharing.activeLink')}</small><strong>{t('sharing.viewOnly')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+        <button className="button primary wide" disabled={busy} onClick={() => void onCreate(expiresAt, includeCosts)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Share2 size={15} />}{readOnlyActive ? t('sharing.refreshReadOnlyLink') : t('sharing.createReadOnlyLink')}</button>
+        {readOnlyActive && shareUrl && <div className="read-only-link"><span><small>{t('sharing.activeLink')}</small><strong>{t('sharing.viewOnly')} · {response.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
       </>}
     </section>
   </div>;
@@ -3724,7 +4214,7 @@ function CollaborationPanel({ authenticated, configured, collaboration, sharePat
   collaboration: ProjectCollaboration;
   sharePath: string | null;
   busy: boolean;
-  onEnable: (mode: 'view' | 'review', expiresAt: string | null) => Promise<void>;
+  onEnable: (mode: 'view' | 'review', expiresAt: string | null, includeCosts: boolean) => Promise<void>;
   onDisable: () => Promise<void>;
   onSignIn: () => void;
   onResolve: (id: string) => void;
@@ -3732,6 +4222,7 @@ function CollaborationPanel({ authenticated, configured, collaboration, sharePat
 }) {
   const { t, locale } = useI18n();
   const [mode, setMode] = useState<'view' | 'review'>(collaboration.share.mode);
+  const [includeCosts, setIncludeCosts] = useState(collaboration.share.includeCosts);
   const [expiryDays, setExpiryDays] = useState('30');
   const shareUrl = sharePath ? `${window.location.origin}${sharePath}` : '';
   const expiresAt = new Date(Date.now() + Number(expiryDays) * 24 * 60 * 60_000).toISOString();
@@ -3742,9 +4233,10 @@ function CollaborationPanel({ authenticated, configured, collaboration, sharePat
       <div className="share-controls">
         <label><span>{t('sharing.permission')}</span><select value={mode} onChange={(event) => setMode(event.target.value as 'view' | 'review')}><option value="view">{t('sharing.viewOnly')}</option><option value="review">{t('sharing.canReview')}</option></select></label>
         <label><span>{t('sharing.expiry')}</span><select value={expiryDays} onChange={(event) => setExpiryDays(event.target.value)}><option value="7">{t('sharing.days', { count: 7 })}</option><option value="30">{t('sharing.days', { count: 30 })}</option><option value="90">{t('sharing.days', { count: 90 })}</option><option value="365">{t('sharing.days', { count: 365 })}</option></select></label>
-        <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt)}>{busy && <LoaderCircle className="spin" size={15} />}{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
+        <label className="share-cost-choice"><input type="checkbox" checked={includeCosts} onChange={(event) => setIncludeCosts(event.target.checked)} /><span><strong>{t('sharing.includeCosts')}</strong><small>{t('sharing.includeCostsBody')}</small></span></label>
+        <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt, includeCosts)}>{busy && <LoaderCircle className="spin" size={15} />}{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
       </div>
-      {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+      {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')} · {collaboration.share.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
       <div className="review-summary">
         <span><ClipboardCheck size={18} /><i><small>{t('sharing.reviewStatus')}</small><strong>{collaboration.review ? t(`sharing.status.${collaboration.review.status}`) : t('sharing.status.pending')}</strong></i></span>
         {collaboration.review && <p><strong>{collaboration.review.reviewerName}</strong> · {shortDate(collaboration.review.updatedAt, locale)}<br />{collaboration.review.note}</p>}
@@ -4350,6 +4842,10 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   onShowSolarExposure: (show: boolean) => void;
 }) {
   const { t, locale } = useI18n();
+  const [layoutTab, setLayoutTab] = useState<'summary' | 'plants' | 'solar' | 'edit'>('summary');
+  useEffect(() => {
+    if (selectedTree) setLayoutTab('edit');
+  }, [selectedTree?.id]);
   if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
   const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
   const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
@@ -4371,20 +4867,47 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       targetPercent: selectedVariant.design.speciesMix[species.id]?.targetPercent ?? null,
     };
   }).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.species.id.localeCompare(b.species.id));
+  const layoutTabs = [
+    { id: 'summary', label: t('layout.tab.summary'), icon: ClipboardCheck },
+    { id: 'plants', label: t('layout.tab.plants'), icon: Sprout },
+    { id: 'solar', label: t('layout.tab.solar'), icon: CloudSun },
+    { id: 'edit', label: t('layout.tab.edit'), icon: PencilRuler },
+  ] as const;
   return (
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
       <div className="panel-intro compact"><span className="eyebrow">{t('layout.eyebrow')}</span><h1>{localizedVariantName(selectedVariant, Math.max(0, variants.findIndex((variant) => variant.id === selectedVariant.id)), t)}</h1><p>{localizedVariantDescription(selectedVariant, t)}</p></div>
       <div className="variant-tabs">{variants.map((variant, index) => <button key={variant.id} className={variant.id === selectedVariant.id ? 'active' : ''} onClick={() => onSelect(variant.id)}><span>0{index + 1}</span><strong>{localizedVariantName(variant, index, t)}</strong><small>{t('layout.score', { score: variant.score })}</small></button>)}</div>
-      <div className="metric-grid">
+      <div className="planning-tabs layout-tabs" role="tablist" aria-label={t('layout.tabsLabel')} data-testid="layout-tabs">
+        {layoutTabs.map(({ id, label, icon: Icon }) => <button
+          key={id}
+          id={`layout-tab-${id}`}
+          type="button"
+          role="tab"
+          aria-selected={layoutTab === id}
+          aria-controls="layout-tab-panel"
+          className={layoutTab === id ? 'active' : ''}
+          data-testid={`layout-tab-${id}`}
+          onClick={() => setLayoutTab(id)}
+        ><Icon size={16} /><span>{label}</span></button>)}
+      </div>
+      <div id="layout-tab-panel" className="planning-tab-panel layout-tab-panel" role="tabpanel" aria-labelledby={`layout-tab-${layoutTab}`} data-testid="layout-tab-panel">
+      {layoutTab === 'summary' && <div className="metric-grid">
         <Metric label={t('layout.plants')} value={formatNumber(selectedVariant.metrics.totalTrees, 0)} detail={t('layout.speciesCount', { count: selectedVariant.metrics.speciesCount })} />
-        <Metric label={t('layout.density')} value={formatNumber(selectedVariant.metrics.treesPerHectare, 0)} detail={t('layout.plantsPerHa')} />
+        <Metric
+          label={t('layout.density')}
+          value={formatNumber(selectedVariant.metrics.treesPerHectare, 0)}
+          detail={t('layout.densityBasis', {
+            count: selectedVariant.metrics.totalTrees,
+            area: formatNumber(layoutDensityBasisAreaM2(selectedVariant) / 10_000, 3),
+          })}
+        />
         <Metric label={t('layout.canopyY10')} value={`${selectedVariant.metrics.projectedCanopyYear10Percent}%`} detail={t('layout.projectedCover')} />
         <Metric label={t('layout.canopyY20')} value={`${selectedVariant.metrics.projectedCanopyYear20Percent}%`} detail={t('layout.projectedCover')} />
         <Metric label={t('layout.openInterior')} value={`${formatNumber(selectedVariant.metrics.cropInteriorAreaM2, 0)} m²`} detail={t(selectedVariant.design.extent === 'full-field' ? 'layout.betweenRows' : 'layout.keptFree')} />
         <Metric label={t('layout.rowBearing')} value={`${selectedVariant.directionDegrees.toFixed(0)}°`} detail={localizedEnum(selectedVariant.design.orientationObjective, t)} />
-      </div>
-      <div className="plan-species-summary" data-testid="plan-species-summary">
+      </div>}
+      {layoutTab === 'plants' && <div className="plan-species-summary" data-testid="plan-species-summary">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('layout.speciesPlanEyebrow')}</small><strong>{t('layout.speciesPlanTitle')}</strong></span></div><output>{t('layout.speciesPlanTotal', { count: selectedVariant.trees.length })}</output></div>
         <p>{t('layout.speciesPlanBody')}</p>
         <div className="plan-species-list">
@@ -4399,8 +4922,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
             </button>;
           })}
         </div>
-      </div>
-      <div className="composition-card" data-testid="layout-composition">
+      </div>}
+      {layoutTab === 'summary' && <div className="composition-card" data-testid="layout-composition">
         <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.objectiveCheck')}</small><strong>{t('layout.composition')}</strong></span></div></div>
         <div className="composition-targets">{[
           [t('layout.productive'), selectedVariant.composition.productivePercent, selectedVariant.composition.targets.productivePercent],
@@ -4411,8 +4934,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
           return <div key={String(label)} className={verified ? '' : 'unverified'}><span><strong>{label}</strong><small>{verified ? t('layout.actualTarget', { value, target: Number(target) }) : t('layout.nativeUnverified')}</small></span><div><i className={verified && value >= Number(target) ? 'met' : ''} style={{ width: `${verified ? Math.min(100, value) : 0}%` }} />{verified && <b style={{ left: `${Math.min(100, Number(target))}%` }} />}</div></div>;
         })}</div>
         <div className="composition-groups"><span><small>{t('layout.strata')}</small><strong>{Object.entries(selectedVariant.composition.byStratum).map(([key, value]) => `${localizedEnum(key, t)} ${value}`).join(' · ')}</strong></span><span><small>{t('layout.succession')}</small><strong>{Object.entries(selectedVariant.composition.bySuccession).map(([key, value]) => `${localizedEnum(key, t)} ${value}`).join(' · ')}</strong></span></div>
-      </div>
-      <div className="solar-assessment">
+      </div>}
+      {layoutTab === 'solar' && <div className="solar-assessment">
         <div className="card-heading"><div><CloudSun size={17} /><span><small>{t('layout.solarCheck')}</small><strong>{selectedVariant.solar.status === 'available' ? t('layout.cropAccess', { value: selectedVariant.solar.cropSolarAccessPercent ?? 0 }) : t('layout.radiationUnavailable')}</strong></span></div><StatusPill status={selectedVariant.solar.confidence} /></div>
         {selectedVariant.solar.status === 'available' && <div className="solar-metrics"><span><small>{t('layout.terrainPlane')}</small><strong>{formatNumber(selectedVariant.solar.terrainPlaneKwhM2Year ?? 0, 0)} kWh/m²·yr</strong></span><span><small>{t('layout.shadeLoss')}</small><strong>{selectedVariant.solar.shadedCropAreaPercent}%</strong></span><span><small>{t('layout.winterSun')}</small><strong>{selectedVariant.solar.winterSunHoursPerDay} h/day</strong></span><span><small>{t('layout.summerSun')}</small><strong>{selectedVariant.solar.summerSunHoursPerDay} h/day</strong></span></div>}
         <p>{t('layout.solarMethod')}</p>
@@ -4456,12 +4979,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
             <small className="solar-limitation">{t('solar.dailyLimitation')}</small>
           </> : <div className="solar-unavailable">{t('solar.unavailable')}</div>}
         </section>
-      </div>
-      <div className="generation-audit" data-testid="generation-audit">
-        <div className="card-heading"><div><Sparkles size={17} /><span><small>{t('layout.generationAudit')}</small><strong>{t(selectedVariant.generation.mode === 'partial' ? 'layout.partialGeneration' : 'layout.fullGeneration')}</strong></span></div><StatusPill status={selectedVariant.generation.conflicts.length ? 'review-required' : 'available'} /></div>
-        <div className="generation-audit-grid"><span><small>{t('layout.seed')}</small><strong>{selectedVariant.generation.seed}</strong></span><span><small>{t('layout.engine')}</small><strong>{selectedVariant.generation.engineVersion}</strong></span><span><small>{t('layout.lockedPreserved')}</small><strong>{selectedVariant.generation.lockedTreeCount}</strong></span></div>
-      </div>
-      {selectedVariant.machinery.enabled && <div className="machinery-plan" data-testid="machinery-plan">
+      </div>}
+      {layoutTab === 'summary' && selectedVariant.machinery.enabled && <div className="machinery-plan" data-testid="machinery-plan">
         <div className="card-heading"><div><Route size={17} /><span><small>{t('machinery.planEyebrow')}</small><strong>{t('machinery.planTitle')}</strong></span></div><StatusPill status={selectedVariant.machinery.clearanceSatisfied ? 'available' : 'review-required'} /></div>
         <div className="machinery-result">
           <span><small>{t('machinery.perimeterLoop')}</small><strong>{formatNumber((selectedVariant.machinery.perimeterLoops ?? []).reduce((sum, route) => sum + route.lengthM, 0), 0)} m</strong></span>
@@ -4473,13 +4992,14 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         <p>{t('machinery.planBody', { corridor: formatNumber(selectedVariant.machinery.requiredCorridorWidthM, 2), headland: formatNumber(selectedVariant.machinery.headlandDepthM, 2) })}</p>
         {!selectedVariant.machinery.clearanceSatisfied && <small className="machinery-review">{t('machinery.routeReview')}</small>}
       </div>}
-      {selectedVariant.firebreak?.enabled && <div className="firebreak-plan" data-testid="firebreak-plan">
+      {layoutTab === 'summary' && selectedVariant.firebreak?.enabled && <div className="firebreak-plan" data-testid="firebreak-plan">
         <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.planEyebrow')}</small><strong>{t('firebreak.planTitle')}</strong></span></div><StatusPill status="review-required" /></div>
         <div className="firebreak-result"><span><small>{t('firebreak.plannedWidth')}</small><strong>{formatNumber(selectedVariant.firebreak.plannedWidthM, 1)} m</strong></span><span><small>{t('firebreak.totalLength')}</small><strong>{formatNumber(selectedVariant.firebreak.totalLengthM, 0)} m</strong></span><span><small>{t('firebreak.reservedArea')}</small><strong>{formatNumber(selectedVariant.firebreak.reservedAreaM2, 0)} m²</strong></span></div>
         <p>{t('firebreak.planBody', { width: formatNumber(selectedVariant.firebreak.plannedWidthM, 1), minimum: formatNumber(selectedVariant.firebreak.minimumPlanningWidthM, 1), treatment: t(`firebreak.treatment.${selectedVariant.firebreak.treatment === 'low-fuel-vegetation' ? 'lowFuel' : selectedVariant.firebreak.treatment === 'bare-ground' ? 'bareGround' : 'mown'}`) })}</p>
         <small className="firebreak-review">{t('firebreak.localReview')}</small>
         <button className="text-button fire-operations-link" onClick={onFireOperations}>{t('fireOperations.open')} <ChevronRight size={14} /></button>
       </div>}
+      {layoutTab === 'edit' && <>
       <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
       <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
       <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{[...selectedVariant.trees].sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id)).map((tree) => {
@@ -4506,7 +5026,9 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         </>}
       </div>
       {selectedTree ? <div className="selected-tree-card" data-testid="selected-tree-identity" data-plant-code={selectedTreeCode}><span className="tree-dot" style={{ background: selectedTreeSpecies?.color }} /><div><small>{t('layout.selectedIndividual')} <b>{selectedTreeCode}</b></small><strong>{selectedTreeSpecies ? speciesDisplayName(selectedTreeSpecies, t) : selectedTree.speciesId}</strong><span className="tree-scientific-name">{selectedTreeSpecies?.scientificName}</span><span>{t('layout.plantPosition', { row: plantingRowLabel(selectedTree.rowIndex), position: selectedTree.positionIndex + 1 })} · {t(selectedTree.locked ? 'layout.positionLocked' : 'layout.positionEditable')} · {t('layout.plantedYear', { year: selectedTree.plantedYear })}</span></div>{selectedTreeGrowth && <div className="tree-growth-model" data-testid="tree-growth-model"><span><small>{t('layout.heightRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.heightLowM, 1)}–{formatNumber(selectedTreeGrowth.heightM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.heightHighM, 1)} m</strong></span><span><small>{t('layout.crownRange')}</small><strong>{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterLowM, 1)}–{formatNumber(selectedTreeGrowth.crownDiameterM, 1)}–{formatNumber(selectedTreeGrowth.uncertainty.crownDiameterHighM, 1)} m</strong></span><p>{t('layout.growthModel', { version: selectedTreeGrowth.model.version, confidence: translatedStatus(selectedTreeGrowth.model.confidence, t) })}</p></div>}<div className="tree-actions"><button onClick={onLock}>{t(selectedTree.locked ? 'actions.unlock' : 'actions.lock')}</button><button onClick={() => onMode('move-tree')} disabled={selectedTree.locked}>{t('actions.move')}</button><button className="danger" aria-label={t('actions.remove')} onClick={onDelete}><Trash2 size={14} /></button></div></div> : <div className="inline-empty">{t('layout.selectCrown')}</div>}
-      {selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
+      </>}
+      {layoutTab === 'summary' && selectedVariant.warnings.length > 0 && <div className="warning-list">{selectedVariant.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</div>}
+      </div>
       </div>
       <div className="panel-action-bar">
         <button className="button primary wide sticky-action calculate-design-action" onClick={onCalculate}>{t('actions.calculate')} <ChevronRight size={18} /></button>
@@ -4827,6 +5349,16 @@ function MaintenanceTimelineChart({ costs, irrigation }: { costs: EstablishmentC
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="metric"><small>{label}</small><strong>{value}</strong><span>{detail}</span></div>; }
+
+function layoutDensityBasisAreaM2(variant: LayoutVariant) {
+  if (Number.isFinite(variant.metrics.densityBasisAreaM2) && variant.metrics.densityBasisAreaM2 > 0) {
+    return variant.metrics.densityBasisAreaM2;
+  }
+  if (variant.metrics.treesPerHectare > 0) {
+    return variant.metrics.totalTrees / variant.metrics.treesPerHectare * 10_000;
+  }
+  return 1;
+}
 function Index({ label, value }: { label: string; value: number }) { return <span><small>{label}</small><strong>{value.toFixed(3)}</strong></span>; }
 function Row({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) { return <div className={strong ? 'strong' : ''}><span>{label}</span><strong>{value}</strong></div>; }
 function SoilPropertyGroup({ title, body, properties }: { title: string; body: string; properties: SoilPropertyEstimate[] }) {
@@ -5073,8 +5605,8 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
   return value;
 }
 function monthName(month: number) { return ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'][month - 1]; }
-function isGeometryDrawMode(mode: DrawMode): mode is 'site' | 'hole' | 'exclusion' | 'path' {
-  return mode === 'site' || mode === 'hole' || mode === 'exclusion' || mode === 'path';
+function isGeometryDrawMode(mode: DrawMode): mode is 'site' | 'hole' | 'exclusion' {
+  return mode === 'site' || mode === 'hole' || mode === 'exclusion';
 }
 function evidenceUsageKey(item: Evidence) {
   const source = item.source.toLowerCase();
@@ -5199,7 +5731,7 @@ function localizedVariantDescription(variant: LayoutVariant, t: (key: string, va
     objective: localizedEnum(variant.design.orientationObjective, t),
   });
 }
-function localizedIrrigationRecommendation(irrigation: IrrigationEstimate, t: (key: string, values?: Record<string, string | number>) => string) {
+function localizedIrrigationRecommendation(irrigation: Pick<IrrigationEstimate, 'satelliteScheduling'>, t: (key: string, values?: Record<string, string | number>) => string) {
   const adjustment = irrigation.satelliteScheduling.adjustmentPercent;
   if (adjustment > 0) return t('water.recommendIncrease', { value: adjustment });
   if (adjustment < 0) return t('water.recommendReduce', { value: Math.abs(adjustment) });

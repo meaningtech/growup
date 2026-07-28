@@ -703,6 +703,7 @@ export type LayoutVariant = {
     totalTrees: number;
     speciesCount: number;
     treesPerHectare: number;
+    densityBasisAreaM2: number;
     projectedCanopyYear10Percent: number;
     projectedCanopyYear20Percent: number;
     cropInteriorAreaM2: number;
@@ -948,6 +949,28 @@ export type ProjectState = {
   updatedAt: string;
 };
 
+export type SharedSystemMaintenanceEstimate = Omit<SystemMaintenanceEstimate, 'laborCostPerHour' | 'totalCost' | 'tasks'> & {
+  tasks: Array<Omit<MaintenanceTaskEstimate, 'cost'>>;
+};
+
+export type SharedIrrigationEstimate = Omit<IrrigationEstimate, 'economics' | 'network' | 'installation' | 'annualOperation' | 'systemMaintenance' | 'monthly'> & {
+  network: Omit<IrrigationNetworkPlan, 'components'> & {
+    components: Array<Omit<IrrigationComponent, 'unitCost' | 'totalCost'>>;
+  };
+  installation: Pick<IrrigationEstimate['installation'], 'laborHours'>;
+  annualOperation: Pick<IrrigationEstimate['annualOperation'], 'pumpingKwh' | 'managementLaborHours'>;
+  systemMaintenance: SharedSystemMaintenanceEstimate;
+  monthly: Array<Omit<IrrigationEstimate['monthly'][number], 'cost'>>;
+};
+
+export type SharedProjectState = Omit<ProjectState, 'economicConfiguration' | 'irrigation' | 'collaboration'> & {
+  economicConfiguration: EconomicConfiguration | null;
+  irrigation: IrrigationEstimate | SharedIrrigationEstimate | null;
+  collaboration: Omit<ProjectCollaboration, 'share'> & {
+    share: Omit<ProjectCollaboration['share'], 'tokenVersion'>;
+  };
+};
+
 export type FireMaintenanceTaskStatus = 'due' | 'scheduled' | 'complete' | 'not-applicable';
 
 export type FireMaintenanceTask = {
@@ -1001,6 +1024,7 @@ export type ProjectCollaboration = {
   share: {
     enabled: boolean;
     mode: 'view' | 'review';
+    includeCosts: boolean;
     tokenVersion: string;
     createdAt: string | null;
     expiresAt: string | null;

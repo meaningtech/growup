@@ -391,6 +391,7 @@ export function createApp(config: GrowupAppConfig = {}) {
       return {
         enabled: true,
         mode: project.collaboration.share.mode,
+        includeCosts: project.collaboration.share.includeCosts,
         expiresAt: project.collaboration.share.expiresAt,
         path: `/shared/${createProjectShareToken(project.id, project.collaboration.share.tokenVersion, project.collaboration.share.expiresAt, config)}`,
         project,
@@ -406,6 +407,7 @@ export function createApp(config: GrowupAppConfig = {}) {
       if (!project) throw httpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
       const now = (config.now?.() ?? new Date()).toISOString();
       const mode = req.body?.mode === 'review' ? 'review' : 'view';
+      const includeCosts = req.body?.includeCosts === true;
       const expiresAt = shareExpiry(req.body?.expiresAt, now);
       const tokenVersion = !project.collaboration.share.enabled || req.body?.rotate === true
         ? rotateShareVersion()
@@ -417,6 +419,7 @@ export function createApp(config: GrowupAppConfig = {}) {
           share: {
             enabled: true,
             mode,
+            includeCosts,
             tokenVersion,
             createdAt: project.collaboration.share.createdAt ?? now,
             expiresAt,
@@ -427,6 +430,7 @@ export function createApp(config: GrowupAppConfig = {}) {
       return {
         enabled: true,
         mode,
+        includeCosts,
         expiresAt,
         path: `/shared/${createProjectShareToken(saved.id, tokenVersion, expiresAt, config)}`,
         project: saved,

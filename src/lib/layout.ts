@@ -42,7 +42,7 @@ type LockedPlacement = {
   species: DesignSpecies;
 };
 
-export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.3.0';
+export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.4.0';
 
 export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   system: 'syntropic',
@@ -291,10 +291,42 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
       totalTrees: trees.length,
       speciesCount: representedSpecies.size,
       treesPerHectare: Math.round(trees.length / (areaM2 / 10_000)),
+      densityBasisAreaM2: Math.round(areaM2),
       projectedCanopyYear10Percent: canopy10,
       projectedCanopyYear20Percent: canopy20,
       cropInteriorAreaM2,
     },
+  };
+}
+
+export function recalculateLayoutMetrics(
+  site: SiteBoundary,
+  siteProfile: SiteProfile,
+  species: DesignSpecies[],
+  variant: Pick<LayoutVariant, 'design' | 'rowSpacingM' | 'trees' | 'firebreak'>,
+  trees: TreeInstance[] = variant.trees,
+): LayoutVariant['metrics'] {
+  const protectedAreaM2 = siteProfile.satellite.existingVegetation.patches
+    .reduce((sum, exclusion) => sum + polygonAreaM2(exclusion.polygon), 0);
+  const additionalFirebreakReserveM2 = variant.firebreak.enabled
+    ? variant.firebreak.totalLengthM * Math.max(0, variant.firebreak.plannedWidthM - site.setbackM)
+    : 0;
+  const densityBasisAreaM2 = Math.max(1, estimatedPlantableAreaM2(site) - additionalFirebreakReserveM2 - protectedAreaM2);
+  return {
+    totalTrees: trees.length,
+    speciesCount: new Set(trees.map((tree) => tree.speciesId)).size,
+    treesPerHectare: Math.round(trees.length / (densityBasisAreaM2 / 10_000)),
+    densityBasisAreaM2: Math.round(densityBasisAreaM2),
+    projectedCanopyYear10Percent: canopyCoverage(trees, species, 10, densityBasisAreaM2),
+    projectedCanopyYear20Percent: canopyCoverage(trees, species, 20, densityBasisAreaM2),
+    cropInteriorAreaM2: estimateCropInteriorArea(site, densityBasisAreaM2, variant.design, {
+      id: '',
+      name: '',
+      description: '',
+      directionDegrees: 0,
+      rowSpacingM: variant.rowSpacingM,
+      treeSpacingM: 0,
+    }),
   };
 }
 

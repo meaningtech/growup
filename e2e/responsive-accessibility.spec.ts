@@ -110,7 +110,7 @@ test('keeps the Google sign-in dialog inside narrow mobile viewports', async ({ 
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-google-login.png'), fullPage: false });
 });
 
-test('keeps the signed-in identity visible outside the menu on narrow screens', async ({ page }) => {
+test('keeps the signed-in identity visible outside the menu on narrow screens', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.route('**/api/config', (route) => route.fulfill({ json: {
     googleMapsApiKey: '',
@@ -134,7 +134,7 @@ test('keeps the signed-in identity visible outside the menu on narrow screens', 
       id: 'responsive-user',
       email: 'sebastiano@example.test',
       name: 'Sebastiano',
-      pictureUrl: null,
+      pictureUrl: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#c7e36f"/><text x="16" y="21" text-anchor="middle" fill="#10281e" font-size="15">S</text></svg>')}`,
       locale: 'it',
       preferences: {},
     },
@@ -144,10 +144,29 @@ test('keeps the signed-in identity visible outside the menu on narrow screens', 
 
   const account = page.getByTestId('topbar-account');
   await expect(account).toHaveAttribute('aria-label', 'Signed in as Sebastiano');
-  await expect(account).toContainText('S');
+  const avatar = account.locator('img');
+  await expect(avatar).toBeVisible();
+  const accountGeometry = await account.evaluate((button) => {
+    const image = button.querySelector('img');
+    if (!image) return null;
+    const buttonBox = button.getBoundingClientRect();
+    const imageBox = image.getBoundingClientRect();
+    return {
+      buttonRadius: getComputedStyle(button).borderRadius,
+      imageRadius: getComputedStyle(image).borderRadius,
+      widthDelta: Math.abs(buttonBox.width - imageBox.width),
+      heightDelta: Math.abs(buttonBox.height - imageBox.height),
+    };
+  });
+  expect(accountGeometry).not.toBeNull();
+  expect(accountGeometry!.buttonRadius).toBe('50%');
+  expect(accountGeometry!.imageRadius).toBe('50%');
+  expect(accountGeometry!.widthDelta).toBeLessThanOrEqual(1);
+  expect(accountGeometry!.heightDelta).toBeLessThanOrEqual(1);
   const box = await account.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-account-status.png'), fullPage: false });
 
   await account.click();
   const menu = page.getByRole('dialog', { name: 'Menu' });
@@ -340,15 +359,16 @@ test('keeps the desktop product menu right-aligned and gives map tools distinct 
   expect(menuBox!.x).toBeGreaterThan(assistantBox!.x);
   expect(1280 - (menuBox!.x + menuBox!.width)).toBeLessThanOrEqual(10);
 
-  const toolNames = ['Edit constraint vertices', 'Draw a management path', 'Edit irrigation pipes'];
+  const toolNames = ['Edit field vertices', 'Edit constraint vertices', 'Edit irrigation pipes'];
   const iconMarkup = await Promise.all(toolNames.map((name) => page.getByRole('button', { name }).locator('svg').first().innerHTML()));
   expect(new Set(iconMarkup).size).toBe(3);
+  await expect(page.getByRole('button', { name: 'Draw a management path' })).toHaveCount(0);
 
-  const operationalPath = page.getByRole('button', { name: 'Draw a management path' });
-  await operationalPath.hover();
-  const tooltip = operationalPath.getByRole('tooltip');
+  const constraintEditor = page.getByRole('button', { name: 'Edit constraint vertices' });
+  await constraintEditor.hover();
+  const tooltip = constraintEditor.getByRole('tooltip');
   await expect(tooltip).toBeVisible();
-  await expect(tooltip).toContainText('Draw an operational route for people and machinery.');
+  await expect(tooltip).toContainText('Move exclusion, access, tree and water-source control points.');
 
   await menuTrigger.click();
   const productMenu = page.getByRole('dialog', { name: 'Menu' });

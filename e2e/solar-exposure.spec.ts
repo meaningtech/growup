@@ -12,6 +12,7 @@ test('analyses hourly plant exposure and renders reversible crown shadows on the
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  await page.getByTestId('layout-tab-solar').click();
 
   const analysis = page.getByTestId('daily-solar-exposure');
   await expect(analysis).toBeVisible();
@@ -59,6 +60,7 @@ test('keeps the daily exposure controls inside the mobile inspector', async ({ p
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  await page.getByTestId('layout-tab-solar').click();
 
   const analysis = page.getByTestId('daily-solar-exposure');
   await analysis.scrollIntoViewIfNeeded();

@@ -401,6 +401,7 @@ function normalizeProject(project: ProjectState): ProjectState {
       share: {
         enabled: false,
         mode: 'view',
+        includeCosts: false,
         tokenVersion: `project-${project.id}`,
         createdAt: null,
         expiresAt: null,

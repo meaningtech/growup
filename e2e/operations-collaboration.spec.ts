@@ -99,6 +99,7 @@ test('persists fire operations and advanced group edits through local recovery',
   await mockBase(page);
   await loadRecoveryDraft(page, project);
   await page.getByTestId('step-layout').click();
+  await page.getByTestId('layout-tab-edit').click();
 
   const treeSelect = page.getByLabel('Select planned tree');
   await treeSelect.selectOption(project.variants[0].trees[0].id);
@@ -111,6 +112,7 @@ test('persists fire operations and advanced group edits through local recovery',
   await bulkEditor.getByRole('button', { name: 'Lock', exact: true }).click();
   await expect(bulkEditor.getByRole('button', { name: 'Equal spacing' })).toBeEnabled();
 
+  await page.getByTestId('layout-tab-summary').click();
   await page.getByRole('button', { name: 'Fire operations' }).click();
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toContainText('EFFIS · FWI');
@@ -151,16 +153,16 @@ test('creates the authenticated share link and renders the public review surface
   await page.route(`**/api/projects/${project.id}/revisions`, async (route) => route.fulfill({ status: 200, contentType: 'application/json', json: [] }));
   await page.route(`**/api/projects/${project.id}/share`, async (route) => {
     if (route.request().method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', json: { enabled: false, project } });
-    const input = route.request().postDataJSON() as { mode: 'view' | 'review'; expiresAt: string | null };
+    const input = route.request().postDataJSON() as { mode: 'view' | 'review'; expiresAt: string | null; includeCosts: boolean };
     project = {
       ...project,
       revision: (project.revision ?? 0) + 1,
       collaboration: {
         ...project.collaboration,
-        share: { ...project.collaboration.share, enabled: true, mode: input.mode, createdAt: observedAt, expiresAt: input.expiresAt },
+        share: { ...project.collaboration.share, enabled: true, mode: input.mode, includeCosts: input.includeCosts, createdAt: observedAt, expiresAt: input.expiresAt },
       },
     };
-    return route.fulfill({ status: 200, contentType: 'application/json', json: { enabled: true, mode: input.mode, path: '/shared/browser-review-token', project } });
+    return route.fulfill({ status: 200, contentType: 'application/json', json: { enabled: true, mode: input.mode, includeCosts: input.includeCosts, path: '/shared/browser-review-token', project } });
   });
   await page.route(`**/api/projects/${project.id}`, async (route) => {
     if (route.request().method() === 'PUT') {
@@ -174,8 +176,10 @@ test('creates the authenticated share link and renders the public review surface
   await page.getByRole('button', { name: 'Share and review' }).click();
   const panel = page.getByTestId('collaboration-panel');
   await panel.getByLabel('Permission').selectOption('review');
+  await panel.getByRole('checkbox', { name: /Include cost plan/ }).check();
   await panel.getByRole('button', { name: 'Create secure link' }).click();
   await expect(panel.getByLabel('Active share link')).toHaveValue(/\/shared\/browser-review-token$/);
+  await expect(panel).toContainText('costs included');
   await page.screenshot({ path: '/private/tmp/growup-sharing-panel.png', fullPage: false });
 
   await page.route('**/api/shared/projects/browser-review-token/comments', async (route) => {
@@ -219,7 +223,7 @@ test('creates the authenticated share link and renders the public review surface
   await expect(page.getByText('Click the map to pin the next comment')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve revision' })).toBeVisible();
   await page.getByLabel('Your name').fill('Field reviewer');
-  await page.getByLabel('Comment').fill('Access and perimeter treatment verified.');
+  await page.getByRole('textbox', { name: 'Comment' }).fill('Access and perimeter treatment verified.');
   await page.getByRole('button', { name: 'Add comment' }).click();
   await expect(page.getByText('Access and perimeter treatment verified.')).toBeVisible();
   await page.getByLabel('Review note').fill('Approved subject to the recorded inspection.');
@@ -268,6 +272,7 @@ test('gives authenticated project selection its own mobile page', async ({ page 
   const projectsPage = page.getByTestId('projects-page');
   await expect(projectsPage).toBeVisible();
   await expect(projectsPage.getByRole('heading', { name: 'Your projects' })).toBeVisible();
+  await expect(projectsPage.getByRole('button', { name: 'New project' })).toContainText('New project');
   await expect(projectsPage.getByRole('button', { name: `Open ${project.name}` })).toHaveAttribute('aria-current', 'page');
   await expect(projectsPage.getByRole('button', { name: 'Open Northern orchard' })).toBeVisible();
   const projectsBox = await projectsPage.boundingBox();
@@ -373,6 +378,8 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   await expect(report).toContainText('Revision required');
   await expect(report).toContainText('72');
   await expect(report).toContainText('Local fire review remains open');
+  await expect(report).not.toContainText('selectedVariant.firebreak.localReviewRequired');
+  await expect(report.locator('code')).toHaveCount(0);
   await page.screenshot({ path: '/private/tmp/growup-formal-analysis-desktop.png', fullPage: false });
   await expect.poll(async () => {
     const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
@@ -414,4 +421,26 @@ test('keeps the populated water page locked to the mobile viewport', async ({ pa
   expect(overflow.content).toBeLessThanOrEqual(overflow.viewport);
   expect(overflow.scrollX).toBe(0);
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-water-locked.png'), fullPage: false });
+  const layerControls = page.getByTestId('irrigation-layer-controls');
+  await layerControls.scrollIntoViewIfNeeded();
+  const layerButtons = layerControls.getByRole('button');
+  await expect(layerButtons).toHaveCount(2);
+  for (const button of await layerButtons.all()) {
+    const geometry = await button.evaluate((element) => {
+      const title = element.querySelector('strong')?.getBoundingClientRect();
+      const description = element.querySelector('small')?.getBoundingClientRect();
+      const bounds = element.getBoundingClientRect();
+      return {
+        height: bounds.height,
+        titleBottom: title?.bottom ?? 0,
+        descriptionTop: description?.top ?? 0,
+        descriptionRight: description?.right ?? 0,
+        cardRight: bounds.right,
+      };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(80);
+    expect(geometry.descriptionTop).toBeGreaterThanOrEqual(geometry.titleBottom);
+    expect(geometry.descriptionRight).toBeLessThanOrEqual(geometry.cardRight);
+  }
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-irrigation-layer-cards.png'), fullPage: false });
 });

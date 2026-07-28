@@ -42,6 +42,7 @@ test('stores exact species targets and manual succession in the generated plan',
     expect.stringMatching(/60\.0% target; spacing and hard site constraints take precedence/),
   ]));
 
+  await page.getByTestId('layout-tab-plants').click();
   const summary = page.getByTestId('plan-species-summary');
   await expect(summary).toContainText(`${variants[0].trees.length} exact positions`);
   const speciesToggle = summary.locator(`[data-species-id="${speciesId}"]`);

@@ -1,11 +1,15 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
+import { openFieldProfile } from '../test/fixtures/siteProfile';
+import { DESIGN_SPECIES } from '../src/data/designSpecies';
 import { defaultEconomicConfiguration } from '../src/data/economicProfiles';
+import { firebreakConfigurationFromFuelModel } from '../src/data/firebreak';
 import { defaultProjectCollaboration } from '../src/lib/collaboration';
+import { calculateEstablishmentCost } from '../src/lib/costs';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
-import { DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
-import { DEFAULT_DESIGN_CONFIGURATION } from '../src/lib/layout';
+import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
+import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from '../src/lib/layout';
 import type { ProjectState } from '../src/types';
 import { createApp, type GrowupAppConfig } from './app';
 import type { GrowupUser } from './mongo';
@@ -24,20 +28,30 @@ describe('shared project review integration', () => {
       lastLoginAt: now,
       preferences: {},
     };
+    const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE);
+    const species = DESIGN_SPECIES.slice(0, 4);
+    const design = {
+      ...DEFAULT_DESIGN_CONFIGURATION,
+      firebreak: { ...firebreakConfigurationFromFuelModel('shrub-edge'), enabled: true },
+    };
+    const variants = generateLayoutVariants(TEMPERATE_OPEN_FIELD_FIXTURE, profile, species, design);
+    const economics = defaultEconomicConfiguration(profile.location.countryCode ?? '');
+    const irrigation = calculateIrrigation(variants[0], species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5, DEFAULT_IRRIGATION_CONFIGURATION, economics);
+    const costs = calculateEstablishmentCost(variants[0], species, irrigation, economics);
     let project: ProjectState = {
       id: 'shared-project',
       name: 'Shared project',
       site: TEMPERATE_OPEN_FIELD_FIXTURE,
-      siteProfile: null,
-      selectedSpeciesIds: [],
-      designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      siteProfile: profile,
+      selectedSpeciesIds: species.map((item) => item.id),
+      designConfiguration: design,
       irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
-      economicConfiguration: defaultEconomicConfiguration(''),
-      variants: [],
-      selectedVariantId: null,
+      economicConfiguration: economics,
+      variants,
+      selectedVariantId: variants[0].id,
       timelineYear: 5,
-      irrigation: null,
-      costs: null,
+      irrigation,
+      costs,
       fireOperations: defaultFireOperationsPlan(now),
       collaboration: defaultProjectCollaboration(),
       revision: 1,
@@ -75,12 +89,31 @@ describe('shared project review integration', () => {
     const cookie = String(login.headers['set-cookie'][0]).split(';')[0];
     const viewOnly = await request(app).post(`/api/projects/${project.id}/share`).set('Cookie', cookie).send({
       mode: 'view',
+      includeCosts: false,
       expiresAt: '2026-08-26T10:00:00.000Z',
     }).expect(200);
-    expect(viewOnly.body).toEqual(expect.objectContaining({ enabled: true, mode: 'view', path: expect.stringMatching(/^\/shared\//) }));
+    expect(viewOnly.body).toEqual(expect.objectContaining({ enabled: true, mode: 'view', includeCosts: false, path: expect.stringMatching(/^\/shared\//) }));
     const viewToken = viewOnly.body.path.split('/').pop();
     const viewOnlyProject = await request(app).get(`/api/shared/projects/${viewToken}`).expect(200);
-    expect(viewOnlyProject.body.collaboration.share).toEqual(expect.objectContaining({ enabled: true, mode: 'view' }));
+    expect(viewOnlyProject.body).toEqual(expect.objectContaining({
+      siteProfile: expect.objectContaining({ soil: expect.any(Object), satellite: expect.any(Object) }),
+      variants: expect.arrayContaining([expect.objectContaining({ trees: expect.any(Array), firebreak: expect.any(Object), machinery: expect.any(Object) })]),
+      fireOperations: expect.any(Object),
+      economicConfiguration: null,
+      costs: null,
+    }));
+    expect(viewOnlyProject.body.irrigation).toEqual(expect.objectContaining({
+      annualWaterM3: expect.any(Number),
+      network: expect.objectContaining({ lines: expect.any(Array), components: expect.any(Array) }),
+    }));
+    expect(viewOnlyProject.body.irrigation).not.toHaveProperty('economics');
+    expect(viewOnlyProject.body.irrigation.installation).not.toHaveProperty('materialsCost');
+    expect(viewOnlyProject.body.irrigation.annualOperation).not.toHaveProperty('waterCost');
+    expect(viewOnlyProject.body.irrigation.systemMaintenance).not.toHaveProperty('totalCost');
+    expect(viewOnlyProject.body.irrigation.systemMaintenance.tasks[0]).not.toHaveProperty('cost');
+    expect(viewOnlyProject.body.irrigation.network.components[0]).not.toHaveProperty('unitCost');
+    expect(viewOnlyProject.body.irrigation.monthly[0]).not.toHaveProperty('cost');
+    expect(viewOnlyProject.body.collaboration.share).toEqual(expect.objectContaining({ enabled: true, mode: 'view', includeCosts: false }));
     expect(viewOnlyProject.body.collaboration.share).not.toHaveProperty('tokenVersion');
     await request(app).post(`/api/shared/projects/${viewToken}/comments`).send({
       authorName: 'Read-only visitor',
@@ -95,11 +128,15 @@ describe('shared project review integration', () => {
 
     const shared = await request(app).post(`/api/projects/${project.id}/share`).set('Cookie', cookie).send({
       mode: 'review',
+      includeCosts: true,
       expiresAt: '2026-08-26T10:00:00.000Z',
     }).expect(200);
-    expect(shared.body).toEqual(expect.objectContaining({ enabled: true, mode: 'review', path: expect.stringMatching(/^\/shared\//) }));
+    expect(shared.body).toEqual(expect.objectContaining({ enabled: true, mode: 'review', includeCosts: true, path: expect.stringMatching(/^\/shared\//) }));
     const token = shared.body.path.split('/').pop();
     const publicRead = await request(app).get(`/api/shared/projects/${token}`).expect(200);
+    expect(publicRead.body.economicConfiguration).toEqual(expect.objectContaining({ currencyCode: economics.currencyCode }));
+    expect(publicRead.body.costs).toEqual(expect.objectContaining({ totalCost: costs.totalCost }));
+    expect(publicRead.body.irrigation.economics).toEqual(expect.objectContaining({ currencyCode: economics.currencyCode }));
     expect(publicRead.body.collaboration.share).not.toHaveProperty('tokenVersion');
 
     const commented = await request(app).post(`/api/shared/projects/${token}/comments`).send({

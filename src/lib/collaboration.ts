@@ -7,6 +7,7 @@ export function defaultProjectCollaboration(): ProjectCollaboration {
     share: {
       enabled: false,
       mode: 'view',
+      includeCosts: false,
       tokenVersion: cryptoId(),
       createdAt: null,
       expiresAt: null,
@@ -30,6 +31,7 @@ export function normalizeProjectCollaboration(value: Partial<ProjectCollaboratio
     share: {
       enabled: share?.enabled === true,
       mode: share?.mode === 'review' ? 'review' : 'view',
+      includeCosts: share?.includeCosts === true,
       tokenVersion: boundedText(share?.tokenVersion, 128) || fallback.share.tokenVersion,
       createdAt: validDate(share?.createdAt) ? share?.createdAt ?? null : null,
       expiresAt: validDate(share?.expiresAt) ? share?.expiresAt ?? null : null,

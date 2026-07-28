@@ -8,7 +8,7 @@ import { mockGoogleMaps } from './support/mockGoogleMaps';
 import { mockPlanningApi } from './support/mockPlanningApi';
 import { importSiteFixture } from './support/siteFixture';
 
-test('labels every active plant point and opens its row-sequence identity from the map', async ({ page }) => {
+test('labels every active plant point and opens its row-sequence identity from the map', async ({ page }, testInfo) => {
   await mockGoogleMaps(page);
   await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await page.goto('/');
@@ -30,6 +30,18 @@ test('labels every active plant point and opens its row-sequence identity from t
   const expectedCode = plantPositionCode(firstTree);
   const expectedInitials = plantSpeciesInitials(firstSpecies.commonName, 'en');
 
+  const layoutTabs = page.getByTestId('layout-tabs');
+  await expect(layoutTabs.getByRole('tab')).toHaveCount(4);
+  await expect(page.getByTestId('layout-tab-summary')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('generation-audit')).toHaveCount(0);
+  await expect(page.getByTestId('plan-species-summary')).toHaveCount(0);
+  await page.getByTestId('layout-tab-plants').click();
+  await expect(page.getByTestId('plan-species-summary')).toBeVisible();
+  await page.getByTestId('layout-tab-solar').click();
+  await expect(page.getByTestId('daily-solar-exposure')).toBeVisible();
+  await page.getByTestId('layout-tab-edit').click();
+  await expect(page.getByTestId('bulk-editor')).toBeVisible();
+
   await expect.poll(() => page.evaluate(() => (
     (window as any).__growupMapMarkers.filter((marker: any) => marker.active && marker.options.title?.match(/^[A-Z]+\d+ · /)).length
   ))).toBe(activeTrees.length);
@@ -43,11 +55,34 @@ test('labels every active plant point and opens its row-sequence identity from t
   }));
   expect(identity.scale).toBeGreaterThanOrEqual(9);
 
+  await page.evaluate(({ code }) => {
+    const marker = (window as any).__growupMapMarkers.find((item: any) => item.active && item.options.title?.startsWith(`${code} · `));
+    marker.emit('mouseover');
+  }, { code: expectedCode });
+  const mapTooltip = page.getByTestId('map-plant-tooltip');
+  await expect(mapTooltip).toBeVisible();
+  await expect(mapTooltip).toHaveAttribute('data-plant-code', expectedCode);
+  await expect(mapTooltip).toContainText(firstSpecies.commonName);
+  await expect(mapTooltip).toContainText(firstSpecies.scientificName);
+  await expect(mapTooltip).toContainText(`Row ${expectedCode.replace(/\d+$/, '')}`);
+  await page.evaluate(({ code }) => {
+    const marker = (window as any).__growupMapMarkers.find((item: any) => item.active && item.options.title?.startsWith(`${code} · `));
+    marker.emit('mouseout');
+  }, { code: expectedCode });
+  await expect(mapTooltip).toBeHidden();
+
   await page.getByTestId('step-costs').click();
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(({ code }) => {
     const marker = (window as any).__growupMapMarkers.find((item: any) => item.active && item.options.title?.startsWith(`${code} · `));
     marker.emit('click', { domEvent: { shiftKey: false } });
   }, { code: expectedCode });
+
+  await expect(mapTooltip).toBeVisible();
+  const tooltipBox = await mapTooltip.boundingBox();
+  expect(tooltipBox).not.toBeNull();
+  expect(tooltipBox!.x).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(390);
 
   const selected = page.getByTestId('selected-tree-identity');
   await expect(selected).toBeVisible();
@@ -55,4 +90,5 @@ test('labels every active plant point and opens its row-sequence identity from t
   await expect(selected).toContainText(firstSpecies.commonName);
   await expect(selected).toContainText(firstSpecies.scientificName);
   await expect(selected).toContainText(`Row ${expectedCode.replace(/\d+$/, '')}`);
+  await page.locator('.map-stage').screenshot({ path: testInfo.outputPath('mobile-plant-tooltip.png') });
 });

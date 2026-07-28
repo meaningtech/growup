@@ -39,4 +39,22 @@ describe('project collaboration', () => {
     expect(normalized.comments).toHaveLength(MAX_PROJECT_COMMENTS);
     expect(normalized.comments[0].id).toBe('comment-5');
   });
+
+  it('keeps cost sharing private unless it is explicitly enabled', () => {
+    expect(normalizeProjectCollaboration({
+      share: {
+        enabled: true,
+        mode: 'view',
+        tokenVersion: 'legacy-share',
+        createdAt: null,
+        expiresAt: null,
+      } as ReturnType<typeof defaultProjectCollaboration>['share'],
+    }).share.includeCosts).toBe(false);
+    expect(normalizeProjectCollaboration({
+      share: {
+        ...defaultProjectCollaboration().share,
+        includeCosts: true,
+      },
+    }).share.includeCosts).toBe(true);
+  });
 });
