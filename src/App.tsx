@@ -230,8 +230,9 @@ export default function App() {
   return sharedToken ? <SharedProjectPage token={sharedToken} /> : <WorkspaceApp />;
 }
 
-type SharedSection = WorkspaceSection;
+type SharedSection = Exclude<WorkspaceSection, 'analysis'>;
 type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'moisture' | 'wind' | 'solar' | 'comments';
+const SHARED_STEPS = STEPS.filter((step) => step.id !== 'analysis') as Array<{ id: SharedSection; label: string; icon: typeof MapIcon }>;
 
 const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
   boundary: true,
@@ -266,6 +267,7 @@ function SharedProjectPage({ token }: { token: string }) {
   const [solarHour, setSolarHour] = useState(12);
   const [mapReady, setMapReady] = useState(false);
   const mapElementRef = useRef<HTMLDivElement | null>(null);
+  const sharedAsideRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
 
@@ -274,7 +276,6 @@ function SharedProjectPage({ token }: { token: string }) {
       .then(([appConfig, sharedProject]) => {
         setConfig(appConfig);
         setProject(sharedProject);
-        if (sharedProject.collaboration.share.mode === 'review') setSection('analysis');
       })
       .catch((loadError) => setError(messageOf(loadError)));
   }, [token]);
@@ -576,10 +577,24 @@ function SharedProjectPage({ token }: { token: string }) {
     }
   }
 
+  function selectSharedSection(nextSection: SharedSection) {
+    setSection(nextSection);
+    if (!window.matchMedia('(max-width: 980px)').matches) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!sharedAsideRef.current) return;
+        const scroller = document.getElementById('root');
+        const top = sharedAsideRef.current.offsetTop - 60;
+        if (scroller) scroller.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+        else window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+      });
+    });
+  }
+
   if (error && !project) return <main className="shared-error"><Sprout size={28} /><h1>{t('shared.unavailable')}</h1><p>{error}</p></main>;
   if (!project) return <main className="shared-loading"><LoaderCircle className="spin" size={26} /><span>{t('busy.loading')}</span></main>;
   const canReview = project.collaboration.share.mode === 'review';
-  const availableSections = STEPS.filter((step) => step.id !== 'costs' || project.collaboration.share.includeCosts);
+  const availableSections = SHARED_STEPS.filter((step) => step.id !== 'costs' || project.collaboration.share.includeCosts);
   const layerDefinitions: Array<{ id: SharedLayerId; icon: typeof MapIcon }> = [
     { id: 'boundary', icon: ScanLine },
     { id: 'constraints', icon: Ban },
@@ -612,32 +627,51 @@ function SharedProjectPage({ token }: { token: string }) {
       {selectedTree && selectedTreeSpecies && <div className="shared-tree-detail" data-testid="shared-tree-detail"><button aria-label={t('actions.close')} onClick={() => setSelectedTreeId(null)}><X size={14} /></button><span className="tree-dot" style={{ background: selectedTreeSpecies.color }} /><span><small>{plantPositionCode(selectedTree)}</small><strong>{speciesDisplayName(selectedTreeSpecies, t)}</strong><i>{selectedTreeSpecies.scientificName}</i></span></div>}
       <span className="shared-map-hint"><MousePointer2 size={14} />{canReview ? t('shared.mapHint') : t('shared.readOnly')}</span>
     </section>
-    <aside>
-      <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}><Icon size={16} /><span>{t(`nav.${id}`)}</span></button>)}</nav>
+    <aside ref={sharedAsideRef}>
+      <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} data-section={id} aria-current={section === id ? 'page' : undefined} onClick={() => selectSharedSection(id)}><Icon size={16} /><span>{t(`nav.${id}`)}</span></button>)}</nav>
       <div className="shared-section-content">
-        <SharedProjectSection project={project} variant={variant} species={species} section={section} />
-        {section === 'analysis' && <>
+        {canReview && <div className="shared-review-workspace">
           {project.collaboration.review && <div className={`shared-decision ${project.collaboration.review.status}`}><ClipboardCheck size={18} /><span><small>{t('sharing.reviewStatus')}</small><strong>{t(`sharing.status.${project.collaboration.review.status}`)}</strong><p>{project.collaboration.review.reviewerName} · {shortDate(project.collaboration.review.updatedAt, locale)}</p></span></div>}
           <div className="shared-comments"><header><strong>{t('sharing.comments')}</strong><small>{project.collaboration.comments.length}</small></header>{project.collaboration.comments.length ? project.collaboration.comments.map((comment) => <article key={comment.id}><span><strong>{comment.authorName}</strong><small>r{comment.revision} · {shortDate(comment.createdAt, locale)}</small></span><p>{comment.message}</p>{comment.coordinate && <i><MapIcon size={12} />{t('shared.pinned')}</i>}</article>) : <p className="inline-empty">{t('sharing.noComments')}</p>}</div>
-          {canReview && <div className="shared-review-form">
+          <div className="shared-review-form">
             <label><span>{t('shared.yourName')}</span><input maxLength={100} value={reviewerName} onChange={(event) => setReviewerName(event.target.value)} /></label>
             <label><span>{t('shared.comment')}</span><textarea maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} /></label>
             {commentCoordinate && <small className="shared-pin"><LocateFixed size={13} />{t('shared.pinReady')}</small>}
             <button disabled={busy || !reviewerName.trim() || !message.trim()} onClick={() => void submitComment()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}{t('shared.addComment')}</button>
             <label><span>{t('shared.reviewNote')}</span><textarea maxLength={2000} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} /></label>
             <div><button className="request" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('changes-requested')}>{t('sharing.requestChanges')}</button><button className="approve" disabled={busy || !reviewerName.trim()} onClick={() => void submitReview('approved')}><Check size={14} />{t('sharing.approve')}</button></div>
-          </div>}
-        </>}
+          </div>
+        </div>}
+        <SharedProjectSection
+          project={project}
+          variant={variant}
+          species={species}
+          section={section}
+          dailySolarExposure={dailySolarExposure}
+          solarMonth={solarMonth}
+          solarHour={solarHour}
+          showSolarExposure={layers.solar}
+          onSolarMonth={setSolarMonth}
+          onSolarHour={setSolarHour}
+          onShowSolarExposure={(show) => setLayers((current) => ({ ...current, solar: show }))}
+        />
       </div>
     </aside>
   </main>;
 }
 
-function SharedProjectSection({ project, variant, species, section }: {
+function SharedProjectSection({ project, variant, species, section, dailySolarExposure, solarMonth, solarHour, showSolarExposure, onSolarMonth, onSolarHour, onShowSolarExposure }: {
   project: SharedProjectState;
   variant: LayoutVariant | null;
   species: DesignSpecies[];
   section: SharedSection;
+  dailySolarExposure: DailyPlantSolarExposure | null;
+  solarMonth: number;
+  solarHour: number;
+  showSolarExposure: boolean;
+  onSolarMonth: (month: number) => void;
+  onSolarHour: (hour: number) => void;
+  onShowSolarExposure: (show: boolean) => void;
 }) {
   const { t, locale } = useI18n();
   const profile = project.siteProfile;
@@ -677,6 +711,8 @@ function SharedProjectSection({ project, variant, species, section }: {
         <SharedRow label={t('shared.aspect')} value={`${profile.terrain.aspectLabel} · ${formatNumber(profile.terrain.aspectDegrees, 0)}°`} />
         <SharedRow label={t('shared.prevailingWind')} value={profile.solar.prevailingWindDirectionDegrees === null ? '—' : `${formatNumber(profile.solar.prevailingWindDirectionDegrees, 0)}° · ${formatNumber(profile.solar.meanWindSpeedMs ?? 0, 1)} m/s`} />
       </SharedDataCard>
+      <SharedClimateChart climate={profile.climate} />
+      <WindClimatologyCard solar={profile.solar} />
       <SharedEvidenceList profile={profile} />
     </> : <p className="inline-empty">{t('shared.noEvidence')}</p>}
   </SharedSectionFrame>;
@@ -722,6 +758,15 @@ function SharedProjectSection({ project, variant, species, section }: {
         <SharedRow label={t('shared.solarScore')} value={variant.solar.cropSolarAccessPercent === null ? '—' : `${formatNumber(variant.solar.cropSolarAccessPercent, 0)}%`} />
         <SharedRow label={t('shared.orientation')} value={`${formatNumber(variant.directionDegrees, 0)}°`} />
       </SharedDataCard>
+      <SharedSolarAnalysis
+        exposure={dailySolarExposure}
+        month={solarMonth}
+        hour={solarHour}
+        showOnMap={showSolarExposure}
+        onMonth={onSolarMonth}
+        onHour={onSolarHour}
+        onShowOnMap={onShowSolarExposure}
+      />
     </> : <p className="inline-empty">{t('shared.noDesignBody')}</p>}
   </SharedSectionFrame>;
   if (section === 'water') return <SharedSectionFrame eyebrow={t('shared.section.waterEyebrow')} title={t('shared.section.waterTitle')} body={t('shared.section.waterBody')}>
@@ -744,6 +789,7 @@ function SharedProjectSection({ project, variant, species, section }: {
         <SharedRow label={t('shared.adjustment')} value={signed(project.irrigation.satelliteScheduling.adjustmentPercent)} />
         <SharedRow label={t('shared.highPrioritySamples')} value={String(project.irrigation.satelliteScheduling.highPrioritySamples)} />
       </SharedDataCard>
+      <SharedMonthlyWaterChart monthly={project.irrigation.monthly} />
     </> : <p className="inline-empty">{t('shared.noWaterPlan')}</p>}
   </SharedSectionFrame>;
   if (section === 'fire') return <SharedSectionFrame eyebrow={t('shared.section.fireEyebrow')} title={t('shared.section.fireTitle')} body={t('shared.section.fireBody')}>
@@ -782,15 +828,7 @@ function SharedProjectSection({ project, variant, species, section }: {
       })}</div>
     </> : <p className="inline-empty">{t('shared.noCosts')}</p>}
   </SharedSectionFrame>;
-  return <SharedSectionFrame eyebrow={t('shared.section.analysisEyebrow')} title={t('shared.section.analysisTitle')} body={t('shared.section.analysisBody')}>
-    {project.analysis ? <>
-      <div className={`shared-analysis-verdict ${project.analysis.verdict}`}><ClipboardCheck size={22} /><span><small>{translatedStatus(project.analysis.verdict, t)}</small><strong>{project.analysis.overallScore}/100</strong></span></div>
-      <p className="shared-executive-summary">{project.analysis.executiveSummary}</p>
-      <div className="shared-analysis-dimensions">{project.analysis.dimensions.map((dimension) => <article key={dimension.id}><span><strong>{translatedStatus(dimension.id, t)}</strong><b>{dimension.score}/100</b></span><p>{dimension.summary}</p></article>)}</div>
-      <SharedDataCard title={t('shared.findings')} icon={ClipboardCheck}>{project.analysis.findings.map((finding) => <article className="shared-finding" key={finding.id}><small>{translatedStatus(finding.severity, t)}</small><strong>{finding.title}</strong><p>{finding.explanation}</p>{finding.recommendation && <span>{finding.recommendation}</span>}</article>)}</SharedDataCard>
-      {project.analysis.limitations.length > 0 && <SharedDataCard title={t('shared.limitations')} icon={Info}>{project.analysis.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</SharedDataCard>}
-    </> : <p className="inline-empty">{t('shared.noAnalysis')}</p>}
-  </SharedSectionFrame>;
+  return null;
 }
 
 function SharedSectionFrame({ eyebrow, title, body, children }: { eyebrow: string; title: string; body: string; children: ReactNode }) {
@@ -821,6 +859,113 @@ function SharedEvidenceList({ profile }: { profile: SiteProfile }) {
     ...profile.satellite.evidence,
   ].filter((item, index, items) => item?.source && items.findIndex((candidate) => candidate?.sourceUrl === item.sourceUrl && candidate?.version === item.version) === index);
   return <SharedDataCard title={t('shared.sources')} icon={Database}>{evidence.map((item) => <a className="shared-evidence-source" key={`${item.sourceUrl}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span><strong>{item.source}</strong><small>{item.version} · {shortDate(item.observedAt, locale)}</small></span><b>{translatedStatus(item.confidence, t)}</b></a>)}</SharedDataCard>;
+}
+
+function SharedClimateChart({ climate }: { climate: SiteProfile['climate'] }) {
+  const { t } = useI18n();
+  const chartWidth = 600;
+  const chartTop = 18;
+  const chartBottom = 174;
+  const chartHeight = chartBottom - chartTop;
+  const bandWidth = chartWidth / climate.monthly.length;
+  const maxWater = Math.max(1, ...climate.monthly.flatMap((month) => [month.precipitationMm, month.et0Mm]));
+  const temperatures = climate.monthly.map((month) => month.temperatureC);
+  const minimumTemperature = Math.min(...temperatures) - 2;
+  const maximumTemperature = Math.max(...temperatures) + 2;
+  const temperatureRange = Math.max(1, maximumTemperature - minimumTemperature);
+  const temperaturePoints = climate.monthly.map((month, index) => {
+    const x = index * bandWidth + bandWidth / 2;
+    const y = chartBottom - (month.temperatureC - minimumTemperature) / temperatureRange * chartHeight;
+    return `${x},${y}`;
+  }).join(' ');
+  return <section className="shared-chart-card shared-climate-chart" data-testid="shared-climate-chart">
+    <header><span><CloudSun size={18} /><strong>{t('shared.climateChart')}</strong></span><small>{climate.period}</small></header>
+    <div className="shared-chart-legend">
+      <span className="rain">{t('shared.precipitation')}</span>
+      <span className="et0">{t('shared.referenceEt0')}</span>
+      <span className="temperature">{t('shared.temperature')}</span>
+    </div>
+    <svg viewBox={`0 0 ${chartWidth} 205`} role="img" aria-label={t('shared.climateChart')}>
+      {[0, .5, 1].map((share) => <line key={share} x1="0" x2={chartWidth} y1={chartBottom - chartHeight * share} y2={chartBottom - chartHeight * share} className="shared-chart-grid" />)}
+      {climate.monthly.map((month, index) => {
+        const precipitationHeight = month.precipitationMm / maxWater * chartHeight;
+        const et0Height = month.et0Mm / maxWater * chartHeight;
+        const center = index * bandWidth + bandWidth / 2;
+        return <g key={month.month}>
+          <rect x={center - 15} y={chartBottom - precipitationHeight} width="13" height={precipitationHeight} rx="3" className="shared-chart-rain"><title>{t('shared.precipitation')}: {formatNumber(month.precipitationMm, 0)} mm</title></rect>
+          <rect x={center + 2} y={chartBottom - et0Height} width="13" height={et0Height} rx="3" className="shared-chart-et0"><title>{t('shared.referenceEt0')}: {formatNumber(month.et0Mm, 0)} mm</title></rect>
+          <text x={center} y="197" className="shared-chart-month">{monthName(month.month)}</text>
+        </g>;
+      })}
+      <polyline points={temperaturePoints} className="shared-chart-temperature-line" />
+      {climate.monthly.map((month, index) => {
+        const x = index * bandWidth + bandWidth / 2;
+        const y = chartBottom - (month.temperatureC - minimumTemperature) / temperatureRange * chartHeight;
+        return <circle key={month.month} cx={x} cy={y} r="4" className="shared-chart-temperature-dot"><title>{t('shared.temperature')}: {formatNumber(month.temperatureC, 1)} °C</title></circle>;
+      })}
+    </svg>
+  </section>;
+}
+
+function SharedSolarAnalysis({ exposure, month, hour, showOnMap, onMonth, onHour, onShowOnMap }: {
+  exposure: DailyPlantSolarExposure | null;
+  month: number;
+  hour: number;
+  showOnMap: boolean;
+  onMonth: (month: number) => void;
+  onHour: (hour: number) => void;
+  onShowOnMap: (show: boolean) => void;
+}) {
+  const { t, locale } = useI18n();
+  const selectedHour = exposure?.hours.find((item) => item.localSolarHour === hour) ?? null;
+  const months = Array.from({ length: 12 }, (_, index) => ({
+    value: index + 1,
+    label: new Intl.DateTimeFormat(locale, { month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, index, 15))),
+  }));
+  return <section className="shared-solar-analysis solar-assessment" data-testid="shared-solar-analysis">
+    <section className="daily-solar-exposure">
+      <div className="daily-solar-heading">
+        <span><small>{t('solar.dailyEyebrow')}</small><strong>{t('solar.dailyTitle')}</strong></span>
+        {exposure && <StatusPill status={exposure.status === 'available' ? exposure.confidence : 'unavailable'} />}
+      </div>
+      <p>{t('solar.dailyBody', { year: exposure?.growthYear ?? 0 })}</p>
+      <div className="solar-time-controls">
+        <label><span>{t('solar.month')}</span><select aria-label={t('solar.month')} value={month} onChange={(event) => onMonth(Number(event.target.value))}>{months.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label><span>{t('solar.hour')}</span><output>{String(hour).padStart(2, '0')}:00</output><input data-testid="shared-solar-hour" aria-label={t('solar.hour')} type="range" min="5" max="20" step="1" value={hour} onChange={(event) => onHour(Number(event.target.value))} /></label>
+      </div>
+      {exposure?.status === 'available' && selectedHour ? <>
+        <div className="solar-day-timeline" data-testid="shared-solar-timeline" role="list" aria-label={t('solar.timeline')}>
+          {exposure.hours.map((item) => {
+            const daylight = item.elevationDegrees > 0 && item.estimatedHorizontalWm2 >= 5;
+            const height = daylight ? Math.max(10, Math.min(100, item.elevationDegrees / 90 * 100)) : 4;
+            return <button key={item.localSolarHour} type="button" role="listitem" className={`${item.localSolarHour === hour ? 'active' : ''} ${daylight ? '' : 'night'}`} aria-label={t('solar.hourSummary', { hour: String(item.localSolarHour).padStart(2, '0'), sunlit: item.sunlitPercent })} onClick={() => onHour(item.localSolarHour)}>
+              <i style={{ height: `${height}%` }} /><span>{item.localSolarHour}</span>
+            </button>;
+          })}
+        </div>
+        <div className="daily-solar-metrics">
+          <span><small>{t('solar.sunElevation')}</small><strong>{formatNumber(selectedHour.elevationDegrees, 1)}°</strong></span>
+          <span><small>{t('solar.azimuth')}</small><strong>{formatNumber(selectedHour.azimuthDegrees, 1)}°</strong></span>
+          <span><small>{t('solar.estimatedRadiation')}</small><strong>{formatNumber(selectedHour.estimatedHorizontalWm2, 0)} W/m²</strong></span>
+          <span><small>{t('solar.sunlitPlants')}</small><strong>{selectedHour.sunlitCount}/{selectedHour.activePlantCount}</strong></span>
+          <span><small>{t('solar.shadedPlants')}</small><strong>{selectedHour.shadedCount}</strong></span>
+          <span><small>{t('solar.sunlitShare')}</small><strong>{formatNumber(selectedHour.sunlitPercent, 1)}%</strong></span>
+        </div>
+        <label className="solar-map-toggle"><input type="checkbox" checked={showOnMap} onChange={(event) => onShowOnMap(event.target.checked)} /><span><strong>{t('solar.showOnMap')}</strong><small>{t('solar.showOnMapHint')}</small></span></label>
+        <div className="solar-source-note"><Database size={15} /><span><strong>{exposure.source}</strong><small>{exposure.sourcePeriod} · {exposure.sourceVersion} · {t('solar.localSolarTime')} · {translatedStatus(exposure.confidence, t)}</small></span></div>
+        <small className="solar-limitation">{t('solar.dailyLimitation')}</small>
+      </> : <div className="solar-unavailable">{t('solar.unavailable')}</div>}
+    </section>
+  </section>;
+}
+
+function SharedMonthlyWaterChart({ monthly }: { monthly: Array<{ month: number; grossM3: number }> }) {
+  const { t } = useI18n();
+  const maximum = Math.max(1, ...monthly.map((item) => item.grossM3));
+  return <section className="shared-chart-card shared-water-chart" data-testid="shared-water-chart">
+    <header><span><Droplets size={18} /><strong>{t('water.monthlyDemand')}</strong></span><small>m³</small></header>
+    <div className="shared-water-bars">{monthly.map((item) => <div key={item.month}><span><i style={{ height: `${Math.max(3, item.grossM3 / maximum * 100)}%` }} title={`${formatNumber(item.grossM3, 1)} m³`} /></span><small>{monthName(item.month)}</small></div>)}</div>
+  </section>;
 }
 
 function WorkspaceApp() {

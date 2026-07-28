@@ -48,8 +48,9 @@ export function verifyProjectShareToken(token: string, config: AuthConfig = {}):
 
 export function publicProject(project: ProjectState): SharedProjectState {
   const includeCosts = project.collaboration.share.includeCosts;
+  const { analysis: _analysis, ...sharedProject } = project;
   return {
-    ...project,
+    ...sharedProject,
     economicConfiguration: includeCosts ? project.economicConfiguration : null,
     irrigation: includeCosts ? project.irrigation : publicIrrigation(project.irrigation),
     costs: includeCosts ? project.costs : null,

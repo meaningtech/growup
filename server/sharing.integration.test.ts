@@ -115,6 +115,7 @@ describe('shared project review integration', () => {
     expect(viewOnlyProject.body.irrigation.monthly[0]).not.toHaveProperty('cost');
     expect(viewOnlyProject.body.collaboration.share).toEqual(expect.objectContaining({ enabled: true, mode: 'view', includeCosts: false }));
     expect(viewOnlyProject.body.collaboration.share).not.toHaveProperty('tokenVersion');
+    expect(viewOnlyProject.body).not.toHaveProperty('analysis');
     await request(app).post(`/api/shared/projects/${viewToken}/comments`).send({
       authorName: 'Read-only visitor',
       message: 'This must not be stored.',
@@ -138,6 +139,7 @@ describe('shared project review integration', () => {
     expect(publicRead.body.costs).toEqual(expect.objectContaining({ totalCost: costs.totalCost }));
     expect(publicRead.body.irrigation.economics).toEqual(expect.objectContaining({ currencyCode: economics.currencyCode }));
     expect(publicRead.body.collaboration.share).not.toHaveProperty('tokenVersion');
+    expect(publicRead.body).not.toHaveProperty('analysis');
 
     const commented = await request(app).post(`/api/shared/projects/${token}/comments`).send({
       authorName: 'Field reviewer',

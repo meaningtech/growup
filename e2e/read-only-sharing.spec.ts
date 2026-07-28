@@ -12,7 +12,7 @@ import { openFieldProfile } from '../test/fixtures/siteProfile';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { mockGoogleMaps } from './support/mockGoogleMaps';
 
-test('creates a read-only project link from the library and exposes no mutation controls', async ({ page }) => {
+test('creates a read-only project link from the library and exposes no mutation controls', async ({ page }, testInfo) => {
   const now = '2026-07-27T10:00:00.000Z';
   const collaboration = defaultProjectCollaboration();
   const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE);
@@ -153,20 +153,74 @@ test('creates a read-only project link from the library and exposes no mutation 
   await page.goto('/shared/read-only-token');
   await expect(page.getByText('Interactive read-only plan')).toBeVisible();
   await expect(page.getByTestId('shared-map')).toHaveAttribute('data-fake-google-map', 'true');
-  await expect(page.getByRole('navigation', { name: 'Shared project sections' }).getByRole('button')).toHaveCount(7);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+  const sectionNavigation = page.getByRole('navigation', { name: 'Shared project sections' });
+  const sectionButtons = sectionNavigation.getByRole('button');
+  await expect(sectionButtons).toHaveCount(6);
   await expect(page.getByRole('button', { name: 'Costs', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Analysis', exact: true })).toHaveCount(0);
+  const sectionButtonRows = await sectionButtons.evaluateAll((buttons) => buttons.reduce<number[]>((rows, button) => {
+    const y = Math.round(button.getBoundingClientRect().y);
+    if (!rows.some((row) => Math.abs(row - y) <= 2)) rows.push(y);
+    return rows;
+  }, []));
+  expect(sectionButtonRows).toHaveLength(2);
+  const sectionButtonColumns = await sectionButtons.evaluateAll((buttons) => buttons.reduce<number[]>((columns, button) => {
+    const x = Math.round(button.getBoundingClientRect().x);
+    if (!columns.some((column) => Math.abs(column - x) <= 2)) columns.push(x);
+    return columns;
+  }, []));
+  expect(sectionButtonColumns).toHaveLength(3);
+  const [mapBox, layerTriggerBox, layerPanelBox] = await Promise.all([
+    page.locator('.shared-map').boundingBox(),
+    page.getByRole('button', { name: 'Map layers' }).boundingBox(),
+    page.getByTestId('shared-layer-panel').boundingBox(),
+  ]);
+  expect(mapBox).not.toBeNull();
+  expect(layerTriggerBox).not.toBeNull();
+  expect(layerPanelBox).not.toBeNull();
+  expect(layerTriggerBox!.y - mapBox!.y).toBeGreaterThanOrEqual(56);
+  expect(layerPanelBox!.y).toBeGreaterThanOrEqual(layerTriggerBox!.y + layerTriggerBox!.height + 6);
+  expect(layerPanelBox!.y + layerPanelBox!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height - 8);
+  await sectionNavigation.screenshot({ path: testInfo.outputPath('shared-navigation-mobile.png') });
   await page.getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page.getByText('What is known about this site')).toBeVisible();
   await expect(page.getByText('Data sources used')).toBeVisible();
+  await expect(page.getByTestId('shared-climate-chart')).toBeVisible();
+  await expect(page.getByTestId('wind-rose')).toBeVisible();
+  await page.getByRole('button', { name: 'Summer', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Summer', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('wind-climatology').screenshot({ path: testInfo.outputPath('shared-wind-mobile.png') });
   await page.getByRole('button', { name: 'Planning', exact: true }).click();
   await expect(page.getByText('Species, quantities and sequence')).toBeVisible();
   await expect(page.locator('.shared-species-list article')).not.toHaveCount(0);
+  await sectionNavigation.locator('button[data-section="layout"]').click();
+  await expect(page.getByTestId('shared-solar-analysis')).toBeVisible();
+  await expect(page.getByTestId('shared-solar-timeline')).toBeVisible();
+  expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+  await expect.poll(async () => {
+    const [navigationAfterSectionChange, sharedSectionAfterChange] = await Promise.all([
+      sectionNavigation.boundingBox(),
+      page.locator('.shared-section-frame > header').boundingBox(),
+    ]);
+    return Boolean(
+      navigationAfterSectionChange
+      && sharedSectionAfterChange
+      && sharedSectionAfterChange.y >= navigationAfterSectionChange.y + navigationAfterSectionChange.height,
+    );
+  }).toBe(true);
+  const solarMapToggle = page.getByRole('checkbox', { name: 'Show shadows on the map' });
+  await expect(solarMapToggle).not.toBeChecked();
+  await solarMapToggle.check();
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Sun and shade' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('shared-solar-analysis').screenshot({ path: testInfo.outputPath('shared-solar-mobile.png') });
   await page.getByRole('button', { name: 'Water', exact: true }).click();
   await expect(page.getByText('Irrigation demand and network')).toBeVisible();
+  await expect(page.getByTestId('shared-water-chart')).toBeVisible();
   await page.getByRole('button', { name: 'Fire', exact: true }).click();
   await expect(page.getByText('Firebreak and operational analysis')).toBeVisible();
-  await page.getByRole('button', { name: 'Analysis', exact: true }).click();
-  await expect(page.getByText('The plan is coherent, with one local fire review still required.')).toBeVisible();
+  await expect(page.getByText('The plan is coherent, with one local fire review still required.')).toHaveCount(0);
   await expect(page.getByText('project.variants[0].firebreak.localReviewRequired')).toHaveCount(0);
   const machineryLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Machinery' });
   await expect(machineryLayer).toHaveAttribute('aria-pressed', 'false');

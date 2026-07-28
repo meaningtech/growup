@@ -963,7 +963,7 @@ export type SharedIrrigationEstimate = Omit<IrrigationEstimate, 'economics' | 'n
   monthly: Array<Omit<IrrigationEstimate['monthly'][number], 'cost'>>;
 };
 
-export type SharedProjectState = Omit<ProjectState, 'economicConfiguration' | 'irrigation' | 'collaboration'> & {
+export type SharedProjectState = Omit<ProjectState, 'economicConfiguration' | 'irrigation' | 'collaboration' | 'analysis'> & {
   economicConfiguration: EconomicConfiguration | null;
   irrigation: IrrigationEstimate | SharedIrrigationEstimate | null;
   collaboration: Omit<ProjectCollaboration, 'share'> & {
