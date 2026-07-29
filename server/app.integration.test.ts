@@ -666,6 +666,28 @@ describe('Growup API integration', () => {
         findings: [],
         assumptions: [],
         limitations: ['Not a legal certification.'],
+        agentRun: {
+          id: 'persisted-agent-run',
+          status: 'improved',
+          stopReason: 'max-iterations',
+          selectedFindingIds: ['mechanical-clearance'],
+          selectedFindingTitles: ['Machinery clearance remains insufficient'],
+          startedAt: observedAt,
+          completedAt: observedAt,
+          initialScore: 62,
+          currentScore: 72,
+          iteration: 4,
+          maxIterations: 4,
+          steps: [{
+            iteration: 1,
+            generatedAt: observedAt,
+            scoreBefore: 62,
+            scoreAfter: 72,
+            proposalSummary: 'Increase crop alley spacing.',
+            actionTypes: ['set_design_spacing', 'regenerate_layout', 'recalculate_water_and_costs'],
+            outcome: 'improved',
+          }],
+        },
       },
       collaboration,
       createdAt: observedAt,
@@ -694,6 +716,11 @@ describe('Growup API integration', () => {
       id: 'persisted-formal-review',
       verdict: 'revise',
       overallScore: 72,
+    }));
+    expect(storedResponse.body.analysis.agentRun).toEqual(expect.objectContaining({
+      id: 'persisted-agent-run',
+      status: 'improved',
+      currentScore: 72,
     }));
     expect(storedResponse.body.collaboration.comments).toEqual([
       expect.objectContaining({
@@ -941,6 +968,78 @@ describe('Growup API integration', () => {
       { type: 'regenerate_layout' },
       { type: 'recalculate_water_and_costs' },
       { type: 'navigate', section: 'fire' },
+    ]);
+  });
+
+  it('validates bounded project-remediation actions before an agent can apply them', async () => {
+    const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    const app = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      fetchImpl: async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        expect(body.messages[0].content).toContain('set_species_mix');
+        expect(body.messages[0].content).toContain('Do not invent field measurements, supplier prices');
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({
+            summary: 'Rebalance the selected palette and regenerate dependent outputs.',
+            rationale: 'The selected review finding identifies a measurable composition gap.',
+            warnings: ['Field and regulatory checks remain open.'],
+            actions: [
+              {
+                type: 'set_species_mix',
+                entries: selectedSpeciesIds.map((speciesId, index) => ({
+                  speciesId,
+                  targetPercent: index === 0 ? 34 : 33,
+                  successionOverride: null,
+                })),
+              },
+              { type: 'set_design_spacing', cropAlleyWidthM: 16, analysisYear: 12 },
+              { type: 'set_machinery_parameters', enabled: true, presetId: 'bcs-740', safetyClearanceM: 0.4 },
+              { type: 'set_firebreak_parameters', enabled: true, widthM: 7.5, supportVehicleAccess: true },
+              { type: 'set_irrigation_parameters', availableFlowM3Hour: 6, distributionEfficiencyPercent: 92 },
+              { type: 'regenerate_layout' },
+              { type: 'recalculate_water_and_costs' },
+            ],
+          }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+
+    const response = await request(app).post('/api/assistant/plan').send({
+      message: 'Resolve the selected formal-review findings within the editable project.',
+      context: {
+        site: TEMPERATE_OPEN_FIELD_FIXTURE,
+        siteProfile: siteProfile(),
+        selectedSpeciesIds,
+        designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+        irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+        economicConfiguration: defaultEconomicConfiguration('IT'),
+        variants: [],
+        selectedVariantId: null,
+        timelineYear: 5,
+        irrigation: null,
+        costs: null,
+        fireOperations: defaultFireOperationsPlan('2026-07-27T08:00:00.000Z'),
+        section: 'analysis',
+      },
+    }).expect(200);
+
+    expect(response.body.actions).toEqual([
+      {
+        type: 'set_species_mix',
+        entries: selectedSpeciesIds.map((speciesId, index) => ({
+          speciesId,
+          targetPercent: index === 0 ? 34 : 33,
+          successionOverride: null,
+        })),
+      },
+      { type: 'set_design_spacing', cropAlleyWidthM: 16, analysisYear: 12 },
+      { type: 'set_machinery_parameters', enabled: true, presetId: 'bcs-740', safetyClearanceM: 0.4 },
+      { type: 'set_firebreak_parameters', enabled: true, supportVehicleAccess: true, widthM: 7.5 },
+      { type: 'set_irrigation_parameters', availableFlowM3Hour: 6, distributionEfficiencyPercent: 92 },
+      { type: 'regenerate_layout' },
+      { type: 'recalculate_water_and_costs' },
     ]);
   });
 

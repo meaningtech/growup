@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Ban,
+  Bot,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -45,6 +46,7 @@ import {
   Share2,
   ShieldCheck,
   Sparkles,
+  Square,
   Sprout,
   Tractor,
   Trash2,
@@ -58,8 +60,8 @@ import {
 } from 'lucide-react';
 import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
 import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
-import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope } from './data/firebreak';
-import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope } from './data/machinery';
+import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope, normalizeFirebreakConfiguration } from './data/firebreak';
+import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope, normalizeMachineryConfiguration } from './data/machinery';
 import { disabledFirebreakPlan } from './lib/firebreak';
 import { defaultFireOperationsPlan, effisFireWeatherTile, normalizeFireOperationsPlan } from './lib/fireOperations';
 import { assessFireScreening, type FireScreeningComponentId } from './lib/fireRisk';
@@ -114,7 +116,7 @@ import type {
   LocationSearchResult,
   ProjectState,
   SharedProjectState,
-  ProjectAnalysisFinding,
+  ProjectAnalysisAgentRun,
   ProjectAnalysisFindingResolutionStatus,
   ProjectAnalysisReport,
   ProjectCollaboration,
@@ -143,6 +145,18 @@ type AssistantConversationTurn = {
   prompt: string;
   proposal: AssistantProposal;
   status: AssistantTurnStatus;
+};
+
+type ProjectMutationSnapshot = {
+  selectedSpeciesIds: string[];
+  designConfiguration: DesignConfiguration;
+  irrigationConfiguration: IrrigationConfiguration;
+  variants: LayoutVariant[];
+  selectedVariantId: string | null;
+  timelineYear: number;
+  irrigation: IrrigationEstimate | null;
+  costs: EstablishmentCost | null;
+  section: WorkspaceSection;
 };
 
 type AppConfig = {
@@ -994,7 +1008,9 @@ function WorkspaceApp() {
   const [projectAnalysis, setProjectAnalysis] = useState<ProjectAnalysisReport | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [analysisProposalFindingId, setAnalysisProposalFindingId] = useState<string | null>(null);
+  const [analysisAgentSelectedFindingIds, setAnalysisAgentSelectedFindingIds] = useState<string[]>([]);
+  const [analysisAgentBusy, setAnalysisAgentBusy] = useState(false);
+  const analysisAgentStopRef = useRef(false);
   const [collaboration, setCollaboration] = useState<ProjectCollaboration>(() => defaultProjectCollaboration());
   const [section, setSection] = useState<WorkspaceSection>('site');
   const [drawMode, setDrawMode] = useState<DrawMode>('idle');
@@ -2110,6 +2126,9 @@ function WorkspaceApp() {
     setFireOperations(defaultFireOperationsPlan());
     setProjectAnalysis(null);
     setAnalysisError(null);
+    setAnalysisAgentSelectedFindingIds([]);
+    setAnalysisAgentBusy(false);
+    analysisAgentStopRef.current = true;
     setCollaboration(defaultProjectCollaboration());
     setSharePath(null);
     setSaveStatus('idle');
@@ -2130,6 +2149,9 @@ function WorkspaceApp() {
     setCosts(null);
     setProjectAnalysis(null);
     setAnalysisError(null);
+    setAnalysisAgentSelectedFindingIds([]);
+    setAnalysisAgentBusy(false);
+    analysisAgentStopRef.current = true;
   }
 
   function activateDrawMode(mode: DrawMode) {
@@ -2338,15 +2360,29 @@ function WorkspaceApp() {
     await recalculateWaterAndCosts(site, nextConfiguration, timelineYear, t('notices.irrigationGeometryMoved'));
   }
 
-  function currentAssistantContext(): AssistantProjectContext {
+  function currentProjectMutationSnapshot(): ProjectMutationSnapshot {
     return {
-      site,
-      siteProfile,
       selectedSpeciesIds,
       designConfiguration,
       irrigationConfiguration,
+      variants,
+      selectedVariantId,
+      timelineYear,
+      irrigation,
+      costs,
+      section,
+    };
+  }
+
+  function assistantContextForSnapshot(snapshot: ProjectMutationSnapshot): AssistantProjectContext {
+    return {
+      site,
+      siteProfile,
+      selectedSpeciesIds: snapshot.selectedSpeciesIds,
+      designConfiguration: snapshot.designConfiguration,
+      irrigationConfiguration: snapshot.irrigationConfiguration,
       economicConfiguration,
-      variants: variants.map(({ id, name, description, score, metrics, solar, composition, machinery, firebreak, warnings, generation }) => ({
+      variants: snapshot.variants.map(({ id, name, description, score, metrics, solar, composition, machinery, firebreak, warnings, generation }) => ({
         id,
         name,
         description,
@@ -2359,13 +2395,17 @@ function WorkspaceApp() {
         warnings,
         generation,
       })),
-      selectedVariantId,
-      timelineYear,
-      irrigation,
-      costs,
+      selectedVariantId: snapshot.selectedVariantId,
+      timelineYear: snapshot.timelineYear,
+      irrigation: snapshot.irrigation,
+      costs: snapshot.costs,
       fireOperations,
-      section,
+      section: snapshot.section,
     };
+  }
+
+  function currentAssistantContext(): AssistantProjectContext {
+    return assistantContextForSnapshot(currentProjectMutationSnapshot());
   }
 
   async function askAssistant(prompt = assistantInput) {
@@ -2393,7 +2433,7 @@ function WorkspaceApp() {
   }
 
   async function runProjectAnalysis() {
-    if (!site || !siteProfile || !selectedVariant) return;
+    if (!site || !siteProfile || !selectedVariant || analysisAgentBusy) return;
     setAnalysisBusy(true);
     setAnalysisError(null);
     try {
@@ -2402,6 +2442,7 @@ function WorkspaceApp() {
         context: currentAssistantContext(),
       }));
       setProjectAnalysis(report);
+      setAnalysisAgentSelectedFindingIds([]);
       if (onboarding?.status === 'active' && onboarding.step === 'review') updateOnboarding('active', 'complete');
     } catch (reviewError) {
       setAnalysisError(messageOf(reviewError));
@@ -2412,20 +2453,289 @@ function WorkspaceApp() {
 
   function updateAnalysisFindingResolution(findingId: string, status: ProjectAnalysisFindingResolutionStatus | null) {
     setProjectAnalysis((report) => report ? setProjectAnalysisFindingResolution(report, findingId, status) : report);
+    if (status !== null) setAnalysisAgentSelectedFindingIds((ids) => ids.filter((id) => id !== findingId));
     setNotice(t(status === null ? 'notices.analysisFindingReopened' : status === 'resolved' ? 'notices.analysisFindingResolved' : 'notices.analysisFindingAccepted'));
   }
 
-  async function proposeAnalysisFindingSolution(finding: ProjectAnalysisFinding) {
-    const prompt = locale === 'it'
-      ? `Aiutami a risolvere l’esito "${finding.title}": ${finding.recommendation} Proponi le modifiche applicabili nel progetto; per sopralluoghi, autorizzazioni o dati mancanti indicami cosa resta da fare senza considerarli risolti.`
-      : `Help me resolve the finding "${finding.title}": ${finding.recommendation} Propose the changes that can be applied to this project; identify field checks, permits or missing evidence separately without treating them as resolved.`;
-    setAnalysisProposalFindingId(finding.id);
-    setAssistantOpen(true);
+  function toggleAnalysisAgentFinding(findingId: string) {
+    setAnalysisAgentSelectedFindingIds((ids) => ids.includes(findingId) ? ids.filter((id) => id !== findingId) : [...ids, findingId]);
+  }
+
+  function stopAnalysisAgent() {
+    analysisAgentStopRef.current = true;
+  }
+
+  async function runAnalysisAgent() {
+    if (!projectAnalysis || analysisAgentBusy) return;
+    const selectedFindings = projectAnalysis.findings.filter((finding) => (
+      analysisAgentSelectedFindingIds.includes(finding.id) && !finding.resolution
+    ));
+    if (!selectedFindings.length) return;
+    const maxIterations = 4;
+    const startedAt = new Date().toISOString();
+    let run: ProjectAnalysisAgentRun = {
+      id: `agent-${crypto.randomUUID()}`,
+      status: 'running',
+      stopReason: null,
+      selectedFindingIds: selectedFindings.map((finding) => finding.id),
+      selectedFindingTitles: selectedFindings.map((finding) => finding.title),
+      startedAt,
+      completedAt: null,
+      initialScore: projectAnalysis.overallScore,
+      currentScore: projectAnalysis.overallScore,
+      iteration: 0,
+      maxIterations,
+      steps: [],
+    };
+    let currentReport: ProjectAnalysisReport = { ...projectAnalysis, agentRun: run };
+    let snapshot = currentProjectMutationSnapshot();
+    let plateauCount = 0;
+    const actionSignatures = new Set<string>();
+    analysisAgentStopRef.current = false;
+    setAnalysisAgentBusy(true);
+    setAnalysisError(null);
+    setProjectAnalysis(currentReport);
+    const finish = (status: ProjectAnalysisAgentRun['status'], stopReason: NonNullable<ProjectAnalysisAgentRun['stopReason']>) => {
+      run = { ...run, status, stopReason, completedAt: new Date().toISOString() };
+      currentReport = { ...currentReport, agentRun: run };
+      setProjectAnalysis(currentReport);
+      setAnalysisAgentSelectedFindingIds(currentReport.findings.filter((finding) => (
+        run.selectedFindingIds.includes(finding.id) && !finding.resolution
+      )).map((finding) => finding.id));
+      setNotice(t(`notices.analysisAgent.${status}`));
+    };
     try {
-      await askAssistant(prompt);
+      for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+        if (analysisAgentStopRef.current) {
+          finish('stopped', 'user-stopped');
+          return;
+        }
+        const remaining = currentReport.findings.filter((finding) => (
+          run.selectedFindingIds.includes(finding.id) && !finding.resolution
+        ));
+        if (!remaining.length) {
+          finish('resolved', 'selected-resolved');
+          return;
+        }
+        run = { ...run, status: 'running', iteration };
+        currentReport = { ...currentReport, agentRun: run };
+        setProjectAnalysis(currentReport);
+        const issueList = remaining.map((finding) => (
+          `- [${finding.id}] ${finding.title}: ${finding.recommendation}`
+        )).join('\n');
+        const prompt = locale === 'it'
+          ? `Modalità Agent Growup, iterazione ${iteration}/${maxIterations}. L’utente ha confermato la risoluzione automatica esclusivamente delle issue selezionate sotto. Proponi un singolo passo di modifiche concrete e validate che possa migliorare la prossima revisione. Non aprire una conversazione, non limitarti a navigare e non ripetere azioni già implicite nei dati correnti. Se un punto richiede sopralluoghi, prezzi, permessi o attività fisiche, non inventarli e restituisci nessuna azione per quel punto.\n${issueList}`
+          : `Growup Agent mode, iteration ${iteration}/${maxIterations}. The user confirmed autonomous remediation only for the selected findings below. Propose one concrete validated change step that can improve the next review. Do not start a conversation, do not merely navigate and do not repeat changes already represented in the current data. If an item requires fieldwork, prices, permits or physical operations, do not invent them and return no action for that item.\n${issueList}`;
+        const proposal = await api<AssistantProposal>('/api/assistant/plan', post({
+          message: prompt,
+          context: assistantContextForSnapshot(snapshot),
+        }));
+        const actions = proposal.actions.filter((action) => action.type !== 'navigate');
+        const scoreBefore = currentReport.overallScore;
+        if (!actions.length) {
+          run = {
+            ...run,
+            steps: [...run.steps, {
+              iteration,
+              generatedAt: new Date().toISOString(),
+              scoreBefore,
+              scoreAfter: null,
+              proposalSummary: proposal.summary,
+              actionTypes: [],
+              outcome: 'blocked',
+            }],
+          };
+          currentReport = { ...currentReport, agentRun: run };
+          finish('blocked', 'no-actions');
+          return;
+        }
+        const signature = JSON.stringify(actions);
+        if (actionSignatures.has(signature)) {
+          run = {
+            ...run,
+            steps: [...run.steps, {
+              iteration,
+              generatedAt: new Date().toISOString(),
+              scoreBefore,
+              scoreAfter: null,
+              proposalSummary: proposal.summary,
+              actionTypes: actions.map((action) => action.type),
+              outcome: 'blocked',
+            }],
+          };
+          currentReport = { ...currentReport, agentRun: run };
+          finish('blocked', 'repeated-actions');
+          return;
+        }
+        actionSignatures.add(signature);
+        snapshot = await executeAssistantActions(actions, { ...snapshot, section: 'analysis' });
+        snapshot = { ...snapshot, section: 'analysis' };
+        commitProjectMutationSnapshot(snapshot);
+        if (analysisAgentStopRef.current) {
+          finish('stopped', 'user-stopped');
+          return;
+        }
+        const reviewed = await api<ProjectAnalysisReport>('/api/assistant/review', post({
+          locale,
+          context: assistantContextForSnapshot(snapshot),
+        }));
+        const scoreAfter = reviewed.overallScore;
+        const outcome = scoreAfter > scoreBefore ? 'improved' : scoreAfter < scoreBefore ? 'regressed' : 'unchanged';
+        run = {
+          ...run,
+          currentScore: scoreAfter,
+          steps: [...run.steps, {
+            iteration,
+            generatedAt: new Date().toISOString(),
+            scoreBefore,
+            scoreAfter,
+            proposalSummary: proposal.summary,
+            actionTypes: actions.map((action) => action.type),
+            outcome,
+          }],
+        };
+        currentReport = { ...reviewed, agentRun: run };
+        setProjectAnalysis(currentReport);
+        const selectedStillOpen = currentReport.findings.some((finding) => (
+          run.selectedFindingIds.includes(finding.id) && !finding.resolution
+        ));
+        if (!selectedStillOpen) {
+          finish('resolved', 'selected-resolved');
+          return;
+        }
+        plateauCount = scoreAfter > scoreBefore ? 0 : plateauCount + 1;
+        if (plateauCount >= 2) {
+          finish(run.currentScore > run.initialScore ? 'improved' : 'blocked', 'score-plateau');
+          return;
+        }
+      }
+      finish(run.currentScore > run.initialScore ? 'improved' : 'blocked', 'max-iterations');
+    } catch (agentError) {
+      run = { ...run, status: 'failed', stopReason: 'error', completedAt: new Date().toISOString() };
+      currentReport = { ...currentReport, agentRun: run };
+      setProjectAnalysis(currentReport);
+      setAnalysisError(messageOf(agentError));
     } finally {
-      setAnalysisProposalFindingId(null);
+      setAnalysisAgentBusy(false);
     }
+  }
+
+  async function executeAssistantActions(actions: AssistantAction[], snapshot: ProjectMutationSnapshot): Promise<ProjectMutationSnapshot> {
+    let nextSpeciesIds = [...snapshot.selectedSpeciesIds];
+    let nextDesignConfiguration = snapshot.designConfiguration;
+    let nextIrrigationConfiguration = snapshot.irrigationConfiguration;
+    let nextVariants = snapshot.variants;
+    let nextVariantId = snapshot.selectedVariantId;
+    let nextTimelineYear = snapshot.timelineYear;
+    let nextIrrigation = snapshot.irrigation;
+    let nextCosts = snapshot.costs;
+    let nextSection = snapshot.section;
+    for (const action of actions) {
+      if (action.type === 'add_species') nextSpeciesIds = Array.from(new Set([...nextSpeciesIds, ...action.speciesIds]));
+      if (action.type === 'remove_species') nextSpeciesIds = nextSpeciesIds.filter((id) => !action.speciesIds.includes(id));
+      if (action.type === 'set_species_mix') {
+        nextDesignConfiguration = normalizeDesignConfiguration({
+          ...nextDesignConfiguration,
+          speciesMix: Object.fromEntries(action.entries.map((entry) => [entry.speciesId, {
+            targetPercent: entry.targetPercent,
+            successionOverride: entry.successionOverride,
+          }])),
+        });
+      }
+      if (action.type === 'set_design_spacing') nextDesignConfiguration = normalizeDesignConfiguration({ ...nextDesignConfiguration, ...action });
+      if (action.type === 'set_machinery_parameters') {
+        const preset = action.presetId ? machineryConfigurationFromPreset(action.presetId) : nextDesignConfiguration.machinery;
+        nextDesignConfiguration = normalizeDesignConfiguration({
+          ...nextDesignConfiguration,
+          machinery: normalizeMachineryConfiguration({ ...nextDesignConfiguration.machinery, ...preset, ...action }),
+        });
+      }
+      if (action.type === 'set_firebreak_parameters') {
+        const preset = action.fuelModel ? firebreakConfigurationFromFuelModel(action.fuelModel) : nextDesignConfiguration.firebreak;
+        nextDesignConfiguration = normalizeDesignConfiguration({
+          ...nextDesignConfiguration,
+          firebreak: normalizeFirebreakConfiguration({ ...nextDesignConfiguration.firebreak, ...preset, ...action }),
+        });
+      }
+      if (action.type === 'set_irrigation_parameters') {
+        nextIrrigationConfiguration = normalizeIrrigationConfiguration({ ...nextIrrigationConfiguration, ...action });
+      }
+      if (action.type === 'set_timeline_year') nextTimelineYear = action.year;
+      if (action.type === 'select_variant') nextVariantId = action.variantId;
+      if (action.type === 'navigate') nextSection = action.section;
+    }
+    const speciesChanged = nextSpeciesIds.join('|') !== snapshot.selectedSpeciesIds.join('|');
+    if (speciesChanged) {
+      nextDesignConfiguration = normalizeDesignConfiguration({
+        ...nextDesignConfiguration,
+        speciesMix: synchronizeSpeciesMix(snapshot.selectedSpeciesIds, nextSpeciesIds, nextDesignConfiguration.speciesMix),
+      });
+    }
+    const minimumSpecies = nextDesignConfiguration.system === 'syntropic' ? 3 : nextDesignConfiguration.system === 'monoculture' ? 1 : 2;
+    if (speciesChanged && nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
+    const designChanged = JSON.stringify(nextDesignConfiguration) !== JSON.stringify(snapshot.designConfiguration);
+    const irrigationChanged = JSON.stringify(nextIrrigationConfiguration) !== JSON.stringify(snapshot.irrigationConfiguration);
+    const timelineChanged = nextTimelineYear !== snapshot.timelineYear;
+    const selectedVariantChanged = nextVariantId !== snapshot.selectedVariantId;
+    const regenerate = actions.some((action) => action.type === 'regenerate_layout') || speciesChanged || designChanged;
+    const recalculate = actions.some((action) => action.type === 'recalculate_water_and_costs')
+      || irrigationChanged
+      || ((regenerate || timelineChanged || selectedVariantChanged) && Boolean(snapshot.irrigation || snapshot.costs));
+    if (regenerate) {
+      setAssistantApplyStage('layout');
+      if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeRegenerate'));
+      const layoutResult = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({
+        site,
+        siteProfile,
+        selectedSpeciesIds: nextSpeciesIds,
+        designConfiguration: nextDesignConfiguration,
+      }));
+      nextVariants = layoutResult.variants;
+      nextVariantId = nextVariants.some((variant) => variant.id === nextVariantId) ? nextVariantId : nextVariants[0]?.id ?? null;
+      nextIrrigation = null;
+      nextCosts = null;
+    }
+    if (recalculate) {
+      setAssistantApplyStage('calculations');
+      if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeCosts'));
+      const chosenVariant = nextVariants.find((variant) => variant.id === nextVariantId) ?? nextVariants[0];
+      if (!chosenVariant) throw new Error(t('errors.layoutBeforeCosts'));
+      const costResult = await api<{ irrigation: IrrigationEstimate; establishment: EstablishmentCost }>('/api/costs/calculate', post({
+        variant: chosenVariant,
+        site,
+        siteProfile,
+        selectedSpeciesIds: nextSpeciesIds,
+        designYear: nextTimelineYear,
+        irrigationConfiguration: nextIrrigationConfiguration,
+        economicConfiguration,
+      }));
+      nextIrrigation = costResult.irrigation;
+      nextCosts = costResult.establishment;
+    }
+    return {
+      selectedSpeciesIds: nextSpeciesIds,
+      designConfiguration: nextDesignConfiguration,
+      irrigationConfiguration: nextIrrigationConfiguration,
+      variants: nextVariants,
+      selectedVariantId: nextVariantId,
+      timelineYear: nextTimelineYear,
+      irrigation: nextIrrigation,
+      costs: nextCosts,
+      section: nextSection,
+    };
+  }
+
+  function commitProjectMutationSnapshot(snapshot: ProjectMutationSnapshot) {
+    setSelectedSpeciesIds(snapshot.selectedSpeciesIds);
+    setDesignConfiguration(snapshot.designConfiguration);
+    setIrrigationConfiguration(snapshot.irrigationConfiguration);
+    setTreeSpeciesId(snapshot.selectedSpeciesIds[0] ?? '');
+    setVariants(snapshot.variants);
+    setSelectedVariantId(snapshot.selectedVariantId);
+    setTimelineYear(snapshot.timelineYear);
+    setIrrigation(snapshot.irrigation);
+    setCosts(snapshot.costs);
+    setSection(snapshot.section);
   }
 
   async function applyAssistantProposal() {
@@ -2436,76 +2746,11 @@ function WorkspaceApp() {
     setAssistantApplyStage('preparing');
     setAssistantError(null);
     try {
-      const actions = assistantProposal.actions;
-      let nextSpeciesIds = [...selectedSpeciesIds];
-      let nextVariants = variants;
-      let nextVariantId = selectedVariantId;
-      let nextTimelineYear = timelineYear;
-      let nextIrrigation = irrigation;
-      let nextCosts = costs;
-      let nextSection = section;
-      for (const action of actions) {
-        if (action.type === 'add_species') nextSpeciesIds = Array.from(new Set([...nextSpeciesIds, ...action.speciesIds]));
-        if (action.type === 'remove_species') nextSpeciesIds = nextSpeciesIds.filter((id) => !action.speciesIds.includes(id));
-        if (action.type === 'set_timeline_year') nextTimelineYear = action.year;
-        if (action.type === 'select_variant') nextVariantId = action.variantId;
-        if (action.type === 'navigate') nextSection = action.section;
-      }
-      const speciesChanged = nextSpeciesIds.join('|') !== selectedSpeciesIds.join('|');
-      const nextDesignConfiguration = speciesChanged
-        ? normalizeDesignConfiguration({
-          ...designConfiguration,
-          speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, designConfiguration.speciesMix),
-        })
-        : designConfiguration;
-      const minimumSpecies = nextDesignConfiguration.system === 'syntropic' ? 3 : nextDesignConfiguration.system === 'monoculture' ? 1 : 2;
-      if (speciesChanged && nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
-      const regenerate = actions.some((action) => action.type === 'regenerate_layout');
-      const recalculate = actions.some((action) => action.type === 'recalculate_water_and_costs');
-      if (speciesChanged && !regenerate) {
-        nextVariants = [];
-        nextVariantId = null;
-        nextIrrigation = null;
-        nextCosts = null;
-      }
-      if (regenerate) {
-        setAssistantApplyStage('layout');
-        if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeRegenerate'));
-        const layoutResult = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds: nextSpeciesIds, designConfiguration: nextDesignConfiguration }));
-        nextVariants = layoutResult.variants;
-        nextVariantId = nextVariants.some((variant) => variant.id === nextVariantId) ? nextVariantId : nextVariants[0]?.id ?? null;
-        nextIrrigation = null;
-        nextCosts = null;
-      }
-      if (recalculate) {
-        setAssistantApplyStage('calculations');
-        if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeCosts'));
-        const chosenVariant = nextVariants.find((variant) => variant.id === nextVariantId) ?? nextVariants[0];
-        if (!chosenVariant) throw new Error(t('errors.layoutBeforeCosts'));
-        const costResult = await api<{ irrigation: IrrigationEstimate; establishment: EstablishmentCost }>('/api/costs/calculate', post({
-          variant: chosenVariant,
-          site,
-          siteProfile,
-          selectedSpeciesIds: nextSpeciesIds,
-          designYear: nextTimelineYear,
-          irrigationConfiguration,
-          economicConfiguration,
-        }));
-        nextIrrigation = costResult.irrigation;
-        nextCosts = costResult.establishment;
-      }
+      const snapshot = await executeAssistantActions(assistantProposal.actions, currentProjectMutationSnapshot());
       setAssistantApplyStage('finalizing');
       const remainingFeedbackMs = 350 - (Date.now() - applyingStartedAt);
       if (remainingFeedbackMs > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingFeedbackMs));
-      setSelectedSpeciesIds(nextSpeciesIds);
-      setDesignConfiguration(nextDesignConfiguration);
-      setTreeSpeciesId(nextSpeciesIds[0] ?? '');
-      setVariants(nextVariants);
-      setSelectedVariantId(nextVariantId);
-      setTimelineYear(nextTimelineYear);
-      setIrrigation(nextIrrigation);
-      setCosts(nextCosts);
-      setSection(nextSection);
+      commitProjectMutationSnapshot(snapshot);
       setAssistantTurns((turns) => turns.map((turn) => turn.id === proposalId ? { ...turn, status: 'applied' } : turn));
       setAssistantProposal(null);
       setNotice(t('notices.aiApplied'));
@@ -2686,8 +2931,22 @@ function WorkspaceApp() {
     setIrrigation(project.irrigation);
     setCosts(project.costs);
     setFireOperations(normalizeFireOperationsPlan(project.fireOperations, project.updatedAt));
-    setProjectAnalysis(project.analysis ?? null);
+    const recoveredAnalysis = project.analysis?.agentRun?.status === 'running'
+      ? {
+        ...project.analysis,
+        agentRun: {
+          ...project.analysis.agentRun,
+          status: 'stopped' as const,
+          stopReason: 'user-stopped' as const,
+          completedAt: project.updatedAt,
+        },
+      }
+      : project.analysis ?? null;
+    setProjectAnalysis(recoveredAnalysis);
     setAnalysisError(null);
+    setAnalysisAgentSelectedFindingIds([]);
+    setAnalysisAgentBusy(false);
+    analysisAgentStopRef.current = true;
     setCollaboration(normalizeProjectCollaboration(project.collaboration));
     setSelectedTreeId(null);
     setSelectedTreeIds([]);
@@ -3411,7 +3670,7 @@ function WorkspaceApp() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
           {section === 'water' && <WaterPanel
@@ -3450,6 +3709,7 @@ function WorkspaceApp() {
             onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
             onTask={updateFireTask}
             onShowLayer={() => setShowFireWeather(true)}
+            onCosts={() => setSection('costs')}
           />}
           {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode))} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={recalculateCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
           {section === 'analysis' && <ProjectAnalysisPanel
@@ -3457,12 +3717,15 @@ function WorkspaceApp() {
             context={currentAssistantContext()}
             report={projectAnalysis}
             busy={analysisBusy}
-            proposalBusyFindingId={analysisProposalFindingId}
+            agentSelectedFindingIds={analysisAgentSelectedFindingIds}
+            agentBusy={analysisAgentBusy}
             error={analysisError}
             onRun={runProjectAnalysis}
             onOpenSection={setSection}
             onFindingResolution={updateAnalysisFindingResolution}
-            onProposeFinding={proposeAnalysisFindingSolution}
+            onToggleAgentFinding={toggleAnalysisAgentFinding}
+            onRunAgent={runAnalysisAgent}
+            onStopAgent={stopAnalysisAgent}
           />}
         </section>
       </main>
@@ -3930,6 +4193,11 @@ function assistantTurnStatusLabel(status: Exclude<AssistantTurnStatus, 'pending'
 function assistantActionLabel(action: AssistantAction, t: (key: string, values?: Record<string, string | number>) => string) {
   if (action.type === 'add_species') return t('assistant.actionAdd', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
   if (action.type === 'remove_species') return t('assistant.actionRemove', { species: action.speciesIds.map((id) => speciesLabel(id, t)).join(', ') });
+  if (action.type === 'set_species_mix') return t('assistant.actionSpeciesMix');
+  if (action.type === 'set_design_spacing') return t('assistant.actionDesignSpacing');
+  if (action.type === 'set_machinery_parameters') return t('assistant.actionMachinery');
+  if (action.type === 'set_firebreak_parameters') return t('assistant.actionFirebreak');
+  if (action.type === 'set_irrigation_parameters') return t('assistant.actionIrrigation');
   if (action.type === 'select_variant') return t('assistant.actionSelect', { id: humanize(action.variantId) });
   if (action.type === 'set_timeline_year') return t('assistant.actionYear', { year: action.year });
   if (action.type === 'regenerate_layout') return t('assistant.actionRegenerate');
@@ -4082,13 +4350,14 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLayer }: {
+function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLayer, onCosts }: {
   profile: SiteProfile | null;
   variant: LayoutVariant | null;
   plan: FireOperationsPlan;
   onPlan: (plan: FireOperationsPlan) => void;
   onTask: (id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) => void;
   onShowLayer: () => void;
+  onCosts: () => void;
 }) {
   const { t, locale } = useI18n();
   const [tab, setTab] = useState<'analysis' | 'data' | 'sources' | 'operations'>('analysis');
@@ -4104,7 +4373,8 @@ function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLay
     if (id === 'protection') return ShieldCheck;
     return Flame;
   };
-  return <div className="panel-body fire-operations-page" data-testid="fire-operations-panel">
+  return <div className="panel-body persistent-action-panel fire-operations-page" data-testid="fire-operations-panel">
+    <div className="panel-scroll-content">
     <div className="panel-intro compact fire-operations-intro">
       <span className="eyebrow">{t('fireAnalysis.eyebrow')}</span>
       <h1 id="fire-operations-title">{t('fireAnalysis.title')}</h1>
@@ -4199,6 +4469,10 @@ function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLay
       <label className="operations-notes"><span>{t('fireOperations.notes')}</span><textarea maxLength={2000} value={plan.notes} onChange={(event) => onPlan({ ...plan, notes: event.target.value })} /></label>
       <footer className="fire-operations-footer"><small>{plan.reviewedAt ? t('fireOperations.reviewed', { date: shortDate(plan.reviewedAt, locale) }) : t('fireOperations.notReviewed')}</small></footer>
     </div>}
+    </div>
+    <div className="panel-action-bar">
+      <button className="button primary wide sticky-action" data-testid="fire-continue-costs" onClick={onCosts}>{t('fireOperations.continueCosts')} <ChevronRight size={18} /></button>
+    </div>
   </div>;
 }
 
@@ -4217,17 +4491,20 @@ function EffisSourceCard({ plan, onPlan, onShowLayer }: {
   </div>;
 }
 
-function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyFindingId, error, onRun, onOpenSection, onFindingResolution, onProposeFinding }: {
+function ProjectAnalysisPanel({ configured, context, report, busy, agentSelectedFindingIds, agentBusy, error, onRun, onOpenSection, onFindingResolution, onToggleAgentFinding, onRunAgent, onStopAgent }: {
   configured: boolean;
   context: AssistantProjectContext;
   report: ProjectAnalysisReport | null;
   busy: boolean;
-  proposalBusyFindingId: string | null;
+  agentSelectedFindingIds: string[];
+  agentBusy: boolean;
   error: string | null;
   onRun: () => void;
   onOpenSection: (section: WorkspaceSection) => void;
   onFindingResolution: (findingId: string, status: ProjectAnalysisFindingResolutionStatus | null) => void;
-  onProposeFinding: (finding: ProjectAnalysisFinding) => void;
+  onToggleAgentFinding: (findingId: string) => void;
+  onRunAgent: () => void;
+  onStopAgent: () => void;
 }) {
   const { t, locale } = useI18n();
   const currentFingerprint = projectAnalysisFingerprint(context);
@@ -4247,6 +4524,8 @@ function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyF
   const canRun = configured && readiness.slice(0, 3).every((item) => item.ready);
   const handledFindingCount = report?.findings.filter((finding) => finding.resolution).length ?? 0;
   const openFindingCount = (report?.findings.length ?? 0) - handledFindingCount;
+  const selectedAgentCount = report?.findings.filter((finding) => agentSelectedFindingIds.includes(finding.id) && !finding.resolution).length ?? 0;
+  const agentRun = report?.agentRun;
   return <div className="panel-body project-analysis-page" data-testid="project-analysis-panel">
     <div className="panel-intro compact">
       <span className="eyebrow">{t('projectAnalysis.eyebrow')}</span>
@@ -4259,7 +4538,7 @@ function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyF
       <div>{readiness.map((item) => <button key={item.id} className={item.ready ? 'ready' : 'missing'} onClick={() => onOpenSection(item.section)}>
         {item.ready ? <Check size={13} /> : <Info size={13} />}<span>{t(`projectAnalysis.dimension.${item.id}`)}</span>
       </button>)}</div>
-      <footer><span><Sparkles size={14} />{t('projectAnalysis.aiBoundary')}</span><button className="button primary" disabled={!canRun || busy} onClick={onRun}>{busy ? <LoaderCircle className="spin" size={15} /> : <ClipboardCheck size={15} />}{busy ? t('projectAnalysis.running') : report ? t('projectAnalysis.runAgain') : t('projectAnalysis.run')}</button></footer>
+      <footer><span><Sparkles size={14} />{t('projectAnalysis.aiBoundary')}</span><button className="button primary" disabled={!canRun || busy || agentBusy} onClick={onRun}>{busy ? <LoaderCircle className="spin" size={15} /> : <ClipboardCheck size={15} />}{busy ? t('projectAnalysis.running') : report ? t('projectAnalysis.runAgain') : t('projectAnalysis.run')}</button></footer>
     </section>
     {!configured && <div className="analysis-inline-warning"><Info size={16} /><span><strong>{t('projectAnalysis.unavailableTitle')}</strong><small>{t('projectAnalysis.unavailableBody')}</small></span></div>}
     {configured && !canRun && <div className="analysis-inline-warning"><Info size={16} /><span><strong>{t('projectAnalysis.incompleteTitle')}</strong><small>{t('projectAnalysis.incompleteBody')}</small></span></div>}
@@ -4277,11 +4556,40 @@ function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyF
         <div><i style={{ width: `${dimension.score}%` }} /></div>
         <p>{dimension.summary}</p>
       </article>)}</div>
+      {(report.findings.length > 0 || agentRun) && <section className={`analysis-agent-card ${agentRun?.status ?? 'idle'}`} data-testid="analysis-agent">
+        <header>
+          <span><i><Bot size={19} /></i><span><small>{t('projectAnalysis.agent.eyebrow')}</small><strong>{t('projectAnalysis.agent.title')}</strong></span></span>
+          <b>{t('projectAnalysis.agent.selected', { count: selectedAgentCount })}</b>
+        </header>
+        <p>{t('projectAnalysis.agent.body')}</p>
+        {agentRun && <div className="analysis-agent-run" data-status={agentRun.status}>
+          <div className="analysis-agent-score">
+            <span><small>{t('projectAnalysis.agent.scoreStart')}</small><strong>{agentRun.initialScore}</strong></span>
+            <ChevronRight size={16} />
+            <span><small>{t('projectAnalysis.agent.scoreNow')}</small><strong>{agentRun.currentScore}</strong></span>
+            <span><small>{t('projectAnalysis.agent.iterations')}</small><strong>{agentRun.iteration}/{agentRun.maxIterations}</strong></span>
+          </div>
+          <div className="analysis-agent-progress"><i style={{ width: `${agentRun.status === 'running' ? Math.max(8, agentRun.iteration / agentRun.maxIterations * 100) : 100}%` }} /></div>
+          <strong className="analysis-agent-status">{agentRun.status === 'running' && <LoaderCircle className="spin" size={14} />}{t(`projectAnalysis.agent.status.${agentRun.status}`)}</strong>
+          {agentRun.stopReason && <small>{t(`projectAnalysis.agent.reason.${agentRun.stopReason}`)}</small>}
+          {agentRun.steps.length > 0 && <ol>{agentRun.steps.map((step) => <li key={`${agentRun.id}-${step.iteration}`}>
+            <b>{step.iteration}</b>
+            <span><strong>{step.proposalSummary}</strong><small>{step.actionTypes.length ? Array.from(new Set(step.actionTypes)).map((type) => t(`projectAnalysis.agent.action.${type}`)).join(' · ') : t('projectAnalysis.agent.noProjectAction')}</small></span>
+            <em className={step.outcome}>{step.scoreAfter === null ? '—' : `${step.scoreBefore}→${step.scoreAfter}`}</em>
+          </li>)}</ol>}
+        </div>}
+        <footer>
+          <span><ShieldCheck size={14} />{t('projectAnalysis.agent.boundary')}</span>
+          {agentBusy
+            ? <button type="button" className="button agent-stop" onClick={onStopAgent}><Square size={12} />{t('projectAnalysis.agent.stop')}</button>
+            : openFindingCount > 0 && <button type="button" className="button primary" data-testid="analysis-agent-start" disabled={!configured || selectedAgentCount === 0 || stale} onClick={onRunAgent}><Bot size={15} />{t('projectAnalysis.agent.start')}</button>}
+        </footer>
+      </section>}
       <section className="review-findings">
         <header><strong>{t('projectAnalysis.findings')}</strong><span><small>{t('projectAnalysis.findingsOpen', { count: openFindingCount })}</small><small>{t('projectAnalysis.findingsHandled', { count: handledFindingCount })}</small></span></header>
         {report.findings.length ? report.findings.map((finding) => {
           const resolution = finding.resolution?.status ?? 'open';
-          const proposalBusy = proposalBusyFindingId === finding.id;
+          const selectedForAgent = agentSelectedFindingIds.includes(finding.id);
           return <article key={finding.id} className={`${finding.severity} ${resolution}`} data-testid={`review-finding-${finding.id}`} data-resolution={resolution}>
           <header><div><span>{t(`projectAnalysis.severity.${finding.severity}`)}</span>{resolution !== 'open' && <b>{t(`projectAnalysis.resolution.${resolution}`)}</b>}</div><small>{t(`projectAnalysis.dimension.${finding.area}`)}</small></header>
           <strong>{finding.title}</strong>
@@ -4289,10 +4597,10 @@ function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyF
           <footer><Check size={13} /><span>{finding.recommendation}</span></footer>
           <div className="review-finding-actions">
             {resolution === 'open' ? <>
-              <button type="button" className="resolve" onClick={() => onFindingResolution(finding.id, 'resolved')}><Check size={13} />{t('projectAnalysis.markResolved')}</button>
-              <button type="button" className="accept" onClick={() => onFindingResolution(finding.id, 'accepted')}><ShieldCheck size={13} />{t('projectAnalysis.markAccepted')}</button>
-            </> : <button type="button" className="reopen" onClick={() => onFindingResolution(finding.id, null)}>{t('projectAnalysis.reopen')}</button>}
-            <button type="button" className="propose" disabled={!configured || proposalBusy} onClick={() => onProposeFinding(finding)}>{proposalBusy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}{proposalBusy ? t('projectAnalysis.proposing') : t('projectAnalysis.proposeSolution')}</button>
+              <button type="button" className="resolve" disabled={agentBusy} onClick={() => onFindingResolution(finding.id, 'resolved')}><Check size={13} />{t('projectAnalysis.markResolved')}</button>
+              <button type="button" className="accept" disabled={agentBusy} onClick={() => onFindingResolution(finding.id, 'accepted')}><ShieldCheck size={13} />{t('projectAnalysis.markAccepted')}</button>
+            </> : <button type="button" className="reopen" disabled={agentBusy} onClick={() => onFindingResolution(finding.id, null)}>{t('projectAnalysis.reopen')}</button>}
+            {resolution === 'open' && <button type="button" className={`agent-select ${selectedForAgent ? 'selected' : ''}`} aria-pressed={selectedForAgent} disabled={!configured || agentBusy} onClick={() => onToggleAgentFinding(finding.id)}><Bot size={13} />{t(selectedForAgent ? 'projectAnalysis.agent.remove' : 'projectAnalysis.agent.solve')}</button>}
           </div>
         </article>;
         }) : <p className="review-empty">{t('projectAnalysis.noFindings')}</p>}
@@ -4572,7 +4880,7 @@ function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, p
   return values;
 }
 
-function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride, additionalEvidence }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[] }) {
+function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride, additionalEvidence, onContinue }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[]; onContinue: () => void }) {
   const { t, locale } = useI18n();
   const [activeEvidenceTab, setActiveEvidenceTab] = useState<'overview' | 'wind' | 'soil' | 'satellite' | 'sources'>('overview');
   const [overrideField, setOverrideField] = useState<SiteProfileOverrideField>(SITE_PROFILE_OVERRIDE_DEFINITIONS[0].field);
@@ -4611,7 +4919,8 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
     ['sources', t('evidence.tab.sources'), evidenceItems.length],
   ] as const;
   return (
-    <div className="panel-body">
+    <div className="panel-body persistent-action-panel">
+      <div className="panel-scroll-content">
       <div className="panel-intro compact"><span className="eyebrow">{t('profile.eyebrow')}</span><h1>{profile.location.municipality ?? profile.location.region ?? profile.location.countryCode ?? t('profile.locationUnknown')}</h1><p>{profile.location.displayName}</p></div>
       <div className="evidence-tabs" role="tablist" aria-label={t('evidence.tabsLabel')} data-testid="evidence-tabs">
         {evidenceTabs.map(([id, label, count]) => <button key={id} id={`evidence-tab-${id}`} role="tab" aria-selected={activeEvidenceTab === id} aria-controls={`evidence-panel-${id}`} className={activeEvidenceTab === id ? 'active' : ''} onClick={() => setActiveEvidenceTab(id)}><span>{label}</span><b>{count}</b></button>)}
@@ -4706,6 +5015,10 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
         })}
       </div>
       </div>}
+      </div>
+      <div className="panel-action-bar">
+        <button className="button primary wide sticky-action" data-testid="evidence-continue" onClick={onContinue}>{t('profile.continueDesign')} <ChevronRight size={18} /></button>
+      </div>
     </div>
   );
 }

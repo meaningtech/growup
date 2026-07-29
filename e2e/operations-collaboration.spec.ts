@@ -8,7 +8,7 @@ import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
 import { projectAnalysisFingerprint } from '../src/lib/projectAnalysis';
 import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
 import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from '../src/lib/layout';
-import type { ProjectState } from '../src/types';
+import type { DesignConfiguration, EconomicConfiguration, IrrigationConfiguration, LayoutVariant, ProjectState, SiteBoundary, SiteProfile } from '../src/types';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { openFieldProfile } from '../test/fixtures/siteProfile';
 
@@ -65,6 +65,49 @@ async function mockBase(page: Page, authenticated = false, assistantConfigured =
     json: { total: DESIGN_SPECIES.length, treeLike: DESIGN_SPECIES.length, globUnt: 0, designReady: DESIGN_SPECIES.length },
   }));
   await page.route('**/api/recommendations', async (route) => route.fulfill({ status: 200, contentType: 'application/json', json: { recommendations: [], palette: [] } }));
+  await page.route('**/api/layout/generate', async (route) => {
+    const input = route.request().postDataJSON() as {
+      site: SiteBoundary;
+      siteProfile: SiteProfile;
+      selectedSpeciesIds: string[];
+      designConfiguration: DesignConfiguration;
+    };
+    const species = DESIGN_SPECIES.filter((item) => input.selectedSpeciesIds.includes(item.id));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: { variants: generateLayoutVariants(input.site, input.siteProfile, species, input.designConfiguration) },
+    });
+  });
+  await page.route('**/api/costs/calculate', async (route) => {
+    const input = route.request().postDataJSON() as {
+      variant: LayoutVariant;
+      site: SiteBoundary;
+      siteProfile: SiteProfile;
+      selectedSpeciesIds: string[];
+      designYear: number;
+      irrigationConfiguration: IrrigationConfiguration;
+      economicConfiguration: EconomicConfiguration;
+    };
+    const species = DESIGN_SPECIES.filter((item) => input.selectedSpeciesIds.includes(item.id));
+    const irrigation = calculateIrrigation(
+      input.variant,
+      species,
+      input.site,
+      input.siteProfile,
+      input.designYear,
+      input.irrigationConfiguration,
+      input.economicConfiguration,
+    );
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: {
+        irrigation,
+        establishment: calculateEstablishmentCost(input.variant, species, irrigation, input.economicConfiguration),
+      },
+    });
+  });
   await page.route('**/api/site/validate', async (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -341,37 +384,40 @@ test('runs and persists the final formal AI review', async ({ page }) => {
     ),
   };
   await mockBase(page, false, true);
+  let reviewCalls = 0;
   await page.route('**/api/assistant/review', async (route) => {
+    reviewCalls += 1;
     const request = route.request().postDataJSON() as { context: Parameters<typeof projectAnalysisFingerprint>[0] };
+    const remediated = reviewCalls > 1;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       json: {
-        id: 'formal-review-browser',
+        id: remediated ? 'formal-review-agent-browser' : 'formal-review-browser',
         model: 'review-test-model',
         generatedAt: observedAt,
         contextFingerprint: projectAnalysisFingerprint(request.context),
-        verdict: 'revise',
-        overallScore: 72,
-        executiveSummary: 'The plan is coherent but needs a documented local fire review.',
+        verdict: remediated ? 'ready' : 'revise',
+        overallScore: remediated ? 84 : 72,
+        executiveSummary: remediated ? 'The selected project inconsistency is resolved.' : 'The plan is coherent but needs a documented local fire review.',
         dimensions: [
           ['evidence', 82, 'pass'],
           ['species', 80, 'pass'],
           ['design', 78, 'pass'],
           ['water', 74, 'attention'],
-          ['fire', 62, 'attention'],
+          ['fire', remediated ? 84 : 62, remediated ? 'pass' : 'attention'],
           ['operations', 66, 'attention'],
           ['economics', 70, 'attention'],
           ['coherence', 81, 'pass'],
         ].map(([id, score, status]) => ({ id, score, status, summary: `${id} review summary.` })),
-        findings: [{
-          id: 'fire-local-review',
+        findings: remediated ? [] : [{
+          id: 'mechanical-clearance',
           severity: 'major',
-          area: 'fire',
-          title: 'Local fire review remains open',
-          explanation: 'The mapped firebreak is a planning output, not field implementation evidence.',
-          evidence: ['selectedVariant.firebreak.localReviewRequired'],
-          recommendation: 'Confirm local authority requirements and field fuel continuity.',
+          area: 'design',
+          title: 'Machinery clearance remains insufficient',
+          explanation: 'The configured crop alley does not provide the requested machinery envelope.',
+          evidence: ['designConfiguration.cropAlleyWidthM', 'selectedVariant.machinery.clearanceSatisfied'],
+          recommendation: 'Increase crop alley spacing and regenerate dependent layouts.',
         }],
         assumptions: ['The irrigation source remains available during the dry season.'],
         limitations: ['This AI review is not a legal or wildfire-safety certification.'],
@@ -384,10 +430,10 @@ test('runs and persists the final formal AI review', async ({ page }) => {
     json: {
       id: 'finding-solution-browser',
       model: 'review-test-model',
-      summary: 'Move the project review to year 6.',
-      rationale: 'This is an executable project change and the formal review will become stale until it is rerun.',
+      summary: 'Increase crop alley spacing to 16 metres.',
+      rationale: 'This is an executable geometry change and dependent outputs will be regenerated.',
       warnings: ['Field verification remains open.'],
-      actions: [{ type: 'set_timeline_year', year: 6 }],
+      actions: [{ type: 'set_design_spacing', cropAlleyWidthM: 16 }],
       requiresConfirmation: true,
     },
   }));
@@ -401,12 +447,12 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   const report = page.getByTestId('formal-review-report');
   await expect(report).toContainText('Revision required');
   await expect(report).toContainText('72');
-  await expect(report).toContainText('Local fire review remains open');
-  await expect(report).not.toContainText('selectedVariant.firebreak.localReviewRequired');
+  await expect(report).toContainText('Machinery clearance remains insufficient');
+  await expect(report).not.toContainText('selectedVariant.machinery.clearanceSatisfied');
   await expect(report.locator('code')).toHaveCount(0);
   await expect(report).toContainText('1 open');
   await expect(report).toContainText('0 handled');
-  const finding = page.getByTestId('review-finding-fire-local-review');
+  const finding = page.getByTestId('review-finding-mechanical-clearance');
   await finding.getByRole('button', { name: 'Mark resolved' }).click();
   await expect(finding).toHaveAttribute('data-resolution', 'resolved');
   await expect(report).toContainText('0 open');
@@ -419,16 +465,111 @@ test('runs and persists the final formal AI review', async ({ page }) => {
     return saved?.analysis?.findings[0].resolution?.status;
   }).toBe('accepted');
   await page.screenshot({ path: '/private/tmp/growup-analysis-resolution-mobile.png', fullPage: false });
-  await finding.getByRole('button', { name: 'Propose AI solution' }).click();
-  const proposal = page.getByTestId('assistant-proposal');
-  await expect(proposal).toContainText('Move the project review to year 6.');
-  await proposal.getByRole('button', { name: 'Apply validated changes' }).click();
-  await expect(page.getByLabel('Succession year')).toHaveValue('6');
+  await finding.getByRole('button', { name: 'Reopen' }).click();
+  await finding.getByRole('button', { name: 'Solve', exact: true }).click();
+  const agent = page.getByTestId('analysis-agent');
+  await expect(agent).toContainText('1 selected');
+  await agent.getByRole('button', { name: 'Start Agent' }).click();
+  await expect(agent).toContainText('Selected findings resolved');
+  await expect(agent).toContainText('72');
+  await expect(agent).toContainText('84');
+  await expect(page.getByTestId('assistant-proposal')).toHaveCount(0);
   await page.screenshot({ path: '/private/tmp/growup-formal-analysis-desktop.png', fullPage: false });
   await expect.poll(async () => {
     const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
-    return saved?.analysis?.id;
-  }).toBe('formal-review-browser');
+    return `${saved?.analysis?.id}:${saved?.analysis?.agentRun?.status}:${saved?.designConfiguration.cropAlleyWidthM}:${saved?.variants[0]?.design.cropAlleyWidthM}`;
+  }).toBe('formal-review-agent-browser:resolved:16:16');
+});
+
+test('stops Agent mode without falsely resolving a field-only finding', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const projectBase = projectFixture();
+  const project = {
+    ...projectBase,
+    costs: calculateEstablishmentCost(
+      projectBase.variants[0],
+      DESIGN_SPECIES.filter((species) => projectBase.selectedSpeciesIds.includes(species.id)),
+      projectBase.irrigation!,
+      projectBase.economicConfiguration,
+    ),
+  };
+  await mockBase(page, false, true);
+  await page.route('**/api/assistant/review', async (route) => {
+    const request = route.request().postDataJSON() as { context: Parameters<typeof projectAnalysisFingerprint>[0] };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: {
+        id: 'formal-review-field-blocker',
+        model: 'review-test-model',
+        generatedAt: observedAt,
+        contextFingerprint: projectAnalysisFingerprint(request.context),
+        verdict: 'revise',
+        overallScore: 70,
+        executiveSummary: 'A field authority review remains necessary.',
+        dimensions: ['evidence', 'species', 'design', 'water', 'fire', 'operations', 'economics', 'coherence']
+          .map((id) => ({ id, score: 70, status: 'attention', summary: `${id} summary.` })),
+        findings: [{
+          id: 'authority-field-check',
+          severity: 'major',
+          area: 'fire',
+          title: 'Authority field check required',
+          explanation: 'No field record or authority decision is present.',
+          evidence: ['fireOperations.tasks.authority-review'],
+          recommendation: 'Complete and document the local authority review.',
+        }],
+        assumptions: [],
+        limitations: ['Software cannot complete an authority review.'],
+      },
+    });
+  });
+  await page.route('**/api/assistant/plan', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      id: 'field-blocked-agent-step',
+      model: 'review-test-model',
+      summary: 'This finding requires a documented external review.',
+      rationale: 'No software edit can establish the missing authority decision.',
+      warnings: ['Keep the finding open until evidence is recorded.'],
+      actions: [],
+      requiresConfirmation: false,
+    },
+  }));
+  await loadRecoveryDraft(page, project);
+  await page.locator('.toast button').click();
+  await page.getByTestId('step-analysis').click();
+  await page.getByRole('button', { name: 'Run formal review' }).click();
+  const finding = page.getByTestId('review-finding-authority-field-check');
+  await finding.getByRole('button', { name: 'Solve', exact: true }).click();
+  await page.getByTestId('analysis-agent-start').click();
+  const agent = page.getByTestId('analysis-agent');
+  await expect(agent).toContainText('Agent stopped at a blocker');
+  await expect(agent).toContainText('No safe software action');
+  await expect(finding).toHaveAttribute('data-resolution', 'open');
+  await expect(page.getByTestId('formal-review-report')).toContainText('1 open');
+});
+
+test('keeps the evidence and fire pages connected to the next project step', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const project = projectFixture();
+  await mockBase(page);
+  await loadRecoveryDraft(page, project);
+  await page.locator('.toast button').click();
+
+  await page.getByTestId('step-profile').click();
+  const evidenceContinue = page.getByTestId('evidence-continue');
+  await expect(evidenceContinue).toBeVisible();
+  await expect(evidenceContinue).toContainText('Continue to planning');
+  await evidenceContinue.click();
+  await expect(page.getByTestId('step-species')).toHaveClass(/active/);
+
+  await page.getByTestId('step-fire').click();
+  const fireContinue = page.getByTestId('fire-continue-costs');
+  await expect(fireContinue).toBeVisible();
+  await expect(fireContinue).toContainText('Continue to costs');
+  await fireContinue.click();
+  await expect(page.getByTestId('step-costs')).toHaveClass(/active/);
 });
 
 test('keeps the populated water page locked to the mobile viewport', async ({ page }, testInfo) => {

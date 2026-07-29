@@ -208,10 +208,18 @@ Never invent species IDs, project values, field observations or costs. Use only 
 Explain uncertainty briefly. Proposed changes are not executed automatically and must be confirmed.
 Never claim that a field check, permit, missing evidence or physical operation is resolved by a software action.
 If adding or removing species when a layout exists, also propose regenerate_layout and recalculate_water_and_costs.
+If changing species mix, design spacing, machinery or firebreak parameters, also propose regenerate_layout and recalculate_water_and_costs.
+If changing irrigation parameters, also propose recalculate_water_and_costs.
+Do not invent field measurements, supplier prices, inspection dates or regulatory approvals to make a finding disappear.
 Do not propose blocked or invasive species. Respect the minimum palette size for the selected design system.
 Allowed action JSON shapes:
 {"type":"add_species","speciesIds":["id"]}
 {"type":"remove_species","speciesIds":["id"]}
+{"type":"set_species_mix","entries":[{"speciesId":"id","targetPercent":25,"successionOverride":"placenta|secondary|climax|null"}]}
+{"type":"set_design_spacing","cropAlleyWidthM":14,"perimeterBandM":8,"analysisYear":10,"customBearingDegrees":0}
+{"type":"set_machinery_parameters","enabled":true,"presetId":"bcs-740","widthM":0.79,"lengthM":2,"turningRadiusM":1.2,"implementWidthM":0.8,"safetyClearanceM":0.35}
+{"type":"set_firebreak_parameters","enabled":true,"fuelModel":"crop-residue","treatment":"mown","expectedFlameLengthM":2,"widthM":5,"supportVehicleAccess":true}
+{"type":"set_irrigation_parameters","availableFlowM3Hour":5,"inletPressureBar":2.5,"emitterFlowLHour":4,"emittersPerPlant":2,"distributionEfficiencyPercent":90,"maxZoneRuntimeHours":8}
 {"type":"select_variant","variantId":"id"}
 {"type":"set_timeline_year","year":0}
 {"type":"regenerate_layout"}
@@ -556,6 +564,75 @@ function validateAction(value: unknown, context: AssistantProjectContext): Assis
     if (!speciesIds.length) throw new Error(`Assistant proposed ${raw.type} without valid species.`);
     return { type: raw.type, speciesIds };
   }
+  if (raw.type === 'set_species_mix') {
+    const successionPhases = ['placenta', 'secondary', 'climax'] as const;
+    const requested = Array.isArray(raw.entries) ? raw.entries : [];
+    const entries = requested.map((entry) => {
+      if (!entry || typeof entry !== 'object') throw new Error('Assistant proposed an invalid species mix entry.');
+      const candidate = entry as Record<string, unknown>;
+      const speciesId = resolveSpeciesId(String(candidate.speciesId ?? ''));
+      if (!speciesId || !context.selectedSpeciesIds.includes(speciesId)) throw new Error('Assistant species mix must use currently selected species.');
+      const targetPercent = boundedActionNumber(candidate.targetPercent, 0, 100, 'Species target percentage');
+      const successionOverride = candidate.successionOverride === null || candidate.successionOverride === undefined
+        ? null
+        : successionPhases.includes(candidate.successionOverride as typeof successionPhases[number])
+          ? candidate.successionOverride as typeof successionPhases[number]
+          : null;
+      return { speciesId, targetPercent, successionOverride };
+    });
+    const ids = new Set(entries.map((entry) => entry.speciesId));
+    const total = entries.reduce((sum, entry) => sum + entry.targetPercent, 0);
+    if (entries.length !== context.selectedSpeciesIds.length || ids.size !== context.selectedSpeciesIds.length || Math.abs(total - 100) > 0.1) {
+      throw new Error('Assistant species mix must include every selected species exactly once and total 100%.');
+    }
+    return { type: 'set_species_mix', entries };
+  }
+  if (raw.type === 'set_design_spacing') {
+    const action: Extract<AssistantAction, { type: 'set_design_spacing' }> = { type: 'set_design_spacing' };
+    if (raw.cropAlleyWidthM !== undefined) action.cropAlleyWidthM = boundedActionNumber(raw.cropAlleyWidthM, 6, 40, 'Crop alley width');
+    if (raw.perimeterBandM !== undefined) action.perimeterBandM = boundedActionNumber(raw.perimeterBandM, 3, 30, 'Perimeter band');
+    if (raw.analysisYear !== undefined) action.analysisYear = boundedActionNumber(raw.analysisYear, 1, 30, 'Analysis year', true);
+    if (raw.customBearingDegrees !== undefined) action.customBearingDegrees = boundedActionNumber(raw.customBearingDegrees, 0, 359.999, 'Custom bearing');
+    if (Object.keys(action).length === 1) throw new Error('Assistant proposed design spacing without parameters.');
+    return action;
+  }
+  if (raw.type === 'set_machinery_parameters') {
+    const action: Extract<AssistantAction, { type: 'set_machinery_parameters' }> = { type: 'set_machinery_parameters' };
+    const presetIds = ['bcs-740', 'john-deere-1025r', 'john-deere-3033r', 'new-holland-t4f'] as const;
+    if (typeof raw.enabled === 'boolean') action.enabled = raw.enabled;
+    if (presetIds.includes(raw.presetId as typeof presetIds[number])) action.presetId = raw.presetId as typeof presetIds[number];
+    if (raw.widthM !== undefined) action.widthM = boundedActionNumber(raw.widthM, 0.35, 4, 'Machine width');
+    if (raw.lengthM !== undefined) action.lengthM = boundedActionNumber(raw.lengthM, 0.8, 8, 'Machine length');
+    if (raw.turningRadiusM !== undefined) action.turningRadiusM = boundedActionNumber(raw.turningRadiusM, 0.4, 12, 'Machine turning radius');
+    if (raw.implementWidthM !== undefined) action.implementWidthM = boundedActionNumber(raw.implementWidthM, 0.35, 8, 'Implement width');
+    if (raw.safetyClearanceM !== undefined) action.safetyClearanceM = boundedActionNumber(raw.safetyClearanceM, 0.1, 3, 'Machine safety clearance');
+    if (Object.keys(action).length === 1) throw new Error('Assistant proposed machinery parameters without values.');
+    return action;
+  }
+  if (raw.type === 'set_firebreak_parameters') {
+    const action: Extract<AssistantAction, { type: 'set_firebreak_parameters' }> = { type: 'set_firebreak_parameters' };
+    const fuelModels = ['managed-herbaceous', 'crop-residue', 'shrub-edge', 'woodland-edge', 'custom'] as const;
+    const treatments = ['mown', 'bare-ground', 'low-fuel-vegetation'] as const;
+    if (typeof raw.enabled === 'boolean') action.enabled = raw.enabled;
+    if (fuelModels.includes(raw.fuelModel as typeof fuelModels[number])) action.fuelModel = raw.fuelModel as typeof fuelModels[number];
+    if (treatments.includes(raw.treatment as typeof treatments[number])) action.treatment = raw.treatment as typeof treatments[number];
+    if (typeof raw.supportVehicleAccess === 'boolean') action.supportVehicleAccess = raw.supportVehicleAccess;
+    if (raw.expectedFlameLengthM !== undefined) action.expectedFlameLengthM = boundedActionNumber(raw.expectedFlameLengthM, 0.2, 20, 'Expected flame length');
+    if (raw.widthM !== undefined) action.widthM = boundedActionNumber(raw.widthM, 1, 60, 'Firebreak width');
+    if (Object.keys(action).length === 1) throw new Error('Assistant proposed firebreak parameters without values.');
+    return action;
+  }
+  if (raw.type === 'set_irrigation_parameters') {
+    const action: Extract<AssistantAction, { type: 'set_irrigation_parameters' }> = { type: 'set_irrigation_parameters' };
+    if (raw.availableFlowM3Hour !== undefined) action.availableFlowM3Hour = boundedActionNumber(raw.availableFlowM3Hour, 0.1, 500, 'Available flow');
+    if (raw.inletPressureBar !== undefined) action.inletPressureBar = boundedActionNumber(raw.inletPressureBar, 0, 20, 'Inlet pressure');
+    if (raw.emitterFlowLHour !== undefined) action.emitterFlowLHour = boundedActionNumber(raw.emitterFlowLHour, 0.5, 32, 'Emitter flow');
+    if (raw.emittersPerPlant !== undefined) action.emittersPerPlant = boundedActionNumber(raw.emittersPerPlant, 1, 12, 'Emitters per plant', true);
+    if (raw.distributionEfficiencyPercent !== undefined) action.distributionEfficiencyPercent = boundedActionNumber(raw.distributionEfficiencyPercent, 50, 98, 'Distribution efficiency');
+    if (raw.maxZoneRuntimeHours !== undefined) action.maxZoneRuntimeHours = boundedActionNumber(raw.maxZoneRuntimeHours, 1, 24, 'Maximum zone runtime');
+    if (Object.keys(action).length === 1) throw new Error('Assistant proposed irrigation parameters without values.');
+    return action;
+  }
   if (raw.type === 'select_variant') {
     const variantId = String(raw.variantId ?? '');
     if (!context.variants.some((variant) => variant.id === variantId)) throw new Error(`Unknown layout variant ${variantId}.`);
@@ -573,6 +650,12 @@ function validateAction(value: unknown, context: AssistantProjectContext): Assis
     return { type: 'navigate', section: section as AssistantProjectContext['section'] };
   }
   throw new Error(`Unsupported assistant action ${raw.type}.`);
+}
+
+function boundedActionNumber(value: unknown, minimum: number, maximum: number, label: string, integer = false) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) throw new Error(`${label} must be between ${minimum} and ${maximum}.`);
+  return integer ? Math.round(number) : number;
 }
 
 function resolveSpeciesId(value: string) {

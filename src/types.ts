@@ -1091,6 +1091,11 @@ export type AssistantProjectContext = {
 export type AssistantAction =
   | { type: 'add_species'; speciesIds: string[] }
   | { type: 'remove_species'; speciesIds: string[] }
+  | { type: 'set_species_mix'; entries: Array<{ speciesId: string; targetPercent: number; successionOverride: SuccessionPhase | null }> }
+  | { type: 'set_design_spacing'; cropAlleyWidthM?: number; perimeterBandM?: number; analysisYear?: number; customBearingDegrees?: number }
+  | { type: 'set_machinery_parameters'; enabled?: boolean; presetId?: AgriculturalMachinePresetId; widthM?: number; lengthM?: number; turningRadiusM?: number; implementWidthM?: number; safetyClearanceM?: number }
+  | { type: 'set_firebreak_parameters'; enabled?: boolean; fuelModel?: FirebreakFuelModel; treatment?: FirebreakTreatment; expectedFlameLengthM?: number; widthM?: number; supportVehicleAccess?: boolean }
+  | { type: 'set_irrigation_parameters'; availableFlowM3Hour?: number; inletPressureBar?: number; emitterFlowLHour?: number; emittersPerPlant?: number; distributionEfficiencyPercent?: number; maxZoneRuntimeHours?: number }
   | { type: 'select_variant'; variantId: string }
   | { type: 'set_timeline_year'; year: number }
   | { type: 'regenerate_layout' }
@@ -1111,6 +1116,33 @@ export type ProjectAnalysisDimensionId = 'evidence' | 'species' | 'design' | 'wa
 export type ProjectAnalysisVerdict = 'ready' | 'revise' | 'incomplete';
 export type ProjectAnalysisSeverity = 'blocking' | 'major' | 'minor' | 'info';
 export type ProjectAnalysisFindingResolutionStatus = 'resolved' | 'accepted';
+export type ProjectAnalysisAgentStatus = 'running' | 'resolved' | 'improved' | 'blocked' | 'stopped' | 'failed';
+export type ProjectAnalysisAgentStopReason = 'selected-resolved' | 'max-iterations' | 'no-actions' | 'repeated-actions' | 'score-plateau' | 'user-stopped' | 'error';
+
+export type ProjectAnalysisAgentStep = {
+  iteration: number;
+  generatedAt: string;
+  scoreBefore: number;
+  scoreAfter: number | null;
+  proposalSummary: string;
+  actionTypes: AssistantAction['type'][];
+  outcome: 'improved' | 'unchanged' | 'regressed' | 'blocked';
+};
+
+export type ProjectAnalysisAgentRun = {
+  id: string;
+  status: ProjectAnalysisAgentStatus;
+  stopReason: ProjectAnalysisAgentStopReason | null;
+  selectedFindingIds: string[];
+  selectedFindingTitles: string[];
+  startedAt: string;
+  completedAt: string | null;
+  initialScore: number;
+  currentScore: number;
+  iteration: number;
+  maxIterations: number;
+  steps: ProjectAnalysisAgentStep[];
+};
 
 export type ProjectAnalysisDimension = {
   id: ProjectAnalysisDimensionId;
@@ -1145,4 +1177,5 @@ export type ProjectAnalysisReport = {
   findings: ProjectAnalysisFinding[];
   assumptions: string[];
   limitations: string[];
+  agentRun?: ProjectAnalysisAgentRun;
 };
