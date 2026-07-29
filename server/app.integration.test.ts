@@ -895,6 +895,7 @@ describe('Growup API integration', () => {
         expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer server-only-test-key');
         const body = JSON.parse(String(init?.body));
         expect(body.response_format).toEqual({ type: 'json_object' });
+        expect(body.messages[0].content).toContain('Never claim that a field check');
         expect(body.messages[1].content).toContain('Olea europaea');
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({

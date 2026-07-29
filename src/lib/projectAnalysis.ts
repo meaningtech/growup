@@ -1,4 +1,8 @@
-import type { AssistantProjectContext } from '../types';
+import type {
+  AssistantProjectContext,
+  ProjectAnalysisFindingResolutionStatus,
+  ProjectAnalysisReport,
+} from '../types';
 
 export function projectAnalysisFingerprint(context: AssistantProjectContext) {
   const payload = JSON.stringify({
@@ -22,4 +26,23 @@ export function projectAnalysisFingerprint(context: AssistantProjectContext) {
     hash = Math.imul(hash, 16_777_619);
   }
   return `review-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export function setProjectAnalysisFindingResolution(
+  report: ProjectAnalysisReport,
+  findingId: string,
+  status: ProjectAnalysisFindingResolutionStatus | null,
+  updatedAt = new Date().toISOString(),
+): ProjectAnalysisReport {
+  return {
+    ...report,
+    findings: report.findings.map((finding) => {
+      if (finding.id !== findingId) return finding;
+      if (status === null) {
+        const { resolution: _resolution, ...openFinding } = finding;
+        return openFinding;
+      }
+      return { ...finding, resolution: { status, updatedAt } };
+    }),
+  };
 }

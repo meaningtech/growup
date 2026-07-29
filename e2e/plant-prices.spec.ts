@@ -17,6 +17,11 @@ test('edits a species unit price and applies it to project costs', async ({ page
   await expect(page.getByTestId('cost-tabs').getByRole('tab')).toHaveCount(4);
   await expect(page.getByTestId('costs-tab-summary')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Establishment total')).toBeVisible();
+  await expect(page.getByText('Operating cost · year 5')).toBeVisible();
+  await expect(page.getByTestId('operating-year-total')).toContainText('water, energy and maintenance; initial CAPEX excluded');
+  expect(await page.getByTestId('operating-year-total').locator('strong').textContent()).not.toBe(
+    await page.getByTestId('establishment-total').locator('strong').textContent(),
+  );
   await page.getByTestId('costs-tab-parameters').click();
 
   const prices = page.getByTestId('plant-unit-price-overrides');

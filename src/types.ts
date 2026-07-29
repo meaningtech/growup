@@ -1110,6 +1110,7 @@ export type AssistantProposal = {
 export type ProjectAnalysisDimensionId = 'evidence' | 'species' | 'design' | 'water' | 'fire' | 'operations' | 'economics' | 'coherence';
 export type ProjectAnalysisVerdict = 'ready' | 'revise' | 'incomplete';
 export type ProjectAnalysisSeverity = 'blocking' | 'major' | 'minor' | 'info';
+export type ProjectAnalysisFindingResolutionStatus = 'resolved' | 'accepted';
 
 export type ProjectAnalysisDimension = {
   id: ProjectAnalysisDimensionId;
@@ -1126,6 +1127,10 @@ export type ProjectAnalysisFinding = {
   explanation: string;
   evidence: string[];
   recommendation: string;
+  resolution?: {
+    status: ProjectAnalysisFindingResolutionStatus;
+    updatedAt: string;
+  };
 };
 
 export type ProjectAnalysisReport = {

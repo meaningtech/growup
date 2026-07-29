@@ -3,6 +3,7 @@ import { DESIGN_SPECIES } from '../src/data/designSpecies';
 import { defaultEconomicConfiguration } from '../src/data/economicProfiles';
 import { firebreakConfigurationFromFuelModel } from '../src/data/firebreak';
 import { defaultProjectCollaboration } from '../src/lib/collaboration';
+import { calculateEstablishmentCost } from '../src/lib/costs';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
 import { projectAnalysisFingerprint } from '../src/lib/projectAnalysis';
 import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
@@ -329,7 +330,16 @@ test('opens fire analysis first and keeps operations secondary on mobile', async
 
 test('runs and persists the final formal AI review', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const project = projectFixture();
+  const projectBase = projectFixture();
+  const project = {
+    ...projectBase,
+    costs: calculateEstablishmentCost(
+      projectBase.variants[0],
+      DESIGN_SPECIES.filter((species) => projectBase.selectedSpeciesIds.includes(species.id)),
+      projectBase.irrigation!,
+      projectBase.economicConfiguration,
+    ),
+  };
   await mockBase(page, false, true);
   await page.route('**/api/assistant/review', async (route) => {
     const request = route.request().postDataJSON() as { context: Parameters<typeof projectAnalysisFingerprint>[0] };
@@ -368,11 +378,25 @@ test('runs and persists the final formal AI review', async ({ page }) => {
       },
     });
   });
+  await page.route('**/api/assistant/plan', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      id: 'finding-solution-browser',
+      model: 'review-test-model',
+      summary: 'Move the project review to year 6.',
+      rationale: 'This is an executable project change and the formal review will become stale until it is rerun.',
+      warnings: ['Field verification remains open.'],
+      actions: [{ type: 'set_timeline_year', year: 6 }],
+      requiresConfirmation: true,
+    },
+  }));
   await loadRecoveryDraft(page, project);
   await page.locator('.toast button').click();
   await page.getByTestId('step-analysis').click();
   const analysis = page.getByTestId('project-analysis-panel');
   await expect(analysis).toBeVisible();
+  await expect(analysis.locator('.analysis-protocol > header > b')).toHaveText('8/8');
   await analysis.getByRole('button', { name: 'Run formal review' }).click();
   const report = page.getByTestId('formal-review-report');
   await expect(report).toContainText('Revision required');
@@ -380,6 +404,26 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   await expect(report).toContainText('Local fire review remains open');
   await expect(report).not.toContainText('selectedVariant.firebreak.localReviewRequired');
   await expect(report.locator('code')).toHaveCount(0);
+  await expect(report).toContainText('1 open');
+  await expect(report).toContainText('0 handled');
+  const finding = page.getByTestId('review-finding-fire-local-review');
+  await finding.getByRole('button', { name: 'Mark resolved' }).click();
+  await expect(finding).toHaveAttribute('data-resolution', 'resolved');
+  await expect(report).toContainText('0 open');
+  await expect(report).toContainText('1 handled');
+  await finding.getByRole('button', { name: 'Reopen' }).click();
+  await finding.getByRole('button', { name: 'Accept risk' }).click();
+  await expect(finding).toHaveAttribute('data-resolution', 'accepted');
+  await expect.poll(async () => {
+    const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
+    return saved?.analysis?.findings[0].resolution?.status;
+  }).toBe('accepted');
+  await page.screenshot({ path: '/private/tmp/growup-analysis-resolution-mobile.png', fullPage: false });
+  await finding.getByRole('button', { name: 'Propose AI solution' }).click();
+  const proposal = page.getByTestId('assistant-proposal');
+  await expect(proposal).toContainText('Move the project review to year 6.');
+  await proposal.getByRole('button', { name: 'Apply validated changes' }).click();
+  await expect(page.getByLabel('Succession year')).toHaveValue('6');
   await page.screenshot({ path: '/private/tmp/growup-formal-analysis-desktop.png', fullPage: false });
   await expect.poll(async () => {
     const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);

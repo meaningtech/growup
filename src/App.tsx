@@ -73,7 +73,7 @@ import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from '
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
-import { projectAnalysisFingerprint } from './lib/projectAnalysis';
+import { projectAnalysisFingerprint, setProjectAnalysisFindingResolution } from './lib/projectAnalysis';
 import {
   distanceToSiteBoundaryM,
   distanceToSitePathM,
@@ -114,6 +114,8 @@ import type {
   LocationSearchResult,
   ProjectState,
   SharedProjectState,
+  ProjectAnalysisFinding,
+  ProjectAnalysisFindingResolutionStatus,
   ProjectAnalysisReport,
   ProjectCollaboration,
   FireOperationsPlan,
@@ -992,6 +994,7 @@ function WorkspaceApp() {
   const [projectAnalysis, setProjectAnalysis] = useState<ProjectAnalysisReport | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisProposalFindingId, setAnalysisProposalFindingId] = useState<string | null>(null);
   const [collaboration, setCollaboration] = useState<ProjectCollaboration>(() => defaultProjectCollaboration());
   const [section, setSection] = useState<WorkspaceSection>('site');
   const [drawMode, setDrawMode] = useState<DrawMode>('idle');
@@ -2407,6 +2410,24 @@ function WorkspaceApp() {
     }
   }
 
+  function updateAnalysisFindingResolution(findingId: string, status: ProjectAnalysisFindingResolutionStatus | null) {
+    setProjectAnalysis((report) => report ? setProjectAnalysisFindingResolution(report, findingId, status) : report);
+    setNotice(t(status === null ? 'notices.analysisFindingReopened' : status === 'resolved' ? 'notices.analysisFindingResolved' : 'notices.analysisFindingAccepted'));
+  }
+
+  async function proposeAnalysisFindingSolution(finding: ProjectAnalysisFinding) {
+    const prompt = locale === 'it'
+      ? `Aiutami a risolvere l’esito "${finding.title}": ${finding.recommendation} Proponi le modifiche applicabili nel progetto; per sopralluoghi, autorizzazioni o dati mancanti indicami cosa resta da fare senza considerarli risolti.`
+      : `Help me resolve the finding "${finding.title}": ${finding.recommendation} Propose the changes that can be applied to this project; identify field checks, permits or missing evidence separately without treating them as resolved.`;
+    setAnalysisProposalFindingId(finding.id);
+    setAssistantOpen(true);
+    try {
+      await askAssistant(prompt);
+    } finally {
+      setAnalysisProposalFindingId(null);
+    }
+  }
+
   async function applyAssistantProposal() {
     if (!assistantProposal) return;
     const proposalId = assistantProposal.id;
@@ -3436,9 +3457,12 @@ function WorkspaceApp() {
             context={currentAssistantContext()}
             report={projectAnalysis}
             busy={analysisBusy}
+            proposalBusyFindingId={analysisProposalFindingId}
             error={analysisError}
             onRun={runProjectAnalysis}
             onOpenSection={setSection}
+            onFindingResolution={updateAnalysisFindingResolution}
+            onProposeFinding={proposeAnalysisFindingSolution}
           />}
         </section>
       </main>
@@ -4193,28 +4217,36 @@ function EffisSourceCard({ plan, onPlan, onShowLayer }: {
   </div>;
 }
 
-function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun, onOpenSection }: {
+function ProjectAnalysisPanel({ configured, context, report, busy, proposalBusyFindingId, error, onRun, onOpenSection, onFindingResolution, onProposeFinding }: {
   configured: boolean;
   context: AssistantProjectContext;
   report: ProjectAnalysisReport | null;
   busy: boolean;
+  proposalBusyFindingId: string | null;
   error: string | null;
   onRun: () => void;
   onOpenSection: (section: WorkspaceSection) => void;
+  onFindingResolution: (findingId: string, status: ProjectAnalysisFindingResolutionStatus | null) => void;
+  onProposeFinding: (finding: ProjectAnalysisFinding) => void;
 }) {
   const { t, locale } = useI18n();
   const currentFingerprint = projectAnalysisFingerprint(context);
   const stale = Boolean(report && report.contextFingerprint !== currentFingerprint);
+  const selectedVariantReady = Boolean(context.selectedVariantId && context.variants.some((variant) => variant.id === context.selectedVariantId));
   const readiness = [
     { id: 'evidence', ready: Boolean(context.siteProfile), section: 'profile' as const },
     { id: 'species', ready: context.selectedSpeciesIds.length > 0, section: 'species' as const },
-    { id: 'design', ready: Boolean(context.selectedVariantId && context.variants.length), section: 'layout' as const },
+    { id: 'design', ready: selectedVariantReady, section: 'layout' as const },
     { id: 'water', ready: Boolean(context.irrigation), section: 'water' as const },
     { id: 'fire', ready: Boolean(context.variants.find((variant) => variant.id === context.selectedVariantId)?.firebreak), section: 'fire' as const },
+    { id: 'operations', ready: Boolean(selectedVariantReady && context.fireOperations.tasks.length), section: 'fire' as const },
     { id: 'economics', ready: Boolean(context.costs), section: 'costs' as const },
+    { id: 'coherence', ready: Boolean(context.siteProfile && selectedVariantReady), section: 'analysis' as const },
   ];
   const readyCount = readiness.filter((item) => item.ready).length;
   const canRun = configured && readiness.slice(0, 3).every((item) => item.ready);
+  const handledFindingCount = report?.findings.filter((finding) => finding.resolution).length ?? 0;
+  const openFindingCount = (report?.findings.length ?? 0) - handledFindingCount;
   return <div className="panel-body project-analysis-page" data-testid="project-analysis-panel">
     <div className="panel-intro compact">
       <span className="eyebrow">{t('projectAnalysis.eyebrow')}</span>
@@ -4246,13 +4278,24 @@ function ProjectAnalysisPanel({ configured, context, report, busy, error, onRun,
         <p>{dimension.summary}</p>
       </article>)}</div>
       <section className="review-findings">
-        <header><strong>{t('projectAnalysis.findings')}</strong><small>{report.findings.length}</small></header>
-        {report.findings.length ? report.findings.map((finding) => <article key={finding.id} className={finding.severity}>
-          <header><span>{t(`projectAnalysis.severity.${finding.severity}`)}</span><small>{t(`projectAnalysis.dimension.${finding.area}`)}</small></header>
+        <header><strong>{t('projectAnalysis.findings')}</strong><span><small>{t('projectAnalysis.findingsOpen', { count: openFindingCount })}</small><small>{t('projectAnalysis.findingsHandled', { count: handledFindingCount })}</small></span></header>
+        {report.findings.length ? report.findings.map((finding) => {
+          const resolution = finding.resolution?.status ?? 'open';
+          const proposalBusy = proposalBusyFindingId === finding.id;
+          return <article key={finding.id} className={`${finding.severity} ${resolution}`} data-testid={`review-finding-${finding.id}`} data-resolution={resolution}>
+          <header><div><span>{t(`projectAnalysis.severity.${finding.severity}`)}</span>{resolution !== 'open' && <b>{t(`projectAnalysis.resolution.${resolution}`)}</b>}</div><small>{t(`projectAnalysis.dimension.${finding.area}`)}</small></header>
           <strong>{finding.title}</strong>
           <p>{finding.explanation}</p>
           <footer><Check size={13} /><span>{finding.recommendation}</span></footer>
-        </article>) : <p className="review-empty">{t('projectAnalysis.noFindings')}</p>}
+          <div className="review-finding-actions">
+            {resolution === 'open' ? <>
+              <button type="button" className="resolve" onClick={() => onFindingResolution(finding.id, 'resolved')}><Check size={13} />{t('projectAnalysis.markResolved')}</button>
+              <button type="button" className="accept" onClick={() => onFindingResolution(finding.id, 'accepted')}><ShieldCheck size={13} />{t('projectAnalysis.markAccepted')}</button>
+            </> : <button type="button" className="reopen" onClick={() => onFindingResolution(finding.id, null)}>{t('projectAnalysis.reopen')}</button>}
+            <button type="button" className="propose" disabled={!configured || proposalBusy} onClick={() => onProposeFinding(finding)}>{proposalBusy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}{proposalBusy ? t('projectAnalysis.proposing') : t('projectAnalysis.proposeSolution')}</button>
+          </div>
+        </article>;
+        }) : <p className="review-empty">{t('projectAnalysis.noFindings')}</p>}
       </section>
       {(report.assumptions.length > 0 || report.limitations.length > 0) && <div className="review-boundaries">
         {report.assumptions.length > 0 && <section><strong>{t('projectAnalysis.assumptions')}</strong>{report.assumptions.map((item) => <p key={item}>• {item}</p>)}</section>}
@@ -5438,8 +5481,8 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
       {costTab === 'summary' && <>
       {costs.economics.missingLocalRates.length > 0 && <div className="estimate-partial"><strong>{t('costs.partialTitle')}</strong><span>{t('costs.partialBody')}</span></div>}
       <div className="cost-scope-grid">
-        <div className="total-cost"><small>{t(costs.economics.missingLocalRates.length ? 'costs.partialEstablishment' : 'costs.establishment')}</small><strong>{currency(costs.totalCost, costs.economics)}</strong><span>{t('costs.capexDetail')}</span></div>
-        <div className="total-cost active"><small>{t('costs.activeSystem', { year: costs.activeSystem.designYear })}</small><strong>{currency(costs.activeSystem.totalReplacementCost, costs.economics)}</strong><span>{t('costs.activeSystemDetail', { active: costs.activeSystem.activePlantCount, inactive: costs.activeSystem.inactivePlantCount })}</span></div>
+        <div className="total-cost" data-testid="establishment-total"><small>{t(costs.economics.missingLocalRates.length ? 'costs.partialEstablishment' : 'costs.establishment')}</small><strong>{currency(costs.totalCost, costs.economics)}</strong><span>{t('costs.capexDetail')}</span></div>
+        <div className="total-cost active" data-testid="operating-year-total"><small>{t('costs.operatingYear', { year: costs.activeSystem.designYear })}</small><strong>{currency(irrigation.annualOperation.totalCost, costs.economics)}</strong><span>{t('costs.operatingYearDetail', { active: costs.activeSystem.activePlantCount })}</span></div>
       </div>
       <div className="cost-breakdown large"><Row label={t('costs.plants')} value={currency(costs.plantPurchaseCost, costs.economics)} /><Row label={t('costs.labourHours', { label: t('costs.labour'), hours: formatNumber(costs.plantingLaborHours, 1) })} value={currency(costs.plantingLaborCost, costs.economics)} /><Row label={t('costs.protection')} value={currency(costs.protectionAndStakesCost, costs.economics)} /><Row label={t('costs.irrigation')} value={currency(costs.irrigationInstallationCost, costs.economics)} strong /><Row label={t('costs.annualWaterYear', { year: irrigation.designYear })} value={t('costs.perYear', { value: currency(irrigation.annualOperation.totalCost, costs.economics) })} strong /></div>
       <div className="source-note"><Database size={17} /><div><strong>{t('costs.priceBasis')}</strong><span>{localizedEconomicSummary(costs.economics.sourceSummary, t)}</span></div></div>

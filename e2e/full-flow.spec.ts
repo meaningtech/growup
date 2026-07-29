@@ -163,7 +163,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByTestId('cost-tabs').getByRole('tab')).toHaveCount(4);
   await expect(page.getByTestId('costs-tab-summary')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Establishment total')).toBeVisible();
-  await expect(page.getByText('Active system · year 5')).toBeVisible();
+  await expect(page.getByText('Operating cost · year 5')).toBeVisible();
+  await expect(page.getByText('water, energy and maintenance; initial CAPEX excluded', { exact: false })).toBeVisible();
   await page.getByTestId('costs-tab-parameters').click();
   await expect(page.getByTestId('economic-configuration')).toContainText('Economic profile · IT');
   await expect(page.getByLabel('Currency code')).toHaveValue('EUR');
@@ -230,7 +231,7 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   expect(matureCosts.establishment.activeSystem.totalReplacementCost).toBeLessThanOrEqual(initialCosts.establishment.activeSystem.totalReplacementCost);
   expect(matureCosts.establishment.totalCost).toBe(initialCosts.establishment.totalCost);
   await page.getByTestId('costs-tab-summary').click();
-  await expect(page.getByText('Active system · year 29')).toBeVisible();
+  await expect(page.getByText('Operating cost · year 29')).toBeVisible();
   await expect(page.getByText('Water + operation · year 29')).toBeVisible();
   await page.getByTestId('costs-tab-management').click();
   await expect(page.getByTestId('maintenance-timeline')).toContainText('Forest-autonomy phase');
