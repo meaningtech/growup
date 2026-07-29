@@ -388,7 +388,7 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   await page.route('**/api/assistant/review', async (route) => {
     reviewCalls += 1;
     const request = route.request().postDataJSON() as { context: Parameters<typeof projectAnalysisFingerprint>[0] };
-    const remediated = reviewCalls > 1;
+    const remediated = reviewCalls > 2;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -469,10 +469,19 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   await finding.getByRole('button', { name: 'Solve', exact: true }).click();
   const agent = page.getByTestId('analysis-agent');
   await expect(agent).toContainText('1 selected');
-  await agent.getByRole('button', { name: 'Start Agent' }).click();
+  await page.getByLabel('Succession year').fill('6');
+  await expect(report.locator('.analysis-stale')).toBeVisible();
+  await expect.poll(async () => {
+    const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
+    return `${saved?.timelineYear}:${saved?.irrigation?.designYear}`;
+  }).toBe('6:6');
+  const startAgent = agent.getByRole('button', { name: 'Start Agent' });
+  await expect(startAgent).toBeEnabled();
+  await startAgent.click();
   await expect(agent).toContainText('Selected findings resolved');
   await expect(agent).toContainText('72');
   await expect(agent).toContainText('84');
+  expect(reviewCalls).toBe(3);
   await expect(page.getByTestId('assistant-proposal')).toHaveCount(0);
   await page.screenshot({ path: '/private/tmp/growup-formal-analysis-desktop.png', fullPage: false });
   await expect.poll(async () => {

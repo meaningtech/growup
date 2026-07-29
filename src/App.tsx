@@ -2467,44 +2467,71 @@ function WorkspaceApp() {
 
   async function runAnalysisAgent() {
     if (!projectAnalysis || analysisAgentBusy) return;
-    const selectedFindings = projectAnalysis.findings.filter((finding) => (
+    let selectedFindings = projectAnalysis.findings.filter((finding) => (
       analysisAgentSelectedFindingIds.includes(finding.id) && !finding.resolution
     ));
     if (!selectedFindings.length) return;
     const maxIterations = 4;
-    const startedAt = new Date().toISOString();
-    let run: ProjectAnalysisAgentRun = {
+    const createRun = (report: ProjectAnalysisReport): ProjectAnalysisAgentRun => ({
       id: `agent-${crypto.randomUUID()}`,
       status: 'running',
       stopReason: null,
       selectedFindingIds: selectedFindings.map((finding) => finding.id),
       selectedFindingTitles: selectedFindings.map((finding) => finding.title),
-      startedAt,
+      startedAt: new Date().toISOString(),
       completedAt: null,
-      initialScore: projectAnalysis.overallScore,
-      currentScore: projectAnalysis.overallScore,
+      initialScore: report.overallScore,
+      currentScore: report.overallScore,
       iteration: 0,
       maxIterations,
       steps: [],
-    };
-    let currentReport: ProjectAnalysisReport = { ...projectAnalysis, agentRun: run };
+    });
+    const previouslyOpenFindings = projectAnalysis.findings.filter((finding) => !finding.resolution);
+    const selectedEveryOpenFinding = selectedFindings.length === previouslyOpenFindings.length;
+    const selectedFindingIds = new Set(selectedFindings.map((finding) => finding.id));
+    const selectedFindingKeys = new Set(selectedFindings.map((finding) => `${finding.area}:${finding.title.trim().toLocaleLowerCase()}`));
+    let run = createRun(projectAnalysis);
+    let currentReport: ProjectAnalysisReport = projectAnalysis;
     let snapshot = currentProjectMutationSnapshot();
     let plateauCount = 0;
     const actionSignatures = new Set<string>();
     analysisAgentStopRef.current = false;
     setAnalysisAgentBusy(true);
     setAnalysisError(null);
-    setProjectAnalysis(currentReport);
-    const finish = (status: ProjectAnalysisAgentRun['status'], stopReason: NonNullable<ProjectAnalysisAgentRun['stopReason']>) => {
-      run = { ...run, status, stopReason, completedAt: new Date().toISOString() };
+    try {
+      const currentContext = assistantContextForSnapshot({ ...snapshot, section: 'analysis' });
+      if (projectAnalysis.contextFingerprint !== projectAnalysisFingerprint(currentContext)) {
+        const refreshedReport = await api<ProjectAnalysisReport>('/api/assistant/review', post({
+          locale,
+          context: currentContext,
+        }));
+        const refreshedOpenFindings = refreshedReport.findings.filter((finding) => !finding.resolution);
+        selectedFindings = selectedEveryOpenFinding
+          ? refreshedOpenFindings
+          : refreshedOpenFindings.filter((finding) => (
+            selectedFindingIds.has(finding.id)
+            || selectedFindingKeys.has(`${finding.area}:${finding.title.trim().toLocaleLowerCase()}`)
+          ));
+        currentReport = refreshedReport;
+        setProjectAnalysis(refreshedReport);
+        setAnalysisAgentSelectedFindingIds(selectedFindings.map((finding) => finding.id));
+        if (!selectedFindings.length) {
+          setNotice(t('notices.analysisAgent.selectionUpdated'));
+          return;
+        }
+        run = createRun(refreshedReport);
+      }
       currentReport = { ...currentReport, agentRun: run };
       setProjectAnalysis(currentReport);
-      setAnalysisAgentSelectedFindingIds(currentReport.findings.filter((finding) => (
-        run.selectedFindingIds.includes(finding.id) && !finding.resolution
-      )).map((finding) => finding.id));
-      setNotice(t(`notices.analysisAgent.${status}`));
-    };
-    try {
+      const finish = (status: ProjectAnalysisAgentRun['status'], stopReason: NonNullable<ProjectAnalysisAgentRun['stopReason']>) => {
+        run = { ...run, status, stopReason, completedAt: new Date().toISOString() };
+        currentReport = { ...currentReport, agentRun: run };
+        setProjectAnalysis(currentReport);
+        setAnalysisAgentSelectedFindingIds(currentReport.findings.filter((finding) => (
+          run.selectedFindingIds.includes(finding.id) && !finding.resolution
+        )).map((finding) => finding.id));
+        setNotice(t(`notices.analysisAgent.${status}`));
+      };
       for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
         if (analysisAgentStopRef.current) {
           finish('stopped', 'user-stopped');
@@ -4582,7 +4609,7 @@ function ProjectAnalysisPanel({ configured, context, report, busy, agentSelected
           <span><ShieldCheck size={14} />{t('projectAnalysis.agent.boundary')}</span>
           {agentBusy
             ? <button type="button" className="button agent-stop" onClick={onStopAgent}><Square size={12} />{t('projectAnalysis.agent.stop')}</button>
-            : openFindingCount > 0 && <button type="button" className="button primary" data-testid="analysis-agent-start" disabled={!configured || selectedAgentCount === 0 || stale} onClick={onRunAgent}><Bot size={15} />{t('projectAnalysis.agent.start')}</button>}
+            : openFindingCount > 0 && <button type="button" className="button primary" data-testid="analysis-agent-start" disabled={!configured || selectedAgentCount === 0} onClick={onRunAgent}><Bot size={15} />{t('projectAnalysis.agent.start')}</button>}
         </footer>
       </section>}
       <section className="review-findings">
