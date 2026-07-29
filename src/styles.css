@@ -1375,8 +1375,7 @@ button { color: inherit; }
 .shared-project > header > span:nth-child(2) { display: grid; min-width: 0; }
 .shared-project > header small { color: rgba(255,255,255,.5); font-size: var(--text-caption); letter-spacing: .04em; text-transform: uppercase; }
 .shared-project > header strong { overflow: hidden; font: 500 21px 'Newsreader',serif; text-overflow: ellipsis; white-space: nowrap; }
-.shared-project > header > b { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 7px 10px; color: #dff49d; background: rgba(215,255,131,.08); border: 1px solid rgba(215,255,131,.16); border-radius: 999px; font-size: var(--text-caption); font-weight: 700; }
-.shared-project > header > i { padding: 7px 9px; color: var(--lime); background: rgba(255,255,255,.07); border-radius: 8px; font: var(--text-label) 'DM Mono',monospace; font-style: normal; }
+.shared-project > header > i { margin-left: auto; padding: 7px 9px; color: var(--lime); background: rgba(255,255,255,.07); border-radius: 8px; font: var(--text-label) 'DM Mono',monospace; font-style: normal; }
 .shared-map { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #d8dbcc; }
 .shared-map > div:first-child { width: 100%; height: 100%; }
 .shared-layer-trigger { position: absolute; top: 62px; left: 14px; z-index: 5; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px; color: white; background: rgba(16,40,30,.92); border: 1px solid rgba(255,255,255,.16); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: var(--text-label); font-weight: 750; cursor: pointer; backdrop-filter: blur(10px); }
@@ -1541,9 +1540,6 @@ button { color: inherit; }
   .share-controls { grid-template-columns: 1fr; }
   .share-link { grid-template-columns: 1fr; }
   .revision-actions { grid-column: 1/-1; grid-template-columns: 1fr 1fr; }
-  .shared-project > header > b { padding: 7px; }
-  .shared-project > header > b svg { margin: 0; }
-  .shared-project > header > b { font-size: 0; }
   .shared-map-hint { bottom: 10px; max-width: calc(100% - 28px); overflow: hidden; text-overflow: ellipsis; }
   .shared-tree-detail { right: 10px; bottom: 52px; }
   .shared-section-frame > header h1 { font-size: 27px; }

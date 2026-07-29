@@ -613,7 +613,6 @@ function SharedProjectPage({ token }: { token: string }) {
     <header>
       <span className="brand-mark"><Sprout size={21} /></span>
       <span><small>{t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
-      <b><Eye size={14} />{t('shared.readOnlyBadge')}</b>
       <i>r{project.revision ?? 0}</i>
     </header>
     <section className="shared-map">
@@ -625,10 +624,10 @@ function SharedProjectPage({ token }: { token: string }) {
         {layers.solar && <div className="shared-solar-controls"><label><span>{t('shared.solarMonth')}</span><input aria-label={t('shared.solarMonth')} type="range" min="1" max="12" value={solarMonth} onChange={(event) => setSolarMonth(Number(event.target.value))} /><b>{monthName(solarMonth)}</b></label><label><span>{t('shared.solarHour')}</span><input aria-label={t('shared.solarHour')} type="range" min="5" max="20" value={solarHour} onChange={(event) => setSolarHour(Number(event.target.value))} /><b>{solarHour}:00</b></label></div>}
       </div>}
       {selectedTree && selectedTreeSpecies && <div className="shared-tree-detail" data-testid="shared-tree-detail"><button aria-label={t('actions.close')} onClick={() => setSelectedTreeId(null)}><X size={14} /></button><span className="tree-dot" style={{ background: selectedTreeSpecies.color }} /><span><small>{plantPositionCode(selectedTree)}</small><strong>{speciesDisplayName(selectedTreeSpecies, t)}</strong><i>{selectedTreeSpecies.scientificName}</i></span></div>}
-      <span className="shared-map-hint"><MousePointer2 size={14} />{canReview ? t('shared.mapHint') : t('shared.readOnly')}</span>
+      {canReview && <span className="shared-map-hint"><MousePointer2 size={14} />{t('shared.mapHint')}</span>}
     </section>
     <aside ref={sharedAsideRef}>
-      <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} data-section={id} aria-current={section === id ? 'page' : undefined} onClick={() => selectSharedSection(id)}><Icon size={16} /><span>{t(`nav.${id}`)}</span></button>)}</nav>
+      <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} data-section={id} aria-current={section === id ? 'page' : undefined} onClick={() => selectSharedSection(id)}><Icon size={16} /><span>{id === 'species' ? t('shared.speciesTab') : t(`nav.${id}`)}</span></button>)}</nav>
       <div className="shared-section-content">
         {canReview && <div className="shared-review-workspace">
           {project.collaboration.review && <div className={`shared-decision ${project.collaboration.review.status}`}><ClipboardCheck size={18} /><span><small>{t('sharing.reviewStatus')}</small><strong>{t(`sharing.status.${project.collaboration.review.status}`)}</strong><p>{project.collaboration.review.reviewerName} · {shortDate(project.collaboration.review.updatedAt, locale)}</p></span></div>}

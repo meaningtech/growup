@@ -151,7 +151,9 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(dialog).toContainText('View only');
 
   await page.goto('/shared/read-only-token');
-  await expect(page.getByText('Interactive read-only plan')).toBeVisible();
+  await expect(page.getByText('Interactive read-only plan')).toHaveCount(0);
+  await expect(page.getByText('Read-only project map')).toHaveCount(0);
+  await expect(page.locator('.shared-map-hint')).toHaveCount(0);
   await expect(page.getByTestId('shared-map')).toHaveAttribute('data-fake-google-map', 'true');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
@@ -192,7 +194,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   await page.getByRole('button', { name: 'Summer', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Summer', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('wind-climatology').screenshot({ path: testInfo.outputPath('shared-wind-mobile.png') });
-  await page.getByRole('button', { name: 'Planning', exact: true }).click();
+  await page.getByRole('button', { name: 'Species', exact: true }).click();
   await expect(page.getByText('Species, quantities and sequence')).toBeVisible();
   await expect(page.locator('.shared-species-list article')).not.toHaveCount(0);
   await sectionNavigation.locator('button[data-section="layout"]').click();
