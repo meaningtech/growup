@@ -1,8 +1,8 @@
-import { fromArrayBuffer } from 'geotiff';
+import { fromArrayBuffer, fromUrl } from 'geotiff';
 import { bounds, createLocalProjection, haversineM, polygonAreaM2, polygonCentroid, polygonPerimeterM } from '../src/lib/geometry.js';
 import { siteContainsCoordinate, sitePolygons } from '../src/lib/siteGeometry.js';
 import { defaultFieldConditions } from '../src/lib/siteOverrides.js';
-import type { Coordinate, Evidence, LocationSearchResult, SatelliteProfile, SiteBoundary, SiteProfile, SoilPropertyEstimate, SoilPropertyEstimateKey, SolarClimateBin, SolarResourceProfile, WindClimatologyPeriod, WindDirectionSector } from '../src/types.js';
+import type { Coordinate, DepthToBedrockSample, Evidence, GroundwaterProfile, LocationSearchResult, SatelliteProfile, SiteBoundary, SiteProfile, SoilDepthLayer, SoilPropertyEstimate, SoilPropertyEstimateKey, SolarClimateBin, SolarResourceProfile, WindClimatologyPeriod, WindDirectionSector } from '../src/types.js';
 import { fetchSatelliteProfile, type SentinelProviderConfig, unavailableSatelliteProfile } from './sentinel.js';
 
 const CLIMATE_START = '2021-01-01';
@@ -20,6 +20,9 @@ export type SiteProviderConfig = SentinelProviderConfig & {
   googleElevationUrl?: string;
   googleGeocodingUrl?: string;
   googleMapsServerApiKey?: string;
+  depthToBedrockUrl?: string;
+  depthToBedrockSampler?: (coordinates: Coordinate[], sourceUrl: string) => Promise<DepthToBedrockSample[]>;
+  groundwaterMapServerUrl?: string;
 };
 
 type ProviderResult<T> = { value: T | null; warning: string | null };
@@ -66,24 +69,26 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
   const fetchImpl = config.fetchImpl ?? fetch;
   const centroid = weightedSiteCentroid(polygons);
   const sampleCoordinates = terrainSamplingPoints(site, centroid);
-  const [location, elevations, climate, solar, soil, landCover, satellite] = await Promise.all([
+  const [location, elevations, climate, solar, soil, depthToBedrock, groundwater, landCover, satellite] = await Promise.all([
     safeProvider(() => reverseGeocodeLocation(centroid, { ...config, fetchImpl }), 'Reverse geocoding is unavailable.'),
     safeProvider(() => fetchElevations(sampleCoordinates, fetchImpl, config), 'Terrain elevation is unavailable.'),
     safeProvider(() => fetchClimate(centroid, fetchImpl, config), 'Historical climate is unavailable.'),
     safeProvider(() => fetchSolarWeather(centroid, fetchImpl, config), 'Historical hourly radiation and wind are unavailable.'),
     safeProvider(() => fetchSoil(polygons.flat(), fetchImpl, config), 'SoilGrids WCS is unavailable; obtain a field soil test.'),
+    safeProvider(() => fetchDepthToBedrock(sampleCoordinates, config), 'Modelled depth to bedrock is unavailable; measure effective rooting depth in the field.'),
+    safeProvider(() => fetchGroundwaterContext(centroid, fetchImpl, config), 'Global groundwater context is unavailable.'),
     safeProvider(() => fetchLandCover(centroid, fetchImpl, config), 'OSM land-cover context is unavailable.'),
     safeProvider(() => fetchSatelliteProfile(site, config), 'Sentinel-1/2 field-water context is unavailable.'),
   ]);
-  const warnings = [location.warning, elevations.warning, climate.warning, solar.warning, soil.warning, landCover.warning, satellite.warning].filter(
+  const warnings = [location.warning, elevations.warning, climate.warning, solar.warning, soil.warning, depthToBedrock.warning, groundwater.warning, landCover.warning, satellite.warning].filter(
     (warning): warning is string => Boolean(warning),
   );
 
   if (!elevations.value) throw new Error('Site profiling requires terrain elevation data');
   if (!climate.value) throw new Error('Site profiling requires historical climate data');
 
-  const terrain = summarizeTerrain(elevations.value.samples, elevations.value.evidence);
   const generatedAt = (config.now?.() ?? new Date()).toISOString();
+  const terrain = summarizeTerrain(elevations.value.samples, elevations.value.evidence, generatedAt);
   const satelliteProfile = satellite.value ?? unavailableSatelliteProfile(config.now?.() ?? new Date());
   if (satelliteProfile.existingVegetation.suitability === 'reject') {
     warnings.push(satelliteProfile.existingVegetation.conclusion);
@@ -108,6 +113,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
     solar: solar.value ?? unavailableSolarProfile(generatedAt),
     soil: {
       ...(soil.value ?? unavailableSoil(config, generatedAt)),
+      depthToBedrock: depthToBedrock.value ?? unavailableDepthToBedrock(config, generatedAt),
       satelliteScreening: satelliteSoilScreening(satelliteProfile),
     },
     fieldConditions: defaultFieldConditions(),
@@ -117,6 +123,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
       osmTags: {},
       evidence: evidence('OpenStreetMap Overpass', config.overpassUrl ?? process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter', 'live', generatedAt, 'low', 'mapped feature proximity'),
     },
+    groundwater: groundwater.value ?? unavailableGroundwater(config, generatedAt),
     satellite: satelliteProfile,
     warnings,
   };
@@ -247,7 +254,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
         const resolution = average(results.map((item) => Number(item.resolution ?? 0)).filter((value) => value > 0));
         return {
           samples: points.map((point, index) => ({ ...point, elevationM: Number(results[index].elevation) })),
-          evidence: evidence('Google Maps Elevation API', baseUrl, 'live', new Date().toISOString(), resolution <= 30 ? 'high' : 'medium', `${resolution ? `${round(resolution, 1)} m mean source resolution; ` : ''}${points.length} field-clipped terrain samples`),
+          evidence: evidence('Google Maps Elevation API', baseUrl, 'live', providerNow(config), resolution <= 30 ? 'high' : 'medium', `${resolution ? `${round(resolution, 1)} m mean source resolution; ` : ''}${points.length} field-clipped terrain samples`),
         };
       }
     }
@@ -268,7 +275,7 @@ async function fetchElevations(points: Coordinate[], fetchImpl: typeof fetch, co
   if (records.length !== points.length || records.some((record) => !Number.isFinite(record.elevation))) throw new Error('Open-Meteo returned incomplete elevation samples');
   return {
     samples: points.map((point, index) => ({ ...point, elevationM: Number(records[index].elevation) })),
-    evidence: evidence('Open-Meteo elevation API', baseUrl, '90 m DEM', new Date().toISOString(), 'medium', `${points.length} field-clipped terrain samples`),
+    evidence: evidence('Open-Meteo elevation API', baseUrl, '90 m DEM', providerNow(config), 'medium', `${points.length} field-clipped terrain samples`),
   };
 }
 
@@ -365,7 +372,15 @@ export async function fetchSolarWeather(centroid: Coordinate, fetchImpl: typeof 
     calmWindFrequencyPercent: annualWind?.calmFrequencyPercent ?? null,
     windClimatology,
     hourlyClimatology,
-    evidence: evidence('Open-Meteo Historical Weather API', url.toString(), 'ERA5-family reanalysis, 2021–2025 hourly aggregate', new Date().toISOString(), 'high', 'hourly radiation and 10 m wind grid'),
+    evidence: evidence(
+      'Open-Meteo Historical Weather API',
+      url.toString(),
+      'ERA5-family reanalysis, 2021–2025 hourly aggregate',
+      providerNow(config),
+      'high',
+      'hourly radiation and 10 m wind grid',
+      { coverageStart: CLIMATE_START, coverageEnd: CLIMATE_END },
+    ),
     limitations: ['Reanalysis does not resolve local obstacles, hedges or gust corridors; verify damaging winds on site.'],
   };
 }
@@ -478,7 +493,7 @@ async function fetchClimate(centroid: Coordinate, fetchImpl: typeof fetch, confi
   });
   const annualPrecipitationMm = sum(daily.precipitation_sum) / years;
   const annualEt0Mm = sum(daily.et0_fao_evapotranspiration) / years;
-  const now = new Date().toISOString();
+  const now = providerNow(config);
   return {
     period: `${CLIMATE_START} to ${CLIMATE_END}`,
     meanTemperatureC: round(average(daily.temperature_2m_mean), 1),
@@ -493,7 +508,15 @@ async function fetchClimate(centroid: Coordinate, fetchImpl: typeof fetch, confi
       precipitationMm: round(item.precipitation / years, 1),
       et0Mm: round(item.et0 / years, 1),
     })),
-    evidence: evidence('Open-Meteo Historical Weather API', url.toString(), 'ERA5-family reanalysis, 2021–2025 aggregate', now, 'high', 'weather grid with 90 m elevation downscaling'),
+    evidence: evidence(
+      'Open-Meteo Historical Weather API',
+      url.toString(),
+      'ERA5-family reanalysis, 2021–2025 aggregate',
+      now,
+      'high',
+      'weather grid with 90 m elevation downscaling',
+      { coverageStart: CLIMATE_START, coverageEnd: CLIMATE_END },
+    ),
   };
 }
 
@@ -522,6 +545,23 @@ const SOIL_COVERAGES: SoilCoverageDescriptor[] = [
   { property: 'wv1500', key: 'water-wilting-point', category: 'physical', depth: '0-5cm', unit: 'vol%', transform: (raw) => raw / 10, uncertainty: false },
 ];
 
+const SOIL_PROFILE_DEPTHS = [
+  { id: '0-5cm', top: 0, bottom: 5 },
+  { id: '5-15cm', top: 5, bottom: 15 },
+  { id: '15-30cm', top: 15, bottom: 30 },
+  { id: '30-60cm', top: 30, bottom: 60 },
+  { id: '60-100cm', top: 60, bottom: 100 },
+  { id: '100-200cm', top: 100, bottom: 200 },
+] as const;
+
+const SOIL_PROFILE_PROPERTIES = [
+  { property: 'phh2o', key: 'ph', transform: (raw: number) => raw / 10 },
+  { property: 'soc', key: 'organic-carbon', transform: (raw: number) => raw / 10 },
+  { property: 'clay', key: 'clay', transform: (raw: number) => raw / 10 },
+  { property: 'cfvo', key: 'coarse-fragments', transform: (raw: number) => raw / 10 },
+  { property: 'bdod', key: 'bulk-density', transform: (raw: number) => raw / 100 },
+] as const;
+
 export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, config: SiteProviderConfig = {}) {
   const baseUrl = config.soilGridsWcsUrl ?? process.env.SOILGRIDS_WCS_URL ?? 'https://maps.isric.org/mapserv';
   const origin = polygonCentroid(polygon);
@@ -538,8 +578,9 @@ export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, 
     observedAt,
     'medium',
     '250 m; topsoil values are 0–5 cm unless labelled 0–30 cm',
+    { publishedAt: '2021-06-14' },
   );
-  const requests = SOIL_COVERAGES.flatMap((descriptor) => {
+  const requests: Array<Promise<readonly [string, number | null]>> = SOIL_COVERAGES.flatMap((descriptor) => {
     const mean = soilCoverage(
       descriptor.property,
       `${descriptor.property}_${descriptor.depth}_mean`,
@@ -558,6 +599,19 @@ export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, 
         .then(([, value]) => [`${descriptor.key}:high`, value] as const),
     ];
   });
+  for (const depth of SOIL_PROFILE_DEPTHS.slice(1)) {
+    for (const descriptor of SOIL_PROFILE_PROPERTIES) {
+      requests.push(soilCoverage(
+        descriptor.property,
+        `${descriptor.property}_${depth.id}_mean`,
+        baseUrl,
+        southwest,
+        northeast,
+        fetchImpl,
+        descriptor.transform,
+      ).then(([, value]) => [`profile:${depth.id}:${descriptor.key}`, value] as const));
+    }
+  }
   const values = Object.fromEntries(await Promise.all(requests)) as Record<string, number | null>;
   const value = (key: SoilPropertyEstimateKey) => values[`${key}:mean`] ?? null;
   const interval = (key: SoilPropertyEstimateKey) => {
@@ -596,6 +650,25 @@ export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, 
   const coreAvailable = ['ph', 'sand', 'silt', 'clay', 'organic-carbon'].every((key) => value(key as SoilPropertyEstimateKey) !== null);
   primaryEvidence.confidence = coreAvailable && available >= 9 ? 'medium' : 'low';
   for (const property of properties) property.evidence.confidence = primaryEvidence.confidence;
+  const verticalProfile: SoilDepthLayer[] = SOIL_PROFILE_DEPTHS.map((depth) => {
+    const profileValue = (key: string) => depth.top === 0
+      ? value(key as SoilPropertyEstimateKey)
+      : values[`profile:${depth.id}:${key}`] ?? null;
+    return {
+      depthTopCm: depth.top,
+      depthBottomCm: depth.bottom,
+      ph: nullableRound(profileValue('ph'), 2),
+      organicCarbonGKg: nullableRound(profileValue('organic-carbon'), 1),
+      clayPercent: nullableRound(profileValue('clay'), 1),
+      coarseFragmentsPercent: nullableRound(profileValue('coarse-fragments'), 1),
+      bulkDensityKgDm3: nullableRound(profileValue('bulk-density'), 2),
+      plantAvailableWaterPercent: depth.top === 0 ? availableWater : null,
+      evidence: {
+        ...primaryEvidence,
+        resolution: `250 m; modelled ${depth.top}–${depth.bottom} cm layer`,
+      },
+    };
+  });
   return {
     ph: nullableRound(value('ph'), 1),
     sandPercent: nullableRound(sand, 1),
@@ -606,6 +679,7 @@ export async function fetchSoil(polygon: Coordinate[], fetchImpl: typeof fetch, 
     status: coreAvailable && available >= 9 ? 'available' as const : available > 0 ? 'partial' as const : 'unavailable' as const,
     evidence: primaryEvidence,
     properties,
+    verticalProfile,
     reactionClass: soilReaction(value('ph')),
     carbonNitrogenRatio,
     limitations: [
@@ -646,6 +720,146 @@ async function soilCoverage(
   }
 }
 
+export async function fetchDepthToBedrock(
+  coordinates: Coordinate[],
+  config: SiteProviderConfig = {},
+): Promise<NonNullable<SiteProfile['soil']['depthToBedrock']>> {
+  const sourceUrl = config.depthToBedrockUrl
+    ?? process.env.DEPTH_TO_BEDROCK_URL
+    ?? 'https://files.isric.org/soilgrids/former/2017-03-10/data/BDTICM_M_250m_ll.tif';
+  const selectedCoordinates = evenlySpacedCoordinates(coordinates, 16);
+  const sampler = config.depthToBedrockSampler ?? sampleDepthToBedrock;
+  const samples = await withProviderTimeout(sampler(selectedCoordinates, sourceUrl), 30_000);
+  const depths = samples.map((sample) => sample.depthM).sort((a, b) => a - b);
+  const observedAt = providerNow(config);
+  return {
+    status: samples.length ? 'available' : 'unavailable',
+    modelledDepthM: depths.length ? round(median(depths), 2) : null,
+    minimumDepthM: depths.length ? round(depths[0], 2) : null,
+    maximumDepthM: depths.length ? round(depths[depths.length - 1], 2) : null,
+    samples,
+    evidence: evidence(
+      'ISRIC / Shangguan et al. global depth-to-bedrock model',
+      sourceUrl,
+      'Global depth to bedrock, March 2017',
+      observedAt,
+      'low',
+      '250 m model grid; field-clipped cell samples',
+      { publishedAt: '2017-03-10' },
+    ),
+    limitations: [
+      'This is modelled depth to bedrock, not measured effective rooting depth.',
+      'A 250 m cell can miss shallow rock, fill, hardpans and local excavation conditions inside the parcel.',
+      'Confirm with soil pits, augering or geotechnical investigation before planting or earthworks.',
+    ],
+  };
+}
+
+async function sampleDepthToBedrock(
+  coordinates: Coordinate[],
+  sourceUrl: string,
+): Promise<DepthToBedrockSample[]> {
+  const tiff = await fromUrl(sourceUrl);
+  const image = await tiff.getImage();
+  const [west, south, east, north] = image.getBoundingBox();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const cellWidth = (east - west) / width;
+  const cellHeight = (north - south) / height;
+  const noData = image.getGDALNoData();
+  const cells = new Map<string, { coordinate: Coordinate; x: number; y: number }>();
+  for (const coordinate of coordinates) {
+    const x = Math.floor((coordinate.lng - west) / cellWidth);
+    const y = Math.floor((north - coordinate.lat) / cellHeight);
+    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    cells.set(`${x}:${y}`, { coordinate, x, y });
+  }
+  const samples: DepthToBedrockSample[] = [];
+  for (const { coordinate, x, y } of cells.values()) {
+    const raster = await image.readRasters({ window: [x, y, x + 1, y + 1] });
+    const raw = Number((raster[0] as ArrayLike<number>)[0]);
+    if (!Number.isFinite(raw) || raw < 0 || (noData !== null && raw === noData)) continue;
+    samples.push({
+      coordinate,
+      depthM: round(raw / 100, 2),
+      cellBounds: {
+        west: west + x * cellWidth,
+        east: west + (x + 1) * cellWidth,
+        north: north - y * cellHeight,
+        south: north - (y + 1) * cellHeight,
+      },
+    });
+  }
+  return samples;
+}
+
+function evenlySpacedCoordinates(coordinates: Coordinate[], maximum: number): Coordinate[] {
+  if (coordinates.length <= maximum) return coordinates;
+  return Array.from({ length: maximum }, (_, index) => (
+    coordinates[Math.round(index * (coordinates.length - 1) / (maximum - 1))]
+  ));
+}
+
+export async function fetchGroundwaterContext(
+  centroid: Coordinate,
+  fetchImpl: typeof fetch,
+  config: SiteProviderConfig = {},
+): Promise<GroundwaterProfile> {
+  const serviceUrl = (
+    config.groundwaterMapServerUrl
+    ?? process.env.GROUNDWATER_MAP_SERVER_URL
+    ?? 'https://services.bgr.de/arcgis/rest/services/grundwasser/whymap_gwr/MapServer'
+  ).replace(/\/$/, '');
+  const layerId = 11;
+  const url = new URL(`${serviceUrl}/${layerId}/query`);
+  url.search = new URLSearchParams({
+    geometry: `${centroid.lng},${centroid.lat}`,
+    geometryType: 'esriGeometryPoint',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: 'aquif_type,recharge,HYGEO2',
+    returnGeometry: 'false',
+    f: 'json',
+  }).toString();
+  const response = await fetchWithTimeout(fetchImpl, url, {}, 20_000);
+  if (!response.ok) throw new Error(`WHYMAP groundwater query returned ${response.status}`);
+  const payload = await response.json() as {
+    features?: Array<{ attributes?: { aquif_type?: string; recharge?: string; HYGEO2?: number } }>;
+    error?: { message?: string };
+  };
+  if (payload.error) throw new Error(payload.error.message ?? 'WHYMAP groundwater query failed');
+  const attributes = payload.features?.[0]?.attributes;
+  const code = Number(attributes?.HYGEO2);
+  const observedAt = providerNow(config);
+  return {
+    status: attributes ? 'available' : 'unavailable',
+    aquiferType: attributes?.aquif_type ?? null,
+    rechargeClass: attributes?.recharge ?? null,
+    resourceClass: Number.isFinite(code) ? groundwaterResourceClass(code) : null,
+    mapLayerId: layerId,
+    evidence: evidence(
+      'BGR / UNESCO WHYMAP',
+      `${serviceUrl}/${layerId}`,
+      'Groundwater resources and recharge global synthesis',
+      observedAt,
+      'low',
+      'Global hydrogeological synthesis; not a parcel-scale water-table survey',
+    ),
+    limitations: [
+      'The layer describes regional aquifer context and recharge classes, not water-table depth beneath the parcel.',
+      'It cannot confirm a productive well, legal abstraction rights, water quality or seasonal availability.',
+      'Use local hydrogeological records, well logs and a qualified field survey before drilling or irrigation decisions.',
+    ],
+  };
+}
+
+function groundwaterResourceClass(code: number): string | null {
+  if (code >= 11 && code <= 16) return 'major groundwater basin';
+  if (code >= 22 && code <= 26) return 'complex hydrogeological structure';
+  if (code >= 33 && code <= 35) return 'local or shallow aquifers';
+  return null;
+}
+
 async function fetchLandCover(centroid: Coordinate, fetchImpl: typeof fetch, config: SiteProviderConfig) {
   const baseUrl = config.overpassUrl ?? process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter';
   const query = `[out:json][timeout:20];nwr(around:180,${centroid.lat},${centroid.lng})[landuse];out tags center 10;`;
@@ -660,11 +874,11 @@ async function fetchLandCover(centroid: Coordinate, fetchImpl: typeof fetch, con
   return {
     classification: landuse.replaceAll('_', ' '),
     osmTags: tags,
-    evidence: evidence('OpenStreetMap Overpass', baseUrl, 'live OSM data', new Date().toISOString(), tags.landuse ? 'medium' : 'low', 'nearest mapped landuse within 180 m'),
+    evidence: evidence('OpenStreetMap Overpass', baseUrl, 'live OSM data', providerNow(config), tags.landuse ? 'medium' : 'low', 'nearest mapped landuse within 180 m'),
   };
 }
 
-function summarizeTerrain(samples: Array<Coordinate & { elevationM: number }>, terrainEvidence: Evidence): SiteProfile['terrain'] {
+function summarizeTerrain(samples: Array<Coordinate & { elevationM: number }>, terrainEvidence: Evidence, computedAt = new Date().toISOString()): SiteProfile['terrain'] {
   const sorted = [...samples].sort((a, b) => a.elevationM - b.elevationM);
   const low = sorted[0];
   const high = sorted[sorted.length - 1];
@@ -673,12 +887,11 @@ function summarizeTerrain(samples: Array<Coordinate & { elevationM: number }>, t
   const fallbackSlope = (high.elevationM - low.elevationM) / distance * 100;
   const slopePercent = plane ? Math.hypot(plane.a, plane.b) * 100 : fallbackSlope;
   const aspectDegrees = plane ? (toDegrees(Math.atan2(-plane.a, -plane.b)) + 360) % 360 : bearing(high, low);
-  const now = new Date().toISOString();
   return {
     elevationMeanM: round(average(samples.map((sample) => sample.elevationM)), 1),
     elevationMinM: round(low.elevationM, 1), elevationMaxM: round(high.elevationM, 1), slopePercent: round(slopePercent, 1),
     aspectDegrees: round(aspectDegrees, 0), aspectLabel: compass(aspectDegrees), samples,
-    evidence: { ...terrainEvidence, observedAt: now, resolution: `${terrainEvidence.resolution ?? 'sampled points'}; least-squares terrain plane` },
+    evidence: { ...terrainEvidence, observedAt: computedAt, computedAt, resolution: `${terrainEvidence.resolution ?? 'sampled points'}; least-squares terrain plane` },
   };
 }
 
@@ -825,6 +1038,56 @@ function unavailableSoil(config: SiteProviderConfig, generatedAt: string): SiteP
   };
 }
 
+function unavailableDepthToBedrock(
+  config: SiteProviderConfig,
+  generatedAt: string,
+): NonNullable<SiteProfile['soil']['depthToBedrock']> {
+  const sourceUrl = config.depthToBedrockUrl
+    ?? process.env.DEPTH_TO_BEDROCK_URL
+    ?? 'https://files.isric.org/soilgrids/former/2017-03-10/data/BDTICM_M_250m_ll.tif';
+  return {
+    status: 'unavailable',
+    modelledDepthM: null,
+    minimumDepthM: null,
+    maximumDepthM: null,
+    samples: [],
+    evidence: evidence(
+      'ISRIC / Shangguan et al. global depth-to-bedrock model',
+      sourceUrl,
+      'Global depth to bedrock, March 2017',
+      generatedAt,
+      'low',
+      '250 m',
+      { publishedAt: '2017-03-10' },
+    ),
+    limitations: ['Modelled depth to bedrock is unavailable; measure effective rooting depth in the field.'],
+  };
+}
+
+function unavailableGroundwater(config: SiteProviderConfig, generatedAt: string): GroundwaterProfile {
+  const serviceUrl = (
+    config.groundwaterMapServerUrl
+    ?? process.env.GROUNDWATER_MAP_SERVER_URL
+    ?? 'https://services.bgr.de/arcgis/rest/services/grundwasser/whymap_gwr/MapServer'
+  ).replace(/\/$/, '');
+  return {
+    status: 'unavailable',
+    aquiferType: null,
+    rechargeClass: null,
+    resourceClass: null,
+    mapLayerId: 11,
+    evidence: evidence(
+      'BGR / UNESCO WHYMAP',
+      `${serviceUrl}/11`,
+      'Groundwater resources and recharge global synthesis',
+      generatedAt,
+      'low',
+      'global hydrogeological context',
+    ),
+    limitations: ['Global groundwater context is unavailable; consult local hydrogeological records.'],
+  };
+}
+
 function satelliteSoilScreening(profile: SatelliteProfile): NonNullable<SiteProfile['soil']['satelliteScreening']> {
   const candidates = profile.optical.history.filter((observation) => (
     observation.ndvi.mean <= 0.3
@@ -854,8 +1117,30 @@ async function fetchWithTimeout(fetchImpl: typeof fetch, input: string | URL, in
   return fetchImpl(input, { ...init, signal: init.signal ?? AbortSignal.timeout(timeoutMs) });
 }
 
-function evidence(source: string, sourceUrl: string, version: string, observedAt: string, confidence: Evidence['confidence'], resolution?: string): Evidence {
-  return { source, sourceUrl, version, observedAt, confidence, resolution };
+async function withProviderTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Provider timed out after ${timeoutMs} ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+type EvidenceTemporalFields = Pick<Evidence, 'dataObservedAt' | 'coverageStart' | 'coverageEnd' | 'publishedAt' | 'retrievedAt' | 'computedAt'>;
+
+function evidence(
+  source: string,
+  sourceUrl: string,
+  version: string,
+  observedAt: string,
+  confidence: Evidence['confidence'],
+  resolution?: string,
+  temporal: Partial<EvidenceTemporalFields> = {},
+): Evidence {
+  return { source, sourceUrl, version, observedAt, retrievedAt: observedAt, confidence, resolution, ...temporal };
 }
 
 function bearing(from: Coordinate, to: Coordinate): number {
@@ -870,6 +1155,11 @@ function compass(degrees: number): string {
 }
 
 function average(values: number[]): number { return values.length ? sum(values) / values.length : 0; }
+function median(sortedValues: number[]): number {
+  if (!sortedValues.length) return 0;
+  const middle = Math.floor(sortedValues.length / 2);
+  return sortedValues.length % 2 ? sortedValues[middle] : (sortedValues[middle - 1] + sortedValues[middle]) / 2;
+}
 function sum(values: number[]): number { return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0); }
 function percentile(sortedValues: number[], fraction: number): number {
   if (!sortedValues.length) return 0;

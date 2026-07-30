@@ -26,7 +26,17 @@ export type Evidence = {
   source: string;
   sourceUrl: string;
   version: string;
+  /**
+   * Legacy primary timestamp kept for saved-project compatibility.
+   * New consumers should prefer the explicitly labelled temporal fields below.
+   */
   observedAt: string;
+  dataObservedAt?: string;
+  coverageStart?: string;
+  coverageEnd?: string;
+  publishedAt?: string;
+  retrievedAt?: string;
+  computedAt?: string;
   confidence: 'high' | 'medium' | 'low';
   resolution?: string;
 };
@@ -213,6 +223,49 @@ export type SoilSatelliteScreening = {
   limitations: string[];
 };
 
+export type SoilDepthLayer = {
+  depthTopCm: number;
+  depthBottomCm: number;
+  ph: number | null;
+  organicCarbonGKg: number | null;
+  clayPercent: number | null;
+  coarseFragmentsPercent: number | null;
+  bulkDensityKgDm3: number | null;
+  plantAvailableWaterPercent: number | null;
+  evidence: Evidence;
+};
+
+export type DepthToBedrockSample = {
+  coordinate: Coordinate;
+  depthM: number;
+  cellBounds: {
+    south: number;
+    west: number;
+    north: number;
+    east: number;
+  };
+};
+
+export type DepthToBedrockProfile = {
+  status: 'available' | 'partial' | 'unavailable';
+  modelledDepthM: number | null;
+  minimumDepthM: number | null;
+  maximumDepthM: number | null;
+  samples: DepthToBedrockSample[];
+  evidence: Evidence;
+  limitations: string[];
+};
+
+export type GroundwaterProfile = {
+  status: 'available' | 'partial' | 'unavailable';
+  aquiferType: string | null;
+  rechargeClass: string | null;
+  resourceClass: string | null;
+  mapLayerId: number;
+  evidence: Evidence;
+  limitations: string[];
+};
+
 export type SiteProfile = {
   generatedAt: string;
   centroid: Coordinate;
@@ -266,6 +319,8 @@ export type SiteProfile = {
     reactionClass?: 'strongly-acidic' | 'acidic' | 'slightly-acidic' | 'neutral' | 'alkaline' | 'strongly-alkaline' | 'unknown';
     carbonNitrogenRatio?: number | null;
     satelliteScreening?: SoilSatelliteScreening;
+    verticalProfile?: SoilDepthLayer[];
+    depthToBedrock?: DepthToBedrockProfile;
     limitations?: string[];
   };
   fieldConditions?: {
@@ -286,6 +341,7 @@ export type SiteProfile = {
     osmTags: Record<string, string>;
     evidence: Evidence;
   };
+  groundwater?: GroundwaterProfile;
   satellite: SatelliteProfile;
   warnings: string[];
 };

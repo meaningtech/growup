@@ -188,6 +188,9 @@ button { color: inherit; }
 .map-layer-panel header button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; }
 .map-layer-panel > p { margin: -1px 0 2px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
 .map-layer-panel > small { margin: 4px 2px 0; color: #718075; font-size: var(--text-caption); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.map-basemap-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.map-basemap-options .map-layer-toggle { grid-template-columns: 30px minmax(0,1fr) 15px; gap: 6px; min-height: 54px; padding-inline: 6px; }
+.map-basemap-options .map-layer-toggle small { white-space: normal; }
 .map-layer-toggle { display: grid; grid-template-columns: 32px minmax(0, 1fr) 17px; align-items: center; gap: 9px; width: 100%; min-height: 48px; padding: 7px 8px; color: var(--ink); background: rgba(255,255,255,.48); border: 1px solid rgba(25,56,41,.11); border-radius: 10px; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
 .map-layer-toggle:hover:not(:disabled) { border-color: rgba(25,56,41,.28); transform: translateY(-1px); }
 .map-layer-toggle.active { background: white; border-color: rgba(63,96,72,.36); box-shadow: 0 5px 14px rgba(17,42,29,.07); }
@@ -210,8 +213,17 @@ button { color: inherit; }
 .map-layer-swatch.vegetation { color: #d7ff83; background: #315d42; }
 .map-layer-swatch.ndmi { color: white; background: #7759a8; }
 .map-layer-swatch.water { color: #10281e; background: #62c8bd; }
+.map-layer-swatch.basemap-google { color: white; background: linear-gradient(135deg,#3f6b4f,#9d7a52); }
+.map-layer-swatch.basemap-esri { color: white; background: linear-gradient(135deg,#285e78,#d0a05f); }
+.map-layer-swatch.recent-imagery { color: #f1ffcf; background: #497247; }
+.map-layer-swatch.bedrock { color: #fff4d3; background: linear-gradient(180deg,#d98c4b,#6e4027); }
+.map-layer-swatch.groundwater { color: #e8fbff; background: #297da1; }
 .map-layer-check { color: transparent; padding: 2px; border: 1px solid rgba(49,81,67,.2); border-radius: 50%; }
 .map-layer-toggle.active .map-layer-check { color: var(--forest); background: var(--lime); border-color: #a9c24d; }
+.layer-opacity-control { display: grid; grid-template-columns: auto minmax(0,1fr) 34px; align-items: center; gap: 8px; margin: -2px 4px 2px 43px; color: #66766d; font-size: var(--text-caption); font-weight: 700; }
+.layer-opacity-control input { width: 100%; accent-color: #557a35; }
+.layer-opacity-control b { color: var(--forest); font: var(--text-caption) 'DM Mono',monospace; text-align: right; }
+.map-source-attribution { position: absolute; right: 8px; bottom: 3px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 8px; max-width: 72%; padding: 2px 5px; color: rgba(20,39,30,.78); background: rgba(250,249,241,.82); border-radius: 4px; font-size: 8px; line-height: 1.25; z-index: 23; pointer-events: none; }
 .irrigation-edit-status { position: absolute; top: 70px; left: 16px; display: flex; align-items: flex-start; gap: 8px; max-width: 250px; padding: 9px 11px; color: #e8f5ef; background: rgba(13,53,38,.92); border: 1px solid rgba(215,255,131,.34); border-radius: 9px; box-shadow: 0 8px 28px rgba(7,25,16,.24); z-index: 42; }.irrigation-edit-status span { display: grid; gap: 2px; }.irrigation-edit-status strong { font-size: var(--text-label); }.irrigation-edit-status small { color: rgba(232,245,239,.64); font-size: var(--text-caption); line-height: 1.4; }
 .timeline-control { position: absolute; left: 18px; bottom: 20px; width: min(430px, calc(100% - 36px)); padding: 13px 16px 11px; color: white; background: rgba(13,38,27,.91); border: 1px solid rgba(255,255,255,.13); border-radius: 12px; box-shadow: var(--shadow); backdrop-filter: blur(11px); z-index: 25; }
 .timeline-control > div:first-child { display: flex; align-items: baseline; justify-content: space-between; }
@@ -377,7 +389,7 @@ button { color: inherit; }
 .source-list a { display: grid; gap: 2px; padding: 9px 10px; color: inherit; text-decoration: none; background: rgba(255,255,255,.45); border: 1px solid var(--line); border-radius: 8px; }
 .source-list span { font-size: var(--text-label); font-weight: 700; }
 .source-list small { color: var(--muted); font-size: var(--text-caption); }
-.evidence-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 12px 0 14px; padding: 4px; background: #e9e7dd; border: 1px solid var(--line); border-radius: 10px; }
+.evidence-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin: 12px 0 14px; padding: 4px; background: #e9e7dd; border: 1px solid var(--line); border-radius: 10px; }
 .evidence-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; padding: 8px 5px; color: var(--muted); background: transparent; border: 0; border-radius: 7px; font-size: var(--text-label); font-weight: 800; cursor: pointer; }
 .evidence-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-tabs button b { display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; color: #788076; background: rgba(255,255,255,.56); border-radius: 999px; font: var(--text-micro) 'DM Mono', monospace; }
@@ -386,6 +398,47 @@ button { color: inherit; }
 .evidence-tabs button:focus-visible { outline: 2px solid var(--lime-dark); outline-offset: 1px; }
 .evidence-tabpanel { animation: evidence-panel-in .18s ease-out; }
 @keyframes evidence-panel-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.evidence-dates { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.evidence-dates span { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; color: #39564a; background: #edf1e7; border: 1px solid rgba(38,75,57,.11); border-radius: 999px; line-height: 1; }
+.evidence-dates svg { color: #708a43; }
+.evidence-dates i { color: #738078; font-size: var(--text-micro); font-style: normal; font-weight: 800; text-transform: uppercase; }
+.evidence-dates time { font: var(--text-caption) 'DM Mono',monospace; white-space: nowrap; }
+.evidence-dates.compact { margin-top: 7px; }
+.evidence-dates.compact span { padding: 4px 6px; }
+.subsurface-card { display: grid; gap: 11px; margin-bottom: 14px; }
+.subsurface-card > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; color: white; background: linear-gradient(135deg,#173c2b,#28543f); border-radius: 14px 14px 6px 14px; }
+.subsurface-card > header > span { display: flex; align-items: center; gap: 10px; }
+.subsurface-card > header > span > i { display: grid; gap: 2px; font-style: normal; }
+.subsurface-card > header small { color: #b7cfb8; font-size: var(--text-micro); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.subsurface-card > header strong { font: 500 19px/1.15 'Newsreader',serif; }
+.subsurface-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.subsurface-summary > article { position: relative; display: flex; flex-direction: column; min-height: 218px; padding: 14px; overflow: hidden; border-radius: 13px; }
+.subsurface-summary > article::after { content: ''; position: absolute; right: -24px; bottom: -35px; width: 105px; height: 105px; border: 18px solid currentColor; border-radius: 50%; opacity: .06; pointer-events: none; }
+.bedrock-summary { color: #4d301c; background: linear-gradient(150deg,#f8e4bd,#f3cf8a); border: 1px solid rgba(121,75,29,.15); }
+.groundwater-summary { color: #133e4c; background: linear-gradient(150deg,#dff1ec,#b9dcd8); border: 1px solid rgba(28,91,99,.15); }
+.subsurface-summary article > span { display: grid; gap: 4px; }
+.subsurface-summary article > span small { font-size: var(--text-micro); font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.subsurface-summary article > span strong { font: 500 25px/1.05 'Newsreader',serif; }
+.subsurface-summary article > b { margin-top: 7px; font-size: var(--text-label); line-height: 1.35; }
+.subsurface-summary article > p { margin: 10px 0; font-size: var(--text-caption); line-height: 1.5; }
+.subsurface-summary article > dl { display: flex; gap: 6px; margin: 8px 0 0; font-size: var(--text-caption); }
+.subsurface-summary article > dl dt { font-weight: 800; }.subsurface-summary article > dl dd { margin: 0; }
+.subsurface-summary article > .text-button { margin-top: auto; color: currentColor; }
+.subsurface-summary .evidence-dates span { background: rgba(255,255,255,.4); border-color: rgba(30,64,48,.09); }
+.soil-profile { padding: 14px; background: #faf9f2; border: 1px solid var(--line); border-radius: 13px; }
+.soil-profile .card-heading strong { font: 700 var(--text-label)/1.4 'Manrope',sans-serif; }
+.soil-profile-legend { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; margin: 12px 0 5px 76px; color: #6a756e; font-size: 8px; font-weight: 800; line-height: 1.15; text-align: center; text-transform: uppercase; }
+.soil-profile-legend span { display: grid; place-content: end center; min-width: 0; }
+.soil-profile-legend i { color: #939b94; font: 7px 'DM Mono',monospace; font-style: normal; text-transform: none; }
+.soil-profile-layers { display: grid; gap: 3px; }
+.soil-profile-layers article { display: grid; grid-template-columns: 72px repeat(5,minmax(0,1fr)); align-items: center; gap: 4px; min-height: 31px; padding: 5px 7px; color: #f9f5e8; background: #875b35; border-radius: 7px; }
+.soil-profile-layers article:nth-child(2) { min-height: 33px; background: #805b39; }
+.soil-profile-layers article:nth-child(3) { min-height: 35px; background: #755a3d; }
+.soil-profile-layers article:nth-child(4) { min-height: 37px; background: #675743; }
+.soil-profile-layers article:nth-child(5) { min-height: 39px; background: #555348; }
+.soil-profile-layers article:nth-child(6) { min-height: 41px; background: #40504a; }
+.soil-profile-layers strong { font: 700 var(--text-caption) 'DM Mono',monospace; }
+.soil-profile-layers span { overflow: hidden; font: var(--text-micro) 'DM Mono',monospace; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .wind-card { margin: 4px 0 14px; padding: 15px; overflow: hidden; background: linear-gradient(155deg,#f3f8f3,#ffffff 62%); border: 1px solid rgba(32,102,93,.2); border-radius: 14px; box-shadow: 0 14px 34px rgba(18,61,51,.08); }
 .wind-card.unavailable { display: flex; align-items: flex-start; gap: 10px; color: var(--muted); }
 .wind-card.unavailable span { display: grid; gap: 3px; }.wind-card.unavailable strong { color: var(--ink); }.wind-card.unavailable p { margin: 0; font-size: var(--text-label); line-height: 1.5; }
@@ -986,6 +1039,17 @@ button { color: inherit; }
   .wind-sector-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .evidence-tabs button { gap: 2px; padding-inline: 3px; }
   .evidence-tabs button b { display: none; }
+  .subsurface-summary { grid-template-columns: 1fr; }
+  .subsurface-summary > article { min-height: 190px; }
+  .soil-profile { padding: 11px; overflow: hidden; }
+  .soil-profile-legend { display: none; }
+  .soil-profile-layers article { grid-template-columns: 64px repeat(5,minmax(48px,1fr)); min-width: 350px; }
+  .soil-profile-layers { overflow-x: auto; padding-bottom: 4px; }
+  .evidence-dates { gap: 4px; }
+  .evidence-dates span { padding: 4px 6px; }
+  .map-basemap-options { grid-template-columns: 1fr; }
+  .map-basemap-options .map-layer-toggle { min-height: 48px; }
+  .map-source-attribution { max-width: 88%; }
   .fire-analysis-tabs { gap: 2px; padding: 3px; }
   .fire-analysis-tabs button { min-height: 36px; gap: 3px; padding: 0 3px; font-size: 9px; }
   .fire-analysis-tabs button svg { width: 14px; height: 14px; }
@@ -1510,6 +1574,14 @@ button { color: inherit; }
 .shared-evidence-source strong { overflow: hidden; font-size: var(--text-label); text-overflow: ellipsis; white-space: nowrap; }
 .shared-evidence-source small { color: var(--muted); font-size: var(--text-caption); }
 .shared-evidence-source b { padding: 4px 6px; color: #50672e; background: #e9efda; border-radius: 6px; font-size: var(--text-micro); }
+.shared-evidence-source .evidence-dates { margin-top: 5px; }
+.shared-evidence-source .evidence-dates span { padding: 3px 5px; }
+.shared-evidence-source .evidence-dates i { font-size: 7px; }
+.shared-evidence-source .evidence-dates time { font-size: 8px; }
+.shared-soil-profile { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px; padding: 10px 12px; background: #f4f0e6; border-top: 1px solid var(--line); }
+.shared-soil-profile span { display: grid; gap: 2px; padding: 7px 8px; color: #f8f2df; background: linear-gradient(135deg,#805735,#4a5b4c); border-radius: 7px; }
+.shared-soil-profile b { font: var(--text-caption) 'DM Mono',monospace; }
+.shared-soil-profile small { color: rgba(255,255,255,.68); font-size: var(--text-micro); }
 .shared-species-list { display: grid; gap: 5px; }
 .shared-species-list article { display: grid; grid-template-columns: 12px minmax(0,1fr) auto auto; align-items: center; gap: 9px; padding: 10px 12px; background: white; border: 1px solid var(--line); border-radius: 9px; }
 .shared-species-list article > span:nth-child(2) { display: grid; min-width: 0; }

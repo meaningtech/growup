@@ -116,7 +116,13 @@ export async function fetchSatelliteProfile(
     },
     existingVegetation: optical?.existingVegetation ?? unavailableExistingVegetation(generatedAt),
     irrigationScheduling: scheduling,
-    evidence: satelliteEvidence(generatedAt, stacUrl, dataUrl),
+    evidence: satelliteEvidence(
+      generatedAt,
+      stacUrl,
+      dataUrl,
+      optical?.history[0]?.acquiredAt,
+      radar?.observations[0]?.acquiredAt,
+    ),
     limitations: [
       'Sentinel-2 indices describe canopy and surface water response; they are not volumetric soil-water measurements.',
       'Sentinel-1 backscatter also responds to vegetation, roughness, row geometry and recent field operations. The signal is a same-orbit anomaly, not a calibrated moisture percentage.',
@@ -944,13 +950,21 @@ function previewUrl(dataUrl: string, rasterBounds: RasterBounds, itemId: string,
   return url.toString();
 }
 
-function satelliteEvidence(observedAt: string, stacUrl: string, dataUrl: string): Evidence[] {
+function satelliteEvidence(
+  retrievedAt: string,
+  stacUrl: string,
+  dataUrl: string,
+  opticalObservedAt?: string,
+  radarObservedAt?: string,
+): Evidence[] {
   return [
     {
       source: 'Copernicus Sentinel-2 Level-2A via Microsoft Planetary Computer',
       sourceUrl: `${stacUrl}/collections/${OPTICAL_COLLECTION}`,
       version: 'Level-2A surface reflectance',
-      observedAt,
+      observedAt: opticalObservedAt ?? retrievedAt,
+      dataObservedAt: opticalObservedAt,
+      retrievedAt,
       confidence: 'medium',
       resolution: '10–20 m native bands; nearest-neighbour SCL mask',
     },
@@ -958,7 +972,9 @@ function satelliteEvidence(observedAt: string, stacUrl: string, dataUrl: string)
       source: 'Copernicus Sentinel-1 Radiometrically Terrain Corrected via Microsoft Planetary Computer',
       sourceUrl: `${stacUrl}/collections/${RADAR_COLLECTION}`,
       version: 'RTC gamma-naught VV/VH',
-      observedAt,
+      observedAt: radarObservedAt ?? retrievedAt,
+      dataObservedAt: radarObservedAt,
+      retrievedAt,
       confidence: 'medium',
       resolution: '10 m pixel spacing; same relative orbit comparison',
     },
@@ -966,20 +982,22 @@ function satelliteEvidence(observedAt: string, stacUrl: string, dataUrl: string)
       source: 'Microsoft Planetary Computer Data API',
       sourceUrl: dataUrl,
       version: 'public TiTiler raster processing API',
-      observedAt,
+      observedAt: retrievedAt,
+      retrievedAt,
       confidence: 'high',
       resolution: 'field-clipped GeoTIFF statistics',
     },
   ];
 }
 
-function existingVegetationEvidence(observedAt: string): Evidence[] {
+function existingVegetationEvidence(retrievedAt: string): Evidence[] {
   return [
     {
       source: 'Sentinel-2 multi-date NDVI persistence',
       sourceUrl: `${DEFAULT_STAC_URL}/collections/${OPTICAL_COLLECTION}`,
       version: 'Field-clipped surface-reflectance time series',
-      observedAt,
+      observedAt: retrievedAt,
+      retrievedAt,
       confidence: 'medium',
       resolution: '10 m native NIR/red bands',
     },
@@ -987,7 +1005,10 @@ function existingVegetationEvidence(observedAt: string): Evidence[] {
       source: 'Impact Observatory annual land-use/land-cover V2',
       sourceUrl: `${DEFAULT_STAC_URL}/collections/${ANNUAL_LAND_COVER_COLLECTION}`,
       version: '2021–2023 tree-class consensus',
-      observedAt,
+      observedAt: retrievedAt,
+      retrievedAt,
+      coverageStart: '2021-01-01',
+      coverageEnd: '2023-12-31',
       confidence: 'medium',
       resolution: '10 m annual Sentinel-2 composites',
     },
@@ -995,7 +1016,9 @@ function existingVegetationEvidence(observedAt: string): Evidence[] {
       source: 'ESA WorldCover 2021',
       sourceUrl: `${DEFAULT_STAC_URL}/collections/${WORLD_COVER_COLLECTION}`,
       version: 'v200 tree-cover class',
-      observedAt,
+      observedAt: '2021-01-01',
+      dataObservedAt: '2021-01-01',
+      retrievedAt,
       confidence: 'medium',
       resolution: '10 m Sentinel-1/Sentinel-2 classification',
     },
@@ -1003,7 +1026,9 @@ function existingVegetationEvidence(observedAt: string): Evidence[] {
       source: 'Copernicus HRL Woody Vegetation Layer 2021',
       sourceUrl: 'https://land.copernicus.eu/en/products/high-resolution-layer-small-landscape-features/woody-vegetation-layer-2021',
       version: 'WVL 2021 raster',
-      observedAt,
+      observedAt: '2021-01-01',
+      dataObservedAt: '2021-01-01',
+      retrievedAt,
       confidence: 'high',
       resolution: '5 m woody vegetation, including isolated trees and permanent crops',
     },

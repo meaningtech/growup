@@ -3,7 +3,7 @@ import { writeArrayBuffer } from 'geotiff';
 import { TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { polygonCentroid } from '../src/lib/geometry.js';
 import { siteContainsCoordinate } from '../src/lib/siteGeometry.js';
-import { fetchSoil, fetchSolarWeather, reverseGeocodeLocation, terrainSamplingPoints } from './site.js';
+import { fetchDepthToBedrock, fetchGroundwaterContext, fetchSoil, fetchSolarWeather, reverseGeocodeLocation, terrainSamplingPoints } from './site.js';
 
 describe('terrain sampling', () => {
   it.each([TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE])('covers the interior of $name with a dense field-clipped grid', (site) => {
@@ -134,6 +134,13 @@ describe('SoilGrids composition provider', () => {
       'wv0033_0-5cm_mean': 310,
       'wv1500_0-5cm_mean': 140,
     };
+    for (const [index, depth] of ['5-15cm', '15-30cm', '30-60cm', '60-100cm', '100-200cm'].entries()) {
+      rawByCoverage[`phh2o_${depth}_mean`] = 73 + index;
+      rawByCoverage[`soc_${depth}_mean`] = 150 - index * 20;
+      rawByCoverage[`clay_${depth}_mean`] = 270 + index * 15;
+      rawByCoverage[`cfvo_${depth}_mean`] = 90 + index * 10;
+      rawByCoverage[`bdod_${depth}_mean`] = 138 + index * 3;
+    }
     const requests: URL[] = [];
     const soil = await fetchSoil(TEMPERATE_OPEN_FIELD_FIXTURE.polygon, async (input) => {
       const url = new URL(String(input));
@@ -154,7 +161,7 @@ describe('SoilGrids composition provider', () => {
       now: () => new Date('2026-07-25T08:00:00.000Z'),
     });
 
-    expect(requests).toHaveLength(20);
+    expect(requests).toHaveLength(45);
     expect(requests.every((url) => url.searchParams.get('SERVICE') === 'WCS')).toBe(true);
     expect(soil).toEqual(expect.objectContaining({
       status: 'available',
@@ -170,6 +177,7 @@ describe('SoilGrids composition provider', () => {
         source: 'ISRIC SoilGrids WCS',
         sourceUrl: 'https://soil.example.test/mapserv',
         observedAt: '2026-07-25T08:00:00.000Z',
+        retrievedAt: '2026-07-25T08:00:00.000Z',
         resolution: expect.stringContaining('250 m'),
       }),
     }));
@@ -195,9 +203,85 @@ describe('SoilGrids composition provider', () => {
       expect.objectContaining({ key: 'plant-available-water', value: 17, estimateType: 'derived-from-modelled' }),
       expect.objectContaining({ key: 'carbon-nitrogen-ratio', value: 12, estimateType: 'derived-from-modelled' }),
     ]));
+    expect(soil.verticalProfile).toHaveLength(6);
+    expect(soil.verticalProfile?.[5]).toEqual(expect.objectContaining({
+      depthTopCm: 100,
+      depthBottomCm: 200,
+      ph: 7.7,
+      organicCarbonGKg: 7,
+      clayPercent: 33,
+      coarseFragmentsPercent: 13,
+      bulkDensityKgDm3: 1.5,
+    }));
     expect(soil.limitations).toEqual(expect.arrayContaining([
       expect.stringContaining('not laboratory measurements'),
       expect.stringContaining('phosphorus, potassium'),
     ]));
+  });
+});
+
+describe('subsurface evidence providers', () => {
+  it('summarizes sampled model cells without presenting them as field measurements', async () => {
+    const points = terrainSamplingPoints(TEMPERATE_OPEN_FIELD_FIXTURE);
+    const depth = await fetchDepthToBedrock(points, {
+      depthToBedrockUrl: 'https://soil.example.test/depth.tif',
+      now: () => new Date('2026-07-25T09:00:00.000Z'),
+      depthToBedrockSampler: async (coordinates) => coordinates.slice(0, 4).map((coordinate, index) => ({
+        coordinate,
+        depthM: [0.8, 1.2, 2.4, 3.6][index],
+        cellBounds: {
+          south: coordinate.lat - 0.001,
+          north: coordinate.lat + 0.001,
+          west: coordinate.lng - 0.001,
+          east: coordinate.lng + 0.001,
+        },
+      })),
+    });
+
+    expect(depth).toEqual(expect.objectContaining({
+      status: 'available',
+      modelledDepthM: 1.8,
+      minimumDepthM: 0.8,
+      maximumDepthM: 3.6,
+      evidence: expect.objectContaining({
+        source: expect.stringContaining('depth-to-bedrock'),
+        publishedAt: '2017-03-10',
+        retrievedAt: '2026-07-25T09:00:00.000Z',
+      }),
+    }));
+    expect(depth.limitations.join(' ')).toContain('not measured effective rooting depth');
+  });
+
+  it('retains WHYMAP aquifer and recharge classes as regional context', async () => {
+    const groundwater = await fetchGroundwaterContext({ lat: 37.5, lng: 14.5 }, async (input) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe('/groundwater/11/query');
+      expect(url.searchParams.get('geometry')).toBe('14.5,37.5');
+      return new Response(JSON.stringify({
+        features: [{
+          attributes: {
+            aquif_type: 'complex hydrogeological structures',
+            recharge: 'medium (20 - 100)',
+            HYGEO2: 23,
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }, {
+      groundwaterMapServerUrl: 'https://water.example.test/groundwater',
+      now: () => new Date('2026-07-25T10:00:00.000Z'),
+    });
+
+    expect(groundwater).toEqual(expect.objectContaining({
+      status: 'available',
+      aquiferType: 'complex hydrogeological structures',
+      rechargeClass: 'medium (20 - 100)',
+      resourceClass: 'complex hydrogeological structure',
+      mapLayerId: 11,
+      evidence: expect.objectContaining({
+        source: 'BGR / UNESCO WHYMAP',
+        retrievedAt: '2026-07-25T10:00:00.000Z',
+      }),
+    }));
+    expect(groundwater.limitations.join(' ')).toContain('not water-table depth');
   });
 });

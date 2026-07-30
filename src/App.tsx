@@ -247,7 +247,7 @@ export default function App() {
 }
 
 type SharedSection = Exclude<WorkspaceSection, 'analysis'>;
-type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'moisture' | 'wind' | 'solar' | 'comments';
+type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'recentImagery' | 'moisture' | 'bedrock' | 'groundwater' | 'wind' | 'solar' | 'comments';
 const SHARED_STEPS = STEPS.filter((step) => step.id !== 'analysis') as Array<{ id: SharedSection; label: string; icon: typeof MapIcon }>;
 
 const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
@@ -259,7 +259,10 @@ const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
   machinery: false,
   firebreak: true,
   irrigation: true,
+  recentImagery: false,
   moisture: false,
+  bedrock: false,
+  groundwater: false,
   wind: false,
   solar: false,
   comments: true,
@@ -482,6 +485,34 @@ function SharedProjectPage({ token }: { token: string }) {
         zIndex: 35,
       })));
     }
+    if (layers.recentImagery) {
+      const trueColorUrl = project.siteProfile?.satellite.optical.trueColorPreviewUrl;
+      if (trueColorUrl) {
+        const imagery = add(new maps.GroundOverlay(trueColorUrl, sitePreviewBounds(project.site.polygon), { opacity: 0.72, clickable: false }));
+        imagery.setMap(map);
+      }
+    }
+    if (layers.bedrock) {
+      project.siteProfile?.soil.depthToBedrock?.samples.forEach((sample) => add(new maps.Rectangle({
+        map,
+        bounds: sample.cellBounds,
+        strokeColor: '#4d301a',
+        strokeOpacity: 0.8,
+        strokeWeight: 1,
+        fillColor: depthToBedrockColor(sample.depthM),
+        fillOpacity: 0.52,
+        clickable: false,
+        zIndex: 18,
+      })));
+    }
+    if (layers.groundwater && project.siteProfile?.groundwater?.status === 'available') {
+      const groundwater = add(new maps.GroundOverlay(
+        groundwaterImageUrl(sitePreviewBounds(project.site.polygon), project.siteProfile.groundwater.mapLayerId),
+        sitePreviewBounds(project.site.polygon),
+        { opacity: 0.58, clickable: false },
+      ));
+      groundwater.setMap(map);
+    }
     const windDirection = project.siteProfile?.solar.prevailingWindDirectionDegrees;
     if (layers.wind && project.siteProfile?.solar.status === 'available' && windDirection !== null && windDirection !== undefined) {
       const [source, destination] = windVectorCoordinates(project.siteProfile.centroid, windDirection, Math.max(35, Math.sqrt(project.siteProfile.areaM2) * 0.75));
@@ -620,7 +651,10 @@ function SharedProjectPage({ token }: { token: string }) {
     { id: 'machinery', icon: Tractor },
     { id: 'firebreak', icon: Flame },
     { id: 'irrigation', icon: Waves },
+    { id: 'recentImagery', icon: Satellite },
     { id: 'moisture', icon: Droplets },
+    { id: 'bedrock', icon: Layers3 },
+    { id: 'groundwater', icon: Droplets },
     { id: 'wind', icon: WindIcon },
     { id: 'solar', icon: CloudSun },
     { id: 'comments', icon: ClipboardCheck },
@@ -725,6 +759,14 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
         <SharedRow label={t('profile.elevation')} value={`${formatNumber(profile.terrain.elevationMeanM, 0)} m`} />
         <SharedRow label={t('shared.aspect')} value={`${profile.terrain.aspectLabel} · ${formatNumber(profile.terrain.aspectDegrees, 0)}°`} />
         <SharedRow label={t('shared.prevailingWind')} value={profile.solar.prevailingWindDirectionDegrees === null ? '—' : `${formatNumber(profile.solar.prevailingWindDirectionDegrees, 0)}° · ${formatNumber(profile.solar.meanWindSpeedMs ?? 0, 1)} m/s`} />
+      </SharedDataCard>
+      <SharedDataCard title={t('evidence.subsurfaceTitle')} icon={Layers3}>
+        <SharedRow label={t('evidence.bedrockTitle')} value={profile.soil.depthToBedrock?.modelledDepthM === null || profile.soil.depthToBedrock?.modelledDepthM === undefined ? '—' : `${formatNumber(profile.soil.depthToBedrock.modelledDepthM, 2)} m`} />
+        <SharedRow label={t('evidence.groundwaterTitle')} value={profile.groundwater?.resourceClass ? localizedGroundwaterLabel(profile.groundwater.resourceClass, locale) : '—'} />
+        <SharedRow label={t('evidence.groundwaterRecharge')} value={profile.groundwater?.rechargeClass ? `${localizedGroundwaterLabel(profile.groundwater.rechargeClass, locale)} mm/a` : '—'} />
+        {(profile.soil.verticalProfile?.length ?? 0) > 0 && <div className="shared-soil-profile">
+          {profile.soil.verticalProfile!.map((layer) => <span key={`${layer.depthTopCm}-${layer.depthBottomCm}`}><b>{layer.depthTopCm}–{layer.depthBottomCm} cm</b><small>pH {layer.ph ?? '—'} · C {layer.organicCarbonGKg ?? '—'} g/kg · {t('profile.clay')} {layer.clayPercent ?? '—'}%</small></span>)}
+        </div>}
       </SharedDataCard>
       <SharedClimateChart climate={profile.climate} />
       <WindClimatologyCard solar={profile.solar} />
@@ -870,10 +912,13 @@ function SharedEvidenceList({ profile }: { profile: SiteProfile }) {
     profile.climate.evidence,
     profile.solar.evidence,
     profile.soil.evidence,
+    profile.soil.depthToBedrock?.evidence,
+    profile.groundwater?.evidence,
     profile.landCover.evidence,
     ...profile.satellite.evidence,
-  ].filter((item, index, items) => item?.source && items.findIndex((candidate) => candidate?.sourceUrl === item.sourceUrl && candidate?.version === item.version) === index);
-  return <SharedDataCard title={t('shared.sources')} icon={Database}>{evidence.map((item) => <a className="shared-evidence-source" key={`${item.sourceUrl}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span><strong>{item.source}</strong><small>{item.version} · {shortDate(item.observedAt, locale)}</small></span><b>{translatedStatus(item.confidence, t)}</b></a>)}</SharedDataCard>;
+  ].filter((item): item is Evidence => Boolean(item))
+    .filter((item, index, items) => item.source && items.findIndex((candidate) => candidate.sourceUrl === item.sourceUrl && candidate.version === item.version) === index);
+  return <SharedDataCard title={t('shared.sources')} icon={Database}>{evidence.map((item) => <a className="shared-evidence-source" key={`${item.sourceUrl}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span><strong>{item.source}</strong><small>{item.version}</small><EvidenceDates evidence={item} compact /></span><b>{translatedStatus(item.confidence, t)}</b></a>)}</SharedDataCard>;
 }
 
 function SharedClimateChart({ climate }: { climate: SiteProfile['climate'] }) {
@@ -1020,6 +1065,12 @@ function WorkspaceApp() {
   const [hoveredTreeId, setHoveredTreeId] = useState<string | null>(null);
   const [treeSpeciesId, setTreeSpeciesId] = useState<string>('');
   const [showNdmi, setShowNdmi] = useState(false);
+  const [showRecentImagery, setShowRecentImagery] = useState(false);
+  const [showDepthToBedrock, setShowDepthToBedrock] = useState(false);
+  const [showGroundwater, setShowGroundwater] = useState(false);
+  const [basemap, setBasemap] = useState<'google' | 'esri'>('google');
+  const [imageryOpacity, setImageryOpacity] = useState(0.72);
+  const [groundwaterOpacity, setGroundwaterOpacity] = useState(0.58);
   const [showWaterSamples, setShowWaterSamples] = useState(false);
   const [showExistingVegetation, setShowExistingVegetation] = useState(true);
   const [showLayerPanel, setShowLayerPanel] = useState(false);
@@ -1101,6 +1152,10 @@ function WorkspaceApp() {
   const waterOverlaysRef = useRef<any[]>([]);
   const irrigationNetworkOverlaysRef = useRef<any[]>([]);
   const ndmiOverlayRef = useRef<any>(null);
+  const recentImageryOverlayRef = useRef<any>(null);
+  const depthToBedrockOverlaysRef = useRef<any[]>([]);
+  const groundwaterOverlayRef = useRef<any>(null);
+  const esriBasemapRef = useRef<any>(null);
   const mapClickRef = useRef<(coordinate: Coordinate) => void>(() => undefined);
   const undoRef = useRef<TreeInstance[][]>([]);
   const redoRef = useRef<TreeInstance[][]>([]);
@@ -1957,6 +2012,91 @@ function WorkspaceApp() {
     ndmiOverlayRef.current.setMap(map);
     return () => ndmiOverlayRef.current?.setMap(null);
   }, [showNdmi, siteProfile?.satellite.optical.ndmiPreviewUrl, site?.polygon]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    recentImageryOverlayRef.current?.setMap(null);
+    recentImageryOverlayRef.current = null;
+    const url = siteProfile?.satellite.optical.trueColorPreviewUrl;
+    if (!map || !maps || !site || !showRecentImagery || !url) return;
+    recentImageryOverlayRef.current = new maps.GroundOverlay(url, sitePreviewBounds(site.polygon), { opacity: imageryOpacity, clickable: false });
+    recentImageryOverlayRef.current.setMap(map);
+    return () => recentImageryOverlayRef.current?.setMap(null);
+  }, [showRecentImagery, imageryOpacity, siteProfile?.satellite.optical.trueColorPreviewUrl, site?.polygon]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    depthToBedrockOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    depthToBedrockOverlaysRef.current = [];
+    const samples = siteProfile?.soil.depthToBedrock?.samples ?? [];
+    if (!map || !maps || !showDepthToBedrock || !samples.length) return;
+    depthToBedrockOverlaysRef.current = samples.map((sample) => new maps.Rectangle({
+      map,
+      bounds: sample.cellBounds,
+      strokeColor: '#4d301a',
+      strokeOpacity: 0.78,
+      strokeWeight: 1,
+      fillColor: depthToBedrockColor(sample.depthM),
+      fillOpacity: 0.52,
+      clickable: true,
+      zIndex: 18,
+      title: `${sample.depthM.toFixed(2)} m`,
+    }));
+    return () => depthToBedrockOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [showDepthToBedrock, siteProfile?.soil.depthToBedrock?.samples]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    if (esriBasemapRef.current) {
+      removeOverlayMapType(map, esriBasemapRef.current);
+      esriBasemapRef.current = null;
+    }
+    if (basemap !== 'esri') return;
+    esriBasemapRef.current = new maps.ImageMapType({
+      getTileUrl: (coordinate: { x: number; y: number }, zoom: number) => esriWorldImageryTileUrl(coordinate, zoom),
+      tileSize: new maps.Size(256, 256),
+      minZoom: 0,
+      maxZoom: 20,
+      opacity: 1,
+      name: 'Esri World Imagery',
+      alt: 'Esri World Imagery',
+    });
+    map.overlayMapTypes.insertAt(0, esriBasemapRef.current);
+    return () => {
+      if (esriBasemapRef.current) removeOverlayMapType(map, esriBasemapRef.current);
+      esriBasemapRef.current = null;
+    };
+  }, [basemap, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    if (groundwaterOverlayRef.current) {
+      removeOverlayMapType(map, groundwaterOverlayRef.current);
+      groundwaterOverlayRef.current = null;
+    }
+    const groundwater = siteProfile?.groundwater;
+    if (!showGroundwater || !groundwater || groundwater.status === 'unavailable') return;
+    groundwaterOverlayRef.current = new maps.ImageMapType({
+      getTileUrl: (coordinate: { x: number; y: number }, zoom: number) => groundwaterTileUrl(coordinate, zoom, groundwater.mapLayerId),
+      tileSize: new maps.Size(256, 256),
+      minZoom: 0,
+      maxZoom: 18,
+      opacity: groundwaterOpacity,
+      name: 'WHYMAP groundwater',
+      alt: 'WHYMAP groundwater resources and recharge',
+    });
+    map.overlayMapTypes.push(groundwaterOverlayRef.current);
+    return () => {
+      if (groundwaterOverlayRef.current) removeOverlayMapType(map, groundwaterOverlayRef.current);
+      groundwaterOverlayRef.current = null;
+    };
+  }, [showGroundwater, groundwaterOpacity, siteProfile?.groundwater, mapReady]);
 
   mapClickRef.current = (coordinate) => {
     if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion') {
@@ -3592,6 +3732,11 @@ function WorkspaceApp() {
           {showLayerPanel && <div className="map-layer-panel" data-testid="map-layer-panel" role="group" aria-label={t('map.layers')}>
             <header><span><Layers3 size={16} /><strong>{t('map.layersTitle')}</strong></span><button aria-label={t('map.closeLayers')} onClick={() => setShowLayerPanel(false)}><X size={15} /></button></header>
             <p>{t('map.layersHint')}</p>
+            <small>{t('map.basemaps')}</small>
+            <div className="map-basemap-options">
+              <MapLayerToggle icon={Satellite} tone="basemap-google" active={basemap === 'google'} disabled={false} label={t('map.basemapGoogle')} hint={t('map.basemapGoogleHint')} toggleLabel={t('map.basemapGoogle')} onToggle={() => setBasemap('google')} />
+              <MapLayerToggle icon={Satellite} tone="basemap-esri" active={basemap === 'esri'} disabled={false} label={t('map.basemapEsri')} hint={t('map.basemapEsriHint')} toggleLabel={t('map.basemapEsri')} onToggle={() => setBasemap('esri')} />
+            </div>
             <small>{t('map.planningLayers')}</small>
             <MapLayerToggle icon={MapIcon} tone="boundary" active={showBoundary} disabled={!site} label={t('map.layerBoundary')} hint={t('map.layerBoundaryHint')} toggleLabel={t('map.toggleBoundary')} onToggle={() => { const next = !showBoundary; setShowBoundary(next); if (!next && drawMode === 'edit-site') setDrawMode('idle'); }} />
             <MapLayerToggle icon={CircleOff} tone="exclusions" active={showNoPlantAreas} disabled={!site || (!site.holes.length && !site.exclusions.length)} label={t('map.layerExclusions')} hint={t('map.layerExclusionsHint')} toggleLabel={t('map.toggleExclusions')} onToggle={() => setShowNoPlantAreas((value) => !value)} />
@@ -3607,8 +3752,13 @@ function WorkspaceApp() {
             <MapLayerToggle icon={Flame} tone="risk" active={showFireWeather} disabled={!site} label={t('map.layerFireWeather')} hint={t('map.layerFireWeatherHint')} toggleLabel={t('map.toggleFireWeather')} onToggle={() => setShowFireWeather((value) => !value)} />
             <MapLayerToggle icon={WindIcon} tone="wind" active={showWind} disabled={siteProfile?.solar.status !== 'available'} label={t('map.layerWind')} hint={t('map.layerWindHint')} toggleLabel={t('map.toggleWind')} onToggle={() => setShowWind((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="vegetation" active={showExistingVegetation} disabled={!siteProfile?.satellite.existingVegetation.patches.length} label={t('map.layerVegetation')} hint={t('map.layerVegetationHint')} toggleLabel={t('map.toggleVegetation')} onToggle={() => setShowExistingVegetation((value) => !value)} />
+            <MapLayerToggle icon={Satellite} tone="recent-imagery" active={showRecentImagery} disabled={!siteProfile?.satellite.optical.trueColorPreviewUrl} label={t('map.layerRecentImagery')} hint={t('map.layerRecentImageryHint')} toggleLabel={t('map.toggleRecentImagery')} onToggle={() => setShowRecentImagery((value) => !value)} />
+            {showRecentImagery && <LayerOpacityControl label={t('map.opacity')} value={imageryOpacity} onChange={setImageryOpacity} />}
             <MapLayerToggle icon={Waves} tone="ndmi" active={showNdmi} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} label={t('map.layerNdmi')} hint={t('map.layerNdmiHint')} toggleLabel={t('map.toggleNdmi')} onToggle={() => setShowNdmi((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="water" active={showWaterSamples} disabled={!siteProfile?.satellite.optical.waterSamples.length} label={t('map.layerWater')} hint={t('map.layerWaterHint')} toggleLabel={t('map.toggleWater')} onToggle={() => setShowWaterSamples((value) => !value)} />
+            <MapLayerToggle icon={Layers3} tone="bedrock" active={showDepthToBedrock} disabled={!siteProfile?.soil.depthToBedrock?.samples.length} label={t('map.layerDepthToBedrock')} hint={t('map.layerDepthToBedrockHint')} toggleLabel={t('map.toggleDepthToBedrock')} onToggle={() => setShowDepthToBedrock((value) => !value)} />
+            <MapLayerToggle icon={Droplets} tone="groundwater" active={showGroundwater} disabled={!siteProfile?.groundwater || siteProfile.groundwater.status === 'unavailable'} label={t('map.layerGroundwater')} hint={t('map.layerGroundwaterHint')} toggleLabel={t('map.toggleGroundwater')} onToggle={() => setShowGroundwater((value) => !value)} />
+            {showGroundwater && <LayerOpacityControl label={t('map.opacity')} value={groundwaterOpacity} onChange={setGroundwaterOpacity} />}
           </div>}
           {editingIrrigation && irrigation && <div className="irrigation-edit-status"><Route size={15} /><span><strong>{t('map.editIrrigation')}</strong><small>{t('map.editIrrigationHint')}</small></span></div>}
           {selectedVariant && (
@@ -3626,6 +3776,11 @@ function WorkspaceApp() {
               <small>Sentinel-2 · {shortDate(siteProfile.satellite.optical.latest.acquiredAt, locale)}</small>
             </div>
           )}
+          <div className="map-source-attribution" aria-live="polite">
+            <span>{t(basemap === 'esri' ? 'map.esriAttribution' : 'map.googleAttribution')}</span>
+            {showRecentImagery && <span>{t('map.sentinelAttribution')}</span>}
+            {showGroundwater && <span>{t('map.groundwaterAttribution')}</span>}
+          </div>
           {showWind && siteProfile?.solar.status === 'available' && siteProfile.solar.prevailingWindDirectionDegrees !== null && (
             <div className="wind-map-legend" data-testid="wind-map-legend">
               <i style={{ transform: `rotate(${siteProfile.solar.prevailingWindDirectionDegrees + 180}deg)` }}>↑</i>
@@ -3697,7 +3852,7 @@ function WorkspaceApp() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
           {section === 'water' && <WaterPanel
@@ -4007,7 +4162,7 @@ function OnboardingTour({
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
   icon: typeof Layers3;
-  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'solar' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind';
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'solar' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind' | 'basemap-google' | 'basemap-esri' | 'recent-imagery' | 'bedrock' | 'groundwater';
   active: boolean;
   disabled: boolean;
   label: string;
@@ -4021,6 +4176,14 @@ function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggl
     <span><strong>{label}</strong><small>{hint}</small></span>
     <Check className="map-layer-check" size={14} />
   </button>;
+}
+
+function LayerOpacityControl({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return <label className="layer-opacity-control">
+    <span>{label}</span>
+    <input type="range" min="0.2" max="1" step="0.05" value={value} onChange={(event) => onChange(Number(event.target.value))} />
+    <b>{Math.round(value * 100)}%</b>
+  </label>;
 }
 
 function MapToolbarButton({ icon: Icon, label, hint, active = false, disabled = false, expanded, className = '', onClick }: {
@@ -4907,14 +5070,15 @@ function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, p
   return values;
 }
 
-function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onOverride, additionalEvidence, onContinue }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[]; onContinue: () => void }) {
+function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onShowSubsurface, onOverride, additionalEvidence, onContinue }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onShowSubsurface: (layer: 'depth' | 'groundwater') => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[]; onContinue: () => void }) {
   const { t, locale } = useI18n();
-  const [activeEvidenceTab, setActiveEvidenceTab] = useState<'overview' | 'wind' | 'soil' | 'satellite' | 'sources'>('overview');
+  const [activeEvidenceTab, setActiveEvidenceTab] = useState<'overview' | 'wind' | 'soil' | 'subsurface' | 'satellite' | 'sources'>('overview');
   const [overrideField, setOverrideField] = useState<SiteProfileOverrideField>(SITE_PROFILE_OVERRIDE_DEFINITIONS[0].field);
   const [overrideInput, setOverrideInput] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideSource, setOverrideSource] = useState('Field measurement');
   const [overrideObservedAt, setOverrideObservedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const evidenceScrollRef = useRef<HTMLDivElement | null>(null);
   const selectedOverrideDefinition = SITE_PROFILE_OVERRIDE_DEFINITIONS.find((item) => item.field === overrideField) ?? SITE_PROFILE_OVERRIDE_DEFINITIONS[0];
   useEffect(() => {
     if (!profile) return;
@@ -4929,11 +5093,17 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
   const chemicalSoilProperties = soilProperties.filter((property) => property.category === 'chemical');
   const physicalSoilProperties = soilProperties.filter((property) => property.category === 'physical' || property.key === 'plant-available-water');
   const soilSatellite = profile.soil.satelliteScreening;
+  const depthToBedrock = profile.soil.depthToBedrock;
+  const verticalProfile = profile.soil.verticalProfile ?? [];
+  const groundwater = profile.groundwater;
   const evidenceItems = [
+    profile.location.evidence,
     profile.terrain.evidence,
     profile.climate.evidence,
     profile.solar.evidence,
     profile.soil.evidence,
+    ...(depthToBedrock ? [depthToBedrock.evidence] : []),
+    ...(groundwater ? [groundwater.evidence] : []),
     ...profile.satellite.existingVegetation.evidence,
     ...profile.satellite.evidence,
     ...additionalEvidence,
@@ -4942,15 +5112,16 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
     ['overview', t('evidence.tab.overview'), 6],
     ['wind', t('evidence.tab.wind'), profile.solar.windClimatology?.[0]?.sectors.length ?? 1],
     ['soil', t('evidence.tab.soil'), soilProperties.length || 1],
+    ['subsurface', t('evidence.tab.subsurface'), verticalProfile.length + Number(Boolean(depthToBedrock)) + Number(Boolean(groundwater))],
     ['satellite', t('evidence.tab.satellite'), profile.satellite.evidence.length + profile.satellite.existingVegetation.evidence.length],
     ['sources', t('evidence.tab.sources'), evidenceItems.length],
   ] as const;
   return (
     <div className="panel-body persistent-action-panel">
-      <div className="panel-scroll-content">
+      <div className="panel-scroll-content" ref={evidenceScrollRef}>
       <div className="panel-intro compact"><span className="eyebrow">{t('profile.eyebrow')}</span><h1>{profile.location.municipality ?? profile.location.region ?? profile.location.countryCode ?? t('profile.locationUnknown')}</h1><p>{profile.location.displayName}</p></div>
       <div className="evidence-tabs" role="tablist" aria-label={t('evidence.tabsLabel')} data-testid="evidence-tabs">
-        {evidenceTabs.map(([id, label, count]) => <button key={id} id={`evidence-tab-${id}`} role="tab" aria-selected={activeEvidenceTab === id} aria-controls={`evidence-panel-${id}`} className={activeEvidenceTab === id ? 'active' : ''} onClick={() => setActiveEvidenceTab(id)}><span>{label}</span><b>{count}</b></button>)}
+        {evidenceTabs.map(([id, label, count]) => <button key={id} id={`evidence-tab-${id}`} role="tab" aria-selected={activeEvidenceTab === id} aria-controls={`evidence-panel-${id}`} className={activeEvidenceTab === id ? 'active' : ''} onClick={() => { setActiveEvidenceTab(id); evidenceScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}><span>{label}</span><b>{count}</b></button>)}
       </div>
       {activeEvidenceTab === 'overview' && <div className="evidence-tabpanel" id="evidence-panel-overview" role="tabpanel" aria-labelledby="evidence-tab-overview">
         <div className="metric-grid">
@@ -5008,6 +5179,46 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
         {(profile.overrides?.length ?? 0) > 0 && <div className="override-audit"><strong>{t('profile.overrideAudit')}</strong>{[...(profile.overrides ?? [])].reverse().slice(0, 8).map((item) => <article key={item.id}><span><b>{t(SITE_PROFILE_OVERRIDE_DEFINITIONS.find((definition) => definition.field === item.field)?.labelKey ?? item.field)}</b><small>{item.sourceLabel} · {shortDate(item.observedAt, locale)}</small></span><span><s>{String(item.previousValue ?? '—')}</s><strong>{String(item.value)}{item.unit ? ` ${item.unit}` : ''}</strong></span><p>{item.reason}</p></article>)}</div>}
       </div>
       </div>}
+      {activeEvidenceTab === 'subsurface' && <div className="evidence-tabpanel" id="evidence-panel-subsurface" role="tabpanel" aria-labelledby="evidence-tab-subsurface">
+        <section className="subsurface-card" data-testid="subsurface-evidence">
+          <header>
+            <span><Layers3 size={18} /><i><small>{t('evidence.subsurfaceEyebrow')}</small><strong>{t('evidence.subsurfaceTitle')}</strong></i></span>
+            <StatusPill status={depthToBedrock?.status === 'available' && groundwater?.status === 'available' ? 'available' : 'partial'} />
+          </header>
+          <div className="subsurface-summary">
+            <article className="bedrock-summary">
+              <span><small>{t('evidence.bedrockTitle')}</small><strong>{depthToBedrock?.modelledDepthM !== null && depthToBedrock?.modelledDepthM !== undefined ? t('evidence.bedrockValue', { value: formatNumber(depthToBedrock.modelledDepthM, 2) }) : t('evidence.bedrockUnavailable')}</strong></span>
+              {depthToBedrock?.minimumDepthM !== null && depthToBedrock?.minimumDepthM !== undefined && depthToBedrock.maximumDepthM !== null && depthToBedrock.maximumDepthM !== undefined && <b>{t('evidence.bedrockRange', { minimum: formatNumber(depthToBedrock.minimumDepthM, 2), maximum: formatNumber(depthToBedrock.maximumDepthM, 2) })}</b>}
+              <p>{t('evidence.bedrockWarning')}</p>
+              <button className="text-button" disabled={!depthToBedrock?.samples.length} onClick={() => onShowSubsurface('depth')}>{t('evidence.showDepthLayer')} <ChevronRight size={14} /></button>
+              {depthToBedrock && <EvidenceDates evidence={depthToBedrock.evidence} compact />}
+            </article>
+            <article className="groundwater-summary">
+              <span><small>{t('evidence.groundwaterTitle')}</small><strong>{groundwater?.resourceClass ? localizedGroundwaterLabel(groundwater.resourceClass, locale) : t('evidence.groundwaterUnavailable')}</strong></span>
+              {groundwater?.aquiferType && <b>{localizedGroundwaterLabel(groundwater.aquiferType, locale)}</b>}
+              {groundwater?.rechargeClass && <dl><dt>{t('evidence.groundwaterRecharge')}</dt><dd>{localizedGroundwaterLabel(groundwater.rechargeClass, locale)} mm/a</dd></dl>}
+              <p>{t('evidence.groundwaterWarning')}</p>
+              <button className="text-button" disabled={!groundwater || groundwater.status === 'unavailable'} onClick={() => onShowSubsurface('groundwater')}>{t('evidence.showGroundwaterLayer')} <ChevronRight size={14} /></button>
+              {groundwater && <EvidenceDates evidence={groundwater.evidence} compact />}
+            </article>
+          </div>
+          <div className="soil-profile">
+            <div className="card-heading"><div><Database size={17} /><span><small>{t('evidence.profileTitle')}</small><strong>{t('evidence.profileBody')}</strong></span></div></div>
+            <div className="soil-profile-legend"><span>pH</span><span>{t('evidence.profileCarbon')}<i>g/kg</i></span><span>{t('soil.property.clay')}<i>%</i></span><span>{t('evidence.profileCoarse')}<i>%</i></span><span>{t('evidence.profileDensity')}<i>kg/dm³</i></span></div>
+            <div className="soil-profile-layers">
+              {verticalProfile.map((layer) => <article key={`${layer.depthTopCm}-${layer.depthBottomCm}`}>
+                <strong>{t('evidence.profileDepth', { top: layer.depthTopCm, bottom: layer.depthBottomCm })}</strong>
+                <span>{soilProfileValue(layer.ph)}</span>
+                <span>{soilProfileValue(layer.organicCarbonGKg)}</span>
+                <span>{soilProfileValue(layer.clayPercent)}</span>
+                <span>{soilProfileValue(layer.coarseFragmentsPercent)}</span>
+                <span>{soilProfileValue(layer.bulkDensityKgDm3)}</span>
+              </article>)}
+            </div>
+            {verticalProfile[0] && <EvidenceDates evidence={verticalProfile[0].evidence} />}
+          </div>
+        </section>
+      </div>}
       {activeEvidenceTab === 'satellite' && <div className="evidence-tabpanel" id="evidence-panel-satellite" role="tabpanel" aria-labelledby="evidence-tab-satellite">
       <div className="vegetation-audit" data-testid="existing-vegetation-audit">
         <div className="card-heading"><div><TreePine size={17} /><span><small>{t('profile.vegetationAudit')}</small><strong>{t('profile.protectedAreas', { count: vegetation.patches.length })}</strong></span></div><StatusPill status={vegetation.suitability} /></div>
@@ -5037,7 +5248,8 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
               <div><dt>{t('evidence.calculation')}</dt><dd>{t(`${usageKey}.calculation`)}</dd></div>
               <div><dt>{t('evidence.decision')}</dt><dd>{t(`${usageKey}.decision`)}</dd></div>
             </dl>
-            <footer><span>{item.version}</span><span>{item.resolution ?? t('evidence.resolutionUnavailable')}</span><time dateTime={item.observedAt}>{shortDate(item.observedAt, locale)}</time><a href={item.sourceUrl} target="_blank" rel="noreferrer">{t('evidence.openSource')}</a></footer>
+            <footer><span>{item.version}</span><span>{item.resolution ?? t('evidence.resolutionUnavailable')}</span><a href={item.sourceUrl} target="_blank" rel="noreferrer">{t('evidence.openSource')}</a></footer>
+            <EvidenceDates evidence={item} />
           </article>;
         })}
       </div>
@@ -5048,6 +5260,47 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onO
       </div>
     </div>
   );
+}
+
+function EvidenceDates({ evidence, compact = false }: { evidence: Evidence; compact?: boolean }) {
+  const { t, locale } = useI18n();
+  const entries: Array<{ key: string; label: string; value: string }> = [];
+  if (evidence.dataObservedAt) entries.push({ key: 'observed', label: t('evidence.date.observed'), value: shortDate(evidence.dataObservedAt, locale) });
+  if (evidence.coverageStart || evidence.coverageEnd) {
+    const start = evidence.coverageStart ? shortDate(evidence.coverageStart, locale) : '…';
+    const end = evidence.coverageEnd ? shortDate(evidence.coverageEnd, locale) : '…';
+    entries.push({ key: 'coverage', label: t('evidence.date.coverage'), value: `${start} — ${end}` });
+  }
+  if (evidence.publishedAt) entries.push({ key: 'published', label: t('evidence.date.published'), value: shortDate(evidence.publishedAt, locale) });
+  if (evidence.retrievedAt) entries.push({ key: 'retrieved', label: t('evidence.date.retrieved'), value: shortDate(evidence.retrievedAt, locale) });
+  if (evidence.computedAt) entries.push({ key: 'computed', label: t('evidence.date.computed'), value: shortDate(evidence.computedAt, locale) });
+  if (!entries.length) entries.push({ key: 'observed', label: t('evidence.date.observed'), value: shortDate(evidence.observedAt, locale) });
+  return <div className={`evidence-dates ${compact ? 'compact' : ''}`} aria-label={t('evidence.tabsLabel')}>
+    {entries.map((entry) => <span key={entry.key}><Clock3 size={compact ? 11 : 12} /><i>{entry.label}</i><time>{entry.value}</time></span>)}
+  </div>;
+}
+
+function soilProfileValue(value: number | null, unit = '') {
+  return value === null ? '—' : `${formatNumber(value, value < 10 ? 2 : 1)}${unit ? ` ${unit}` : ''}`;
+}
+
+function localizedGroundwaterLabel(value: string, locale: Locale) {
+  if (locale !== 'it') return value;
+  const translations: Record<string, string> = {
+    'major groundwater basin': 'bacino idrico sotterraneo principale',
+    'complex hydrogeological structure': 'struttura idrogeologica complessa',
+    'local or shallow aquifers': 'acquiferi locali o superficiali',
+    'complex hydrogeological structures': 'strutture idrogeologiche complesse',
+    'major groundwater basins': 'bacini idrici sotterranei principali',
+    'local and shallow aquifers': 'acquiferi locali e superficiali',
+    'medium (20 - 100)': 'media (20–100)',
+    'high (100 - 300)': 'alta (100–300)',
+    'very high (> 300)': 'molto alta (>300)',
+    'low (2 - 20)': 'bassa (2–20)',
+    'very low (< 2)': 'molto bassa (<2)',
+    'low - very low (< 20)': 'bassa o molto bassa (<20)',
+  };
+  return translations[value.toLowerCase()] ?? value;
 }
 
 function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
@@ -6075,6 +6328,64 @@ function windVectorCoordinates(center: Coordinate, sourceDirectionDegrees: numbe
     projection.unproject({ x: -sourceOffset.x, y: -sourceOffset.y }),
   ];
 }
+function esriWorldImageryTileUrl(coordinate: { x: number; y: number }, zoom: number) {
+  const tiles = 2 ** zoom;
+  if (coordinate.y < 0 || coordinate.y >= tiles) return '';
+  const x = ((coordinate.x % tiles) + tiles) % tiles;
+  return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${coordinate.y}/${x}`;
+}
+function groundwaterTileUrl(coordinate: { x: number; y: number }, zoom: number, layerId: number) {
+  const tiles = 2 ** zoom;
+  if (coordinate.y < 0 || coordinate.y >= tiles) return '';
+  const x = ((coordinate.x % tiles) + tiles) % tiles;
+  const origin = 20_037_508.342789244;
+  const tileSpan = origin * 2 / tiles;
+  const west = -origin + x * tileSpan;
+  const east = west + tileSpan;
+  const north = origin - coordinate.y * tileSpan;
+  const south = north - tileSpan;
+  const url = new URL('https://services.bgr.de/arcgis/rest/services/grundwasser/whymap_gwr/MapServer/export');
+  url.search = new URLSearchParams({
+    bbox: `${west},${south},${east},${north}`,
+    bboxSR: '3857',
+    imageSR: '3857',
+    size: '256,256',
+    format: 'png32',
+    transparent: 'true',
+    layers: `show:${layerId}`,
+    f: 'image',
+  }).toString();
+  return url.toString();
+}
+function groundwaterImageUrl(
+  bounds: { west: number; south: number; east: number; north: number },
+  layerId: number,
+) {
+  const url = new URL('https://services.bgr.de/arcgis/rest/services/grundwasser/whymap_gwr/MapServer/export');
+  url.search = new URLSearchParams({
+    bbox: `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`,
+    bboxSR: '4326',
+    imageSR: '4326',
+    size: '720,520',
+    format: 'png32',
+    transparent: 'true',
+    layers: `show:${layerId}`,
+    f: 'image',
+  }).toString();
+  return url.toString();
+}
+function removeOverlayMapType(map: any, overlay: any) {
+  for (let index = map.overlayMapTypes.getLength() - 1; index >= 0; index -= 1) {
+    if (map.overlayMapTypes.getAt(index) === overlay) map.overlayMapTypes.removeAt(index);
+  }
+}
+function depthToBedrockColor(depthM: number) {
+  if (depthM < 0.5) return '#c85d45';
+  if (depthM < 1.5) return '#e4944f';
+  if (depthM < 3) return '#e7c66c';
+  if (depthM < 10) return '#92ad73';
+  return '#4e8c8b';
+}
 function cloneSite(site: SiteBoundary): SiteBoundary {
   return {
     ...site,
@@ -6217,6 +6528,9 @@ function evidenceUsageKey(item: Evidence) {
   if (source.includes('elevation')) return 'evidence.usage.terrain';
   if (source.includes('open-meteo') && /radiation|wind|hourly/.test(context)) return 'evidence.usage.solar';
   if (source.includes('open-meteo')) return 'evidence.usage.climate';
+  if (/nominatim|geocoding/.test(source)) return 'evidence.usage.location';
+  if (/shangguan|depth-to-bedrock/.test(source)) return 'evidence.usage.bedrock';
+  if (/whymap|groundwater/.test(source)) return 'evidence.usage.groundwater';
   if (source.includes('soilgrids')) return 'evidence.usage.soil';
   if (source.includes('ndvi persistence')) return 'evidence.usage.woodyPersistence';
   if (source.includes('impact observatory')) return 'evidence.usage.landCoverHistory';

@@ -86,7 +86,7 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
   const profilePromise = page.waitForResponse((response) => response.url().endsWith('/api/site/profile') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   expect((await profilePromise).ok()).toBeTruthy();
-  await expect(page.getByTestId('evidence-tabs').getByRole('tab')).toHaveCount(5);
+  await expect(page.getByTestId('evidence-tabs').getByRole('tab')).toHaveCount(6);
   await expect(page.getByTestId('wind-map-legend')).toContainText('From NW');
   await page.getByRole('tab', { name: /Wind/ }).click();
   const windClimatology = page.getByTestId('wind-climatology');
@@ -108,6 +108,18 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
   await expect(soilComposition).toContainText('global model prediction, not a parcel sample');
   await expect(soilComposition.getByRole('link', { name: 'Open source' })).toHaveAttribute('href', /soilgrids/);
   await soilComposition.scrollIntoViewIfNeeded();
+  await page.getByRole('tab', { name: /Subsurface/ }).click();
+  const subsurface = page.getByTestId('subsurface-evidence');
+  await expect(subsurface).toContainText('Modelled depth to bedrock');
+  await expect(subsurface).toContainText('1.85 m');
+  await expect(subsurface).toContainText('Regional groundwater context');
+  await expect(subsurface).toContainText('complex hydrogeological structure');
+  await expect(subsurface).toContainText('100–200 cm');
+  await expect(subsurface).toContainText('Publication / release');
+  await expect(subsurface).toContainText('Retrieved');
+  await subsurface.getByRole('button', { name: 'Show depth cells' }).click();
+  await expect(page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide modelled depth-to-bedrock cells' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Close map layers' }).click();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-soil-composition.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
@@ -181,4 +193,15 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
   await expect(traceability).toContainText('Decision affected');
   await expect(traceability.getByRole('link', { name: 'Open source' }).first()).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-evidence-tabs.png', fullPage: false });
+
+  const toast = page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Close' }) });
+  if (await toast.isVisible()) await toast.getByRole('button', { name: 'Close' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: /Subsurface/ }).click();
+  await expect(page.getByTestId('subsurface-evidence')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  const mobileSubsurfaceBox = await page.getByTestId('subsurface-evidence').boundingBox();
+  expect(mobileSubsurfaceBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((mobileSubsurfaceBox?.x ?? 0) + (mobileSubsurfaceBox?.width ?? 500)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: '/private/tmp/growup-checkpoint-subsurface-mobile.png', fullPage: false });
 });

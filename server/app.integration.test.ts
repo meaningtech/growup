@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { writeArrayBuffer } from 'geotiff';
 import { TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
 import { defaultEconomicConfiguration } from '../src/data/economicProfiles.js';
@@ -17,6 +18,7 @@ import { createApp, type GrowupAppConfig } from './app.js';
 import type { GrowupUser } from './mongo.js';
 import { buildRevisionArtifacts } from './revisions.js';
 import { unavailableSatelliteProfile } from './sentinel.js';
+import { terrainSamplingPoints } from './site.js';
 
 const observedAt = '2026-07-21T00:00:00.000Z';
 const geometryValidation = {
@@ -58,6 +60,24 @@ const testAuth = {
     locale: testUser.locale,
   }),
 };
+
+function readOnlyTestDatabase(): NonNullable<GrowupAppConfig['database']> {
+  return {
+    health: async () => true,
+    geometryMetrics: async () => geometryValidation,
+    getUser: async () => null,
+    upsertUser: async () => testUser,
+    updateUserOnboarding: async (_id, preference) => ({ ...testUser, preferences: { onboarding: preference } }),
+    getProject: async () => null,
+    getSharedProject: async () => null,
+    listProjects: async () => [],
+    setProjectArchived: async (_ownerUserId, id, archivedAt) => ({ id, name: 'Project', updatedAt: observedAt, archivedAt }),
+    listProjectRevisions: async () => [],
+    getProjectRevision: async () => null,
+    getCalculationRun: async () => null,
+    saveProject: async (_ownerUserId, project) => project,
+  };
+}
 
 function siteProfile(): SiteProfile {
   const satellite = unavailableSatelliteProfile(new Date(observedAt));
@@ -228,6 +248,111 @@ function equatorialSiteProfile(): SiteProfile {
 }
 
 describe('Growup API integration', () => {
+  it('returns dated vertical-soil, bedrock and groundwater evidence from the site-profile API', async () => {
+    const terrainPointCount = terrainSamplingPoints(TEMPERATE_OPEN_FIELD_FIXTURE).length;
+    const soilTiff = writeArrayBuffer(new Uint16Array([100]), {
+      width: 1,
+      height: 1,
+      ModelPixelScale: [1, 1, 0],
+      ModelTiepoint: [0, 0, 0, 0, 0, 0],
+      GeographicTypeGeoKey: 4326,
+    });
+    const dates = Array.from({ length: 12 }, (_, index) => `2021-${String(index + 1).padStart(2, '0')}-15`);
+    const hourlyTime = ['2021-01-15T12:00', '2021-04-15T12:00', '2021-07-15T12:00', '2021-10-15T12:00'];
+    const app = createApp({
+      skipDatabaseMigration: true,
+      database: readOnlyTestDatabase(),
+      now: () => new Date('2026-07-25T12:00:00.000Z'),
+      nominatimUrl: 'https://location.example.test',
+      openMeteoForecastUrl: 'https://weather.example.test/forecast',
+      openMeteoArchiveUrl: 'https://weather.example.test/archive',
+      soilGridsWcsUrl: 'https://soil.example.test/mapserv',
+      overpassUrl: 'https://land.example.test/interpreter',
+      groundwaterMapServerUrl: 'https://water.example.test/groundwater',
+      planetaryComputerStacUrl: 'https://satellite.example.test/stac',
+      planetaryComputerDataUrl: 'https://satellite.example.test/data',
+      depthToBedrockSampler: async (coordinates) => coordinates.slice(0, 4).map((coordinate, index) => ({
+        coordinate,
+        depthM: [0.9, 1.4, 2.1, 2.8][index],
+        cellBounds: {
+          south: coordinate.lat - 0.001,
+          north: coordinate.lat + 0.001,
+          west: coordinate.lng - 0.001,
+          east: coordinate.lng + 0.001,
+        },
+      })),
+      fetchImpl: async (input) => {
+        const url = new URL(String(input));
+        if (url.hostname === 'location.example.test') {
+          return Response.json({ display_name: 'Test field, Sicily', address: { city: 'Test field', state: 'Sicily', country_code: 'it' } });
+        }
+        if (url.hostname === 'weather.example.test' && url.pathname === '/forecast') {
+          return Response.json(Array.from({ length: terrainPointCount }, (_, index) => ({ elevation: 100 + index / 10 })));
+        }
+        if (url.hostname === 'weather.example.test' && url.searchParams.has('hourly')) {
+          return Response.json({
+            hourly: {
+              time: hourlyTime,
+              direct_normal_irradiance: [400, 500, 650, 450],
+              diffuse_radiation: [80, 90, 100, 85],
+              shortwave_radiation: [350, 420, 560, 390],
+              wind_speed_10m: [2, 3, 4, 3],
+              wind_direction_10m: [300, 310, 320, 305],
+            },
+          });
+        }
+        if (url.hostname === 'weather.example.test') {
+          return Response.json({
+            daily: {
+              time: dates,
+              temperature_2m_mean: dates.map((_, index) => 12 + index),
+              temperature_2m_min: dates.map((_, index) => 6 + index),
+              temperature_2m_max: dates.map((_, index) => 19 + index),
+              precipitation_sum: dates.map(() => 45),
+              et0_fao_evapotranspiration: dates.map(() => 70),
+            },
+          });
+        }
+        if (url.hostname === 'soil.example.test') {
+          return new Response(soilTiff, { status: 200, headers: { 'Content-Type': 'image/tiff' } });
+        }
+        if (url.hostname === 'water.example.test') {
+          return Response.json({ features: [{ attributes: { aquif_type: 'complex hydrogeological structures', recharge: 'medium (20 - 100)', HYGEO2: 23 } }] });
+        }
+        if (url.hostname === 'land.example.test') {
+          return Response.json({ elements: [{ tags: { landuse: 'farmland' } }] });
+        }
+        return new Response(null, { status: 503 });
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/site/profile')
+      .send(TEMPERATE_OPEN_FIELD_FIXTURE)
+      .expect(200);
+
+    expect(response.body.soil.verticalProfile).toHaveLength(6);
+    expect(response.body.soil.depthToBedrock).toEqual(expect.objectContaining({
+      status: 'available',
+      modelledDepthM: 1.75,
+      evidence: expect.objectContaining({ publishedAt: '2017-03-10', retrievedAt: '2026-07-25T12:00:00.000Z' }),
+    }));
+    expect(response.body.groundwater).toEqual(expect.objectContaining({
+      status: 'available',
+      resourceClass: 'complex hydrogeological structure',
+      rechargeClass: 'medium (20 - 100)',
+      evidence: expect.objectContaining({ retrievedAt: '2026-07-25T12:00:00.000Z' }),
+    }));
+    expect(response.body.climate.evidence).toEqual(expect.objectContaining({
+      coverageStart: '2021-01-01',
+      coverageEnd: '2025-12-31',
+      retrievedAt: '2026-07-25T12:00:00.000Z',
+    }));
+    expect(response.body.terrain.evidence).toEqual(expect.objectContaining({
+      computedAt: '2026-07-25T12:00:00.000Z',
+    }));
+  });
+
   it('generates a location-independent design for an equatorial field', async () => {
     const app = createApp({ skipDatabaseMigration: true });
     const profile = equatorialSiteProfile();
