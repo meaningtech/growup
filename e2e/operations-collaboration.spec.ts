@@ -222,7 +222,8 @@ test('creates the authenticated share link and renders the public review surface
   await panel.getByLabel('Permission').selectOption('review');
   await panel.getByRole('checkbox', { name: /Include cost plan/ }).check();
   await panel.getByRole('button', { name: 'Create secure link' }).click();
-  await expect(panel.getByLabel('Active share link')).toHaveValue(/\/shared\/browser-review-token$/);
+  await expect(panel.getByRole('link', { name: 'Active share link' })).toHaveAttribute('href', /\/shared\/browser-review-token$/);
+  await expect(panel.getByRole('link', { name: 'Active share link' })).toHaveAttribute('target', '_blank');
   await expect(panel).toContainText('costs included');
   await page.screenshot({ path: '/private/tmp/growup-sharing-panel.png', fullPage: false });
 

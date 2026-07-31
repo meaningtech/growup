@@ -19,6 +19,7 @@ import {
   Droplets,
   Eye,
   EyeOff,
+  ExternalLink,
   Flame,
   FlaskConical,
   FolderOpen,
@@ -904,20 +905,50 @@ function SharedRow({ label, value }: { label: string; value: string }) {
   return <span className="shared-data-row"><small>{label}</small><strong>{value}</strong></span>;
 }
 
-function SharedEvidenceList({ profile }: { profile: SiteProfile }) {
-  const { t, locale } = useI18n();
-  const evidence = [
+function siteProfileEvidence(profile: SiteProfile, additionalEvidence: Evidence[] = []): Evidence[] {
+  const candidates = [
     profile.location.evidence,
     profile.terrain.evidence,
     profile.climate.evidence,
     profile.solar.evidence,
     profile.soil.evidence,
+    ...(profile.soil.properties ?? []).map((property) => property.evidence),
+    ...(profile.soil.verticalProfile ?? []).map((layer) => layer.evidence),
+    profile.soil.satelliteScreening?.evidence,
     profile.soil.depthToBedrock?.evidence,
     profile.groundwater?.evidence,
     profile.landCover.evidence,
     ...profile.satellite.evidence,
-  ].filter((item): item is Evidence => Boolean(item))
-    .filter((item, index, items) => item.source && items.findIndex((candidate) => candidate.sourceUrl === item.sourceUrl && candidate.version === item.version) === index);
+    ...profile.satellite.existingVegetation.evidence,
+    ...additionalEvidence,
+  ].filter((item): item is Evidence => Boolean(item));
+  const merged = new Map<string, Evidence>();
+  for (const item of candidates) {
+    const key = `${item.source}\u0000${item.sourceUrl}\u0000${item.version}`;
+    const previous = merged.get(key);
+    if (!previous) {
+      merged.set(key, item);
+      continue;
+    }
+    merged.set(key, {
+      ...previous,
+      ...item,
+      observedAt: item.observedAt || previous.observedAt,
+      dataObservedAt: item.dataObservedAt ?? previous.dataObservedAt,
+      coverageStart: item.coverageStart ?? previous.coverageStart,
+      coverageEnd: item.coverageEnd ?? previous.coverageEnd,
+      publishedAt: item.publishedAt ?? previous.publishedAt,
+      retrievedAt: item.retrievedAt ?? previous.retrievedAt,
+      computedAt: item.computedAt ?? previous.computedAt,
+      resolution: item.resolution ?? previous.resolution,
+    });
+  }
+  return [...merged.values()];
+}
+
+function SharedEvidenceList({ profile }: { profile: SiteProfile }) {
+  const { t, locale } = useI18n();
+  const evidence = siteProfileEvidence(profile);
   return <SharedDataCard title={t('shared.sources')} icon={Database}>{evidence.map((item) => <a className="shared-evidence-source" key={`${item.sourceUrl}-${item.version}`} href={item.sourceUrl} target="_blank" rel="noreferrer"><span><strong>{item.source}</strong><small>{item.version}</small><EvidenceDates evidence={item} compact /></span><b>{translatedStatus(item.confidence, t)}</b></a>)}</SharedDataCard>;
 }
 
@@ -4892,9 +4923,36 @@ function ProjectReadOnlyShareDialog({ projectName, configured, response, busy, o
         </div>
         {response?.enabled && response.mode === 'review' && <div className="read-only-warning"><Info size={16} />{t('sharing.reviewLinkWarning')}</div>}
         <button className="button primary wide" disabled={busy} onClick={() => void onCreate(expiresAt, includeCosts)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Share2 size={15} />}{readOnlyActive ? t('sharing.refreshReadOnlyLink') : t('sharing.createReadOnlyLink')}</button>
-        {readOnlyActive && shareUrl && <div className="read-only-link"><span><small>{t('sharing.activeLink')}</small><strong>{t('sharing.viewOnly')} · {response.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+        {readOnlyActive && shareUrl && <div className="read-only-link"><span><small>{t('sharing.activeLink')}</small><strong>{t('sharing.viewOnly')} · {response.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><ShareUrlControl shareUrl={shareUrl} /><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
       </>}
     </section>
+  </div>;
+}
+
+function ShareUrlControl({ shareUrl }: { shareUrl: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+    } catch {
+      const field = document.createElement('textarea');
+      field.value = shareUrl;
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.append(field);
+      field.select();
+      const copiedWithFallback = document.execCommand('copy');
+      field.remove();
+      if (copiedWithFallback) setCopied(true);
+    }
+  }
+
+  return <div className="share-url-control">
+    <a className="share-link-url" href={shareUrl} target="_blank" rel="noopener noreferrer" aria-label={t('sharing.activeLink')} title={shareUrl}><span>{shareUrl}</span><ExternalLink size={13} /></a>
+    <button className={copied ? 'copied' : ''} aria-label={t(copied ? 'sharing.copied' : 'sharing.copy')} title={t(copied ? 'sharing.copied' : 'sharing.copy')} onClick={() => void copy()}>{copied ? <Check size={15} /> : <Copy size={15} />}</button>
   </div>;
 }
 
@@ -4926,7 +4984,7 @@ function CollaborationPanel({ authenticated, configured, collaboration, sharePat
         <label className="share-cost-choice"><input type="checkbox" checked={includeCosts} onChange={(event) => setIncludeCosts(event.target.checked)} /><span><strong>{t('sharing.includeCosts')}</strong><small>{t('sharing.includeCostsBody')}</small></span></label>
         <button className="button primary" disabled={busy} onClick={() => void onEnable(mode, expiresAt, includeCosts)}>{busy && <LoaderCircle className="spin" size={15} />}{busy ? t('status.saving') : collaboration.share.enabled ? t('sharing.updateLink') : t('sharing.createLink')}</button>
       </div>
-      {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')} · {collaboration.share.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><div><input readOnly value={shareUrl} aria-label={t('sharing.activeLink')} /><button aria-label={t('sharing.copy')} onClick={() => void navigator.clipboard.writeText(shareUrl)}><Copy size={15} /></button></div><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
+      {collaboration.share.enabled && shareUrl && <div className="share-link"><span><small>{t('sharing.activeLink')}</small><strong>{collaboration.share.mode === 'review' ? t('sharing.canReview') : t('sharing.viewOnly')} · {collaboration.share.includeCosts ? t('sharing.costsIncluded') : t('sharing.costsExcluded')}</strong></span><ShareUrlControl shareUrl={shareUrl} /><button className="text-button danger" disabled={busy} onClick={() => void onDisable()}>{t('sharing.disable')}</button></div>}
       <div className="review-summary">
         <span><ClipboardCheck size={18} /><i><small>{t('sharing.reviewStatus')}</small><strong>{collaboration.review ? t(`sharing.status.${collaboration.review.status}`) : t('sharing.status.pending')}</strong></i></span>
         {collaboration.review && <p><strong>{collaboration.review.reviewerName}</strong> · {shortDate(collaboration.review.updatedAt, locale)}<br />{collaboration.review.note}</p>}
@@ -5096,18 +5154,7 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onS
   const depthToBedrock = profile.soil.depthToBedrock;
   const verticalProfile = profile.soil.verticalProfile ?? [];
   const groundwater = profile.groundwater;
-  const evidenceItems = [
-    profile.location.evidence,
-    profile.terrain.evidence,
-    profile.climate.evidence,
-    profile.solar.evidence,
-    profile.soil.evidence,
-    ...(depthToBedrock ? [depthToBedrock.evidence] : []),
-    ...(groundwater ? [groundwater.evidence] : []),
-    ...profile.satellite.existingVegetation.evidence,
-    ...profile.satellite.evidence,
-    ...additionalEvidence,
-  ];
+  const evidenceItems = siteProfileEvidence(profile, additionalEvidence);
   const evidenceTabs = [
     ['overview', t('evidence.tab.overview'), 6],
     ['wind', t('evidence.tab.wind'), profile.solar.windClimatology?.[0]?.sectors.length ?? 1],

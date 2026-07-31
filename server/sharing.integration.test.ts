@@ -29,6 +29,12 @@ describe('shared project review integration', () => {
       preferences: {},
     };
     const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE);
+    profile.satellite.optical.trueColorPreviewUrl = 'https://imagery.example.test/sentinel-2-true-color.png';
+    profile.satellite.evidence[0] = {
+      ...profile.satellite.evidence[0],
+      dataObservedAt: '2026-07-20T09:42:00.000Z',
+      retrievedAt: now,
+    };
     const species = DESIGN_SPECIES.slice(0, 4);
     const design = {
       ...DEFAULT_DESIGN_CONFIGURATION,
@@ -101,6 +107,23 @@ describe('shared project review integration', () => {
       fireOperations: expect.any(Object),
       economicConfiguration: null,
       costs: null,
+    }));
+    expect(viewOnlyProject.body.siteProfile.generatedAt).toBe(profile.generatedAt);
+    expect(viewOnlyProject.body.siteProfile.soil.verticalProfile).toEqual(profile.soil.verticalProfile);
+    expect(viewOnlyProject.body.siteProfile.soil.depthToBedrock).toEqual(profile.soil.depthToBedrock);
+    expect(viewOnlyProject.body.siteProfile.groundwater).toEqual(profile.groundwater);
+    expect(viewOnlyProject.body.siteProfile.satellite).toEqual(profile.satellite);
+    expect(viewOnlyProject.body.siteProfile.soil.verticalProfile[0].evidence).toEqual(expect.objectContaining({
+      publishedAt: '2021-06-14',
+      retrievedAt: profile.soil.evidence.retrievedAt,
+    }));
+    expect(viewOnlyProject.body.siteProfile.soil.depthToBedrock.evidence).toEqual(expect.objectContaining({
+      publishedAt: '2017-03-10',
+      retrievedAt: profile.soil.depthToBedrock?.evidence.retrievedAt,
+    }));
+    expect(viewOnlyProject.body.siteProfile.satellite.evidence[0]).toEqual(expect.objectContaining({
+      dataObservedAt: '2026-07-20T09:42:00.000Z',
+      retrievedAt: now,
     }));
     expect(viewOnlyProject.body.irrigation).toEqual(expect.objectContaining({
       annualWaterM3: expect.any(Number),

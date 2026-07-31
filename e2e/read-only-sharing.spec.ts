@@ -137,6 +137,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   } }));
   await page.route('**/api/projects', (route) => route.fulfill({ json: [summary] }));
 
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Projects' }).click();
   await page.getByRole('button', { name: 'Share Lanterna as read-only' }).click();
@@ -147,7 +148,21 @@ test('creates a read-only project link from the library and exposes no mutation 
   await dialog.getByRole('button', { name: 'Create read-only link' }).click();
   expect(submittedMode).toBe('view');
   expect(submittedIncludeCosts).toBe(false);
-  await expect(dialog.getByRole('textbox', { name: 'Active share link' })).toHaveValue(`${new URL(page.url()).origin}/shared/read-only-token`);
+  const expectedShareUrl = `${new URL(page.url()).origin}/shared/read-only-token`;
+  const activeShareLink = dialog.getByRole('link', { name: 'Active share link' });
+  await expect(activeShareLink).toHaveAttribute('href', expectedShareUrl);
+  await expect(activeShareLink).toHaveAttribute('target', '_blank');
+  await expect(activeShareLink).toHaveAttribute('rel', /noopener/);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin });
+  await dialog.getByRole('button', { name: 'Copy link' }).click();
+  await expect(dialog.getByRole('button', { name: 'Link copied' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expectedShareUrl);
+  await dialog.screenshot({ path: testInfo.outputPath('read-only-share-mobile.png') });
+  const popupPromise = page.waitForEvent('popup');
+  await activeShareLink.click();
+  const sharedPage = await popupPromise;
+  await expect(sharedPage).toHaveURL(expectedShareUrl);
+  await sharedPage.close();
   await expect(dialog).toContainText('View only');
 
   await page.goto('/shared/read-only-token');
@@ -155,7 +170,6 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(page.getByText('Read-only project map')).toHaveCount(0);
   await expect(page.locator('.shared-map-hint')).toHaveCount(0);
   await expect(page.getByTestId('shared-map')).toHaveAttribute('data-fake-google-map', 'true');
-  await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
   const sectionNavigation = page.getByRole('navigation', { name: 'Shared project sections' });
   const sectionButtons = sectionNavigation.getByRole('button');
@@ -189,8 +203,20 @@ test('creates a read-only project link from the library and exposes no mutation 
   await page.getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page.getByText('What is known about this site')).toBeVisible();
   await expect(page.getByText('Data sources used')).toBeVisible();
+  await expect(page.getByText('Soil profile and groundwater context')).toBeVisible();
+  await expect(page.getByText('1.85 m')).toBeVisible();
+  await expect(page.getByText('100–200 cm')).toBeVisible();
+  await expect(page.getByText('complex hydrogeological structure', { exact: true })).toBeVisible();
+  await expect(page.getByText('Publication / release', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Retrieved', { exact: true }).first()).toBeVisible();
   await expect(page.getByTestId('shared-climate-chart')).toBeVisible();
   await expect(page.getByTestId('wind-rose')).toBeVisible();
+  const bedrockLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Depth to bedrock' });
+  const groundwaterLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Groundwater context' });
+  await bedrockLayer.click();
+  await groundwaterLayer.click();
+  await expect(bedrockLayer).toHaveAttribute('aria-pressed', 'true');
+  await expect(groundwaterLayer).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Summer', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Summer', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('wind-climatology').screenshot({ path: testInfo.outputPath('shared-wind-mobile.png') });

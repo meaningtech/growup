@@ -99,6 +99,12 @@ export async function mockGoogleMaps(page: Page) {
         (window as any).__growupMapPolylines.push(this);
       }
     }
+    class FakeRectangle extends FakeOverlay {
+      constructor(options: Record<string, any>) {
+        super(options);
+        (window as any).__growupMapRectangles.push(this);
+      }
+    }
     class FakeGroundOverlay extends FakeOverlay {
       constructor(bounds: unknown, url: string, options: Record<string, any>) {
         super({ ...options, bounds, url });
@@ -119,6 +125,7 @@ export async function mockGoogleMaps(page: Page) {
     (window as any).__growupMapCircles = [];
     (window as any).__growupMapPolygons = [];
     (window as any).__growupMapPolylines = [];
+    (window as any).__growupMapRectangles = [];
     (window as any).google = {
       maps: {
         Map: FakeMap,
@@ -126,6 +133,7 @@ export async function mockGoogleMaps(page: Page) {
         Circle: FakeCircle,
         Polygon: FakePolygon,
         Polyline: FakePolyline,
+        Rectangle: FakeRectangle,
         GroundOverlay: FakeGroundOverlay,
         LatLngBounds: FakeLatLngBounds,
         SymbolPath: { CIRCLE: 'circle', FORWARD_CLOSED_ARROW: 'forward-closed-arrow' },
