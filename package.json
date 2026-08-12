@@ -2,6 +2,7 @@
   "name": "growup",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,green \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
@@ -16,7 +17,8 @@
     "db:migrate": "tsx server/migrate.ts",
     "db:migrate:mongo": "tsx server/migrateMongo.ts",
     "db:migrate:brand": "tsx scripts/migrateBrandCollections.ts",
-    "data:import": "tsx scripts/importCatalog.ts"
+    "data:import": "tsx scripts/importCatalog.ts",
+    "docs:screenshots": "tsx scripts/captureReadmeScreenshots.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",

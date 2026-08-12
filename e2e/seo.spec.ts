@@ -64,7 +64,7 @@ test('keeps product information behind an explicit control', async ({ page }, te
   await expect(panel).toContainText('Design the system');
   await expect(panel).toContainText('Prepare implementation');
   const repository = panel.getByRole('link', { name: /GrowUp is open source/ });
-  await expect(repository).toHaveAttribute('href', 'https://github.com/turinglabsorg/growup');
+  await expect(repository).toHaveAttribute('href', 'https://github.com/meaningtech/growup');
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds!.x).toBeGreaterThanOrEqual(0);

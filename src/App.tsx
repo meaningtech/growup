@@ -4301,7 +4301,7 @@ function InfoPanel({ onClose }: { onClose: () => void }) {
         <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>
         <header><span className="info-mark"><Sprout size={24} /></span><small>{t('info.eyebrow')}</small><h2 id="info-title">{t('info.title')}</h2><p>{t('info.body')}</p></header>
         <div className="info-features">{features.map(({ icon: Icon, title, body }, index) => <article key={title}><span><Icon size={17} /></span><small>0{index + 1}</small><h3>{title}</h3><p>{body}</p></article>)}</div>
-        <a className="info-open-source" href="https://github.com/turinglabsorg/growup" target="_blank" rel="noreferrer">
+        <a className="info-open-source" href="https://github.com/meaningtech/growup" target="_blank" rel="noreferrer">
           <span><Github size={19} /></span>
           <span><small>{t('info.openSourceEyebrow')}</small><strong>{t('info.openSourceTitle')}</strong><p>{t('info.openSourceBody')}</p></span>
           <ChevronRight size={18} />

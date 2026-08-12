@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a planning, evidence or workflow improvement.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user decision or operational problem, not only the interface change.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant evidence or sources
+      description: Link any scientific, regulatory, provider or field references that should inform the change.
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and tradeoffs
