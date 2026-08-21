@@ -633,7 +633,7 @@ function requireOnboardingPreference(value: unknown): OnboardingPreference {
   if (!value || typeof value !== 'object') throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'An onboarding preference is required.');
   const preference = value as Partial<OnboardingPreference>;
   const statuses = ['active', 'skipped', 'completed'];
-  const steps = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'complete'];
+  const steps = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'care', 'complete'];
   if (!statuses.includes(String(preference.status)) || !steps.includes(String(preference.step)) || Number.isNaN(Date.parse(String(preference.updatedAt)))) {
     throw httpError(400, 'INVALID_ONBOARDING_PREFERENCE', 'The onboarding preference is invalid.');
   }

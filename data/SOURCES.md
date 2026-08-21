@@ -26,6 +26,8 @@
 
 Runtime environmental requests and curated design data cite their source in the API response. The application currently uses Open-Meteo historical and forecast APIs, SoilGrids WCS, Nominatim, Overpass, FAO ECOCROP, EUFORGEN, Plants of the World Online, and official Sicilian regional price books. Their values are not redistributed as a bulk third-party dataset.
 
+The operations handbook matches taxa by scientific name against the local Italy pack in `data/operations/IT.json`, then genus archetypes. Curated windows are in `data/operations/curated-IT.json`. Rebuild with `npm run data:operations`. PFAF prose and raw PEP725 observations are not copied into the catalogue.
+
 ## Existing vegetation and water context
 
 - [Copernicus Sentinel-2 Level-2A via Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a): surface-reflectance scenes, SCL cloud mask, NDVI, NDMI, NDWI and BSI. Existing vegetation uses up to eight usable observations separated by at least 28 days, rather than an average from adjacent acquisitions.

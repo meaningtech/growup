@@ -15,7 +15,7 @@ import type {
 
 const DEFAULT_PROVIDER_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_PROVIDER_MODEL = 'deepseek-v4-pro';
-const SECTIONS = new Set(['site', 'profile', 'species', 'layout', 'water', 'fire', 'costs', 'analysis']);
+const SECTIONS = new Set(['site', 'profile', 'species', 'layout', 'water', 'fire', 'costs', 'analysis', 'care']);
 const REVIEW_DIMENSIONS: ProjectAnalysisDimensionId[] = ['evidence', 'species', 'design', 'water', 'fire', 'operations', 'economics', 'coherence'];
 
 export type AssistantProviderConfig = {
@@ -224,7 +224,7 @@ Allowed action JSON shapes:
 {"type":"set_timeline_year","year":0}
 {"type":"regenerate_layout"}
 {"type":"recalculate_water_and_costs"}
-{"type":"navigate","section":"site|profile|species|layout|water|fire|costs|analysis"}
+{"type":"navigate","section":"site|profile|species|layout|water|fire|costs|analysis|care"}
 Required response JSON shape:
 {"summary":"short answer","rationale":"grounded explanation","warnings":["warning"],"actions":[]}`;
 }

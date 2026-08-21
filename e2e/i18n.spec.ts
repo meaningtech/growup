@@ -42,6 +42,7 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByTestId('step-species')).toContainText('Progetta');
   await expect(page.getByTestId('step-fire')).toContainText('Incendi');
   await expect(page.getByTestId('step-analysis')).toContainText('Analisi');
+  await expect(page.getByTestId('step-care')).toContainText('Cura');
   await expect(page.getByRole('tab', { name: 'Specie' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Tagliafuoco' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Mezzi di lavoro' })).toBeVisible();

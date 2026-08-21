@@ -4,6 +4,7 @@ import { normalizeEconomicConfiguration } from '../src/data/economicProfiles.js'
 import { normalizeProjectCollaboration } from '../src/lib/collaboration.js';
 import { disabledFirebreakPlan } from '../src/lib/firebreak.js';
 import { normalizeFireOperationsPlan } from '../src/lib/fireOperations.js';
+import { normalizeOperationsPlan } from '../src/lib/operations.js';
 import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
 import { normalizeDesignConfiguration } from '../src/lib/layout.js';
 import { normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
@@ -26,7 +27,7 @@ export type GoogleIdentity = {
 
 export type OnboardingPreference = {
   status: 'active' | 'skipped' | 'completed';
-  step: 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'water' | 'fire' | 'costs' | 'review' | 'complete';
+  step: 'welcome' | 'location' | 'boundary' | 'analysis' | 'species' | 'design' | 'water' | 'fire' | 'costs' | 'review' | 'care' | 'complete';
   updatedAt: string;
   projectName?: string;
 };
@@ -305,7 +306,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
         { $set: {
           name: artifacts.state.name,
           state: artifacts.state,
-          schemaVersion: 3,
+          schemaVersion: 4,
           revision: artifacts.summary.revision,
           contentHash: artifacts.summary.contentHash,
           updatedAt: artifacts.state.updatedAt,
@@ -318,7 +319,7 @@ export async function saveProject(ownerUserId: string, project: ProjectState): P
         ownerUserId,
         name: artifacts.state.name,
         state: artifacts.state,
-        schemaVersion: 3,
+        schemaVersion: 4,
         revision: artifacts.summary.revision,
         contentHash: artifacts.summary.contentHash,
         archivedAt: null,
@@ -397,6 +398,7 @@ function normalizeProject(project: ProjectState): ProjectState {
     irrigationConfiguration: normalizeIrrigationConfiguration(project.irrigationConfiguration),
     economicConfiguration: normalizeEconomicConfiguration(project.economicConfiguration, countryCode),
     fireOperations: normalizeFireOperationsPlan(project.fireOperations, stableTimestamp),
+    operations: normalizeOperationsPlan(project.operations),
     collaboration: normalizeProjectCollaboration(project.collaboration ?? {
       share: {
         enabled: false,

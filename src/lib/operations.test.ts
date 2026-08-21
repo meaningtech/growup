@@ -1,0 +1,84 @@
+import { describe, expect, it } from 'vitest';
+import { DESIGN_SPECIES } from '../data/designSpecies';
+import { ITALY_OPERATIONS_PACK } from '../data/operationsItaly';
+import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../../test/fixtures/sites';
+import { openFieldProfile } from '../../test/fixtures/siteProfile';
+import { defaultEconomicConfiguration } from '../data/economicProfiles';
+import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from './layout';
+import { calculateIrrigation } from './irrigation';
+import {
+  OPERATIONS_MODEL_VERSION,
+  buildOperationsPlan,
+  monthsInWindow,
+  resolveOperationsProfile,
+  shiftWindow,
+} from './operations';
+
+const designReady = DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked');
+
+describe('operations matching', () => {
+  it('matches every design-ready species through the Italy pack', () => {
+    expect(designReady.length).toBe(50);
+    for (const species of designReady) {
+      const profile = resolveOperationsProfile({
+        scientificName: species.scientificName,
+        speciesId: species.id,
+        treeLike: species.treeLike,
+        countryCode: 'IT',
+        designSpecies: species,
+      });
+      expect(profile.matchLevel).toBe('country-pack');
+      expect(profile.packId).toBe('IT');
+      expect(profile.planting.window).not.toBeNull();
+      expect(profile.modelVersion).toBe(OPERATIONS_MODEL_VERSION);
+    }
+  });
+
+  it('keeps blocked taxa out of the Italy pack', () => {
+    expect(ITALY_OPERATIONS_PACK.has('acacia saligna')).toBe(false);
+  });
+
+  it('matches catalogue-scale names by genus when no species record exists', () => {
+    const beech = resolveOperationsProfile({ scientificName: 'Fagus sylvatica', treeLike: true, countryCode: 'IT' });
+    expect(beech.matchLevel).toBe('country-pack');
+    expect(beech.archetypeId).toBe('forestry-deciduous-climax');
+
+    const unknownPrunus = resolveOperationsProfile({ scientificName: 'Prunus padus', treeLike: true, countryCode: 'DE' });
+    expect(unknownPrunus.matchLevel).toBe('genus');
+    expect(unknownPrunus.archetypeId).toBe('grafted-deciduous-fruit');
+    expect(unknownPrunus.confidence).toBe('low');
+  });
+
+  it('leaves unmatched non-tree names unknown instead of inventing care', () => {
+    const profile = resolveOperationsProfile({ scientificName: 'Unknownia fictionalis', treeLike: false });
+    expect(profile.matchLevel).toBe('unknown');
+    expect(profile.planting.window).toBeNull();
+    expect(profile.unknownFields).toContain('planting.window');
+  });
+});
+
+describe('operations calendar', () => {
+  it('builds a deterministic site-adjusted plan from the selected layout', () => {
+    const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE, 'IT');
+    const species = designReady.slice(0, 8);
+    const variant = generateLayoutVariants(TEMPERATE_OPEN_FIELD_FIXTURE, profile, species, DEFAULT_DESIGN_CONFIGURATION)[0];
+    const irrigation = calculateIrrigation(variant, species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5, null, defaultEconomicConfiguration('IT'));
+    const plan = buildOperationsPlan(profile, variant, species, irrigation);
+    const again = buildOperationsPlan(profile, variant, species, irrigation);
+
+    expect(plan.modelVersion).toBe(OPERATIONS_MODEL_VERSION);
+    expect(plan.species).toHaveLength([...new Set(variant.trees.map((tree) => tree.speciesId))].length);
+    expect(plan.calendar.some((event) => event.event === 'plant')).toBe(true);
+    expect(plan.calendar.some((event) => event.event === 'prune' || event.event === 'train' || event.event === 'coppice')).toBe(true);
+    expect(JSON.stringify(plan.calendar)).toBe(JSON.stringify(again.calendar));
+    expect(plan.species.reduce((sum, entry) => sum + entry.count, 0)).toBe(variant.trees.length);
+  });
+
+  it('shifts Mediterranean planting windows by six months in the southern hemisphere', () => {
+    const olive = resolveOperationsProfile({ scientificName: 'Olea europaea', countryCode: 'IT' });
+    const northern = olive.planting.window!;
+    const southern = shiftWindow(northern, 6);
+    expect(monthsInWindow(northern)).toEqual([11, 12, 1, 2, 3]);
+    expect(monthsInWindow(southern)).toEqual([5, 6, 7, 8, 9]);
+  });
+});

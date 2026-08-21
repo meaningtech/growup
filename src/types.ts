@@ -542,6 +542,172 @@ export type MaintenanceTaskId = 'vegetation-control' | 'training-pruning' | 'bio
 export type MaintenancePhase = 'establishment' | 'development' | 'mature';
 export type MaintenanceModelBasis = 'measured-agroforestry-reference' | 'enterprise-budget-reference' | 'practice-standard-reference' | 'triangulated-planning-default';
 
+export type OperationsArchetypeId =
+  | 'grafted-deciduous-fruit'
+  | 'citrus-evergreen'
+  | 'mediterranean-evergreen-crop'
+  | 'forestry-evergreen-climax'
+  | 'forestry-deciduous-climax'
+  | 'placenta-biomass'
+  | 'mediterranean-shrub'
+  | 'climber-vine'
+  | 'succulent-cutting'
+  | 'woody-default';
+
+export type OperationsPackId = 'IT';
+export type OperationsMatchLevel = 'country-pack' | 'genus' | 'archetype' | 'woody-default' | 'unknown';
+export type OperationsPlantingMethod = 'bare-root' | 'container' | 'cutting' | 'grafted' | 'pad';
+export type OperationsFrostConstraint = 'plant-dormant' | 'wait-after-frost' | 'autumn-evergreen-ok' | 'unknown';
+export type OperationsPruningStyle = 'training' | 'production' | 'coppice' | 'pollard' | 'sanitary-only' | 'minimal';
+export type OperationsPhenologyAnchor = 'dormant' | 'after-harvest' | 'after-flowering' | 'biomass-cycle' | 'avoid-wet-wood';
+export type OperationsPruningFrequency = 'annual' | 'biennial' | 'every-3-years' | 'as-needed';
+export type OperationsFirstYearWater = 'critical' | 'moderate' | 'minimal-once-established';
+export type OperationsStepId =
+  | 'plant.water-in'
+  | 'plant.firm-soil'
+  | 'plant.orient-graft'
+  | 'plant.stake'
+  | 'plant.mulch-basin'
+  | 'care.first-summer-water'
+  | 'care.weed-circle'
+  | 'care.inspect-guards'
+  | 'prune.formative'
+  | 'prune.remove-dead'
+  | 'prune.keep-leader'
+  | 'coppice.biomass-on-site';
+export type OperationsCalendarEventId = 'plant' | 'water-check' | 'train' | 'prune' | 'coppice' | 'inspect' | 'mulch' | 'guard-check';
+export type OperationsFieldBasis = 'species-record' | 'genus' | 'archetype' | 'site-climate' | 'irrigation-model' | 'maintenance-model';
+
+export type MonthWindow = {
+  startMonth: number;
+  endMonth: number;
+  confidence: Evidence['confidence'];
+  sources: SpeciesSource[];
+};
+
+export type SpeciesOperationsFields = {
+  planting: {
+    window: MonthWindow | null;
+    method: OperationsPlantingMethod | null;
+    holeWidthM: number | null;
+    holeDepthM: number | null;
+    establishmentYears: number;
+    frostConstraint: OperationsFrostConstraint;
+    steps: OperationsStepId[];
+  };
+  pruning: {
+    style: OperationsPruningStyle | null;
+    phenologyAnchor: OperationsPhenologyAnchor | null;
+    window: MonthWindow | null;
+    frequency: OperationsPruningFrequency | null;
+    productivePruningExcluded: true;
+  };
+  care: {
+    firstYearWater: OperationsFirstYearWater | null;
+    mulch: boolean | null;
+    guards: boolean | null;
+    notes: OperationsStepId[];
+  };
+  phenology: {
+    leafOut: MonthWindow | null;
+    flowering: MonthWindow | null;
+    harvest: MonthWindow | null;
+    leafFall: MonthWindow | null;
+  };
+  limitations: string[];
+};
+
+export type SpeciesOperationsRecord = SpeciesOperationsFields & {
+  scientificName: string;
+  wfoId: string | null;
+  speciesId: string | null;
+  packId: OperationsPackId;
+  archetypeId: OperationsArchetypeId;
+  sources: SpeciesSource[];
+  confidence: Evidence['confidence'];
+};
+
+export type OperationsCuratedOverlay = {
+  scientificName: string;
+  wfoId?: string | null;
+  speciesId?: string | null;
+  archetypeId?: OperationsArchetypeId;
+  plantStart?: number;
+  plantEnd?: number;
+  pruneStart?: number;
+  pruneEnd?: number;
+  pruneAnchor?: OperationsPhenologyAnchor;
+  flowerStart?: number;
+  flowerEnd?: number;
+  harvestStart?: number;
+  harvestEnd?: number;
+};
+
+export type OperationsPackFile = {
+  packId: OperationsPackId;
+  modelVersion: string;
+  updatedAt: string;
+  records: SpeciesOperationsRecord[];
+};
+
+export type OperationsCoverageReport = {
+  modelVersion: string;
+  generatedAt: string;
+  packId: OperationsPackId;
+  passes: number;
+  recordCount: number;
+  designReadyComplete: number;
+  designReadyTotal: number;
+  incomplete: Array<{ scientificName: string; missing: string[] }>;
+  complete: boolean;
+};
+
+export type ResolvedOperationsProfile = SpeciesOperationsFields & {
+  modelVersion: string;
+  scientificName: string;
+  wfoId: string | null;
+  speciesId: string | null;
+  packId: OperationsPackId | null;
+  archetypeId: OperationsArchetypeId;
+  matchLevel: OperationsMatchLevel;
+  sources: SpeciesSource[];
+  confidence: Evidence['confidence'];
+  unknownFields: string[];
+};
+
+export type ProjectOperationsSpeciesEntry = {
+  speciesId: string;
+  scientificName: string;
+  count: number;
+  profile: ResolvedOperationsProfile;
+  resolvedPlantingWindow: MonthWindow | null;
+  resolvedPruningWindow: MonthWindow | null;
+  basis: OperationsFieldBasis[];
+  confidence: Evidence['confidence'];
+};
+
+export type ProjectOperationsCalendarEvent = {
+  yearOffset: number;
+  month: number;
+  event: OperationsCalendarEventId;
+  speciesId: string | null;
+  scientificName: string | null;
+  titleKey: string;
+  basis: OperationsFieldBasis;
+  confidence: Evidence['confidence'];
+};
+
+export type ProjectOperationsPlan = {
+  modelVersion: string;
+  generatedAt: string;
+  packId: OperationsPackId | null;
+  siteCountryCode: string | null;
+  species: ProjectOperationsSpeciesEntry[];
+  calendar: ProjectOperationsCalendarEvent[];
+  warnings: string[];
+  sources: SpeciesSource[];
+};
+
 export type MaintenanceTaskEstimate = {
   id: MaintenanceTaskId;
   hours: number;
@@ -996,6 +1162,7 @@ export type ProjectState = {
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
   fireOperations: FireOperationsPlan;
+  operations?: ProjectOperationsPlan | null;
   analysis?: ProjectAnalysisReport | null;
   collaboration: ProjectCollaboration;
   revision?: number;
@@ -1141,7 +1308,8 @@ export type AssistantProjectContext = {
   irrigation: IrrigationEstimate | null;
   costs: EstablishmentCost | null;
   fireOperations: FireOperationsPlan;
-  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
+  operations?: ProjectOperationsPlan | null;
+  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care';
 };
 
 export type AssistantAction =

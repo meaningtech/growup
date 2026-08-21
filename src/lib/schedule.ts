@@ -4,9 +4,11 @@ import type {
   Evidence,
   IrrigationEstimate,
   LayoutVariant,
+  ProjectOperationsPlan,
   SiteProfile,
   SystemMaintenanceEstimate,
 } from '../types';
+import { buildOperationsPlan } from './operations';
 
 export const OPERATIONAL_TASKS = ['verify-field', 'set-out', 'install-irrigation', 'plant', 'commission', 'monitor'] as const;
 export const MANAGEMENT_PHASES = ['establishment', 'development', 'mature'] as const;
@@ -50,6 +52,7 @@ export type OperationalSchedule = {
   irrigationMonths: IrrigationEstimate['monthly'];
   maintenance: IrrigationEstimate['systemMaintenance'];
   managementPhases: Array<(typeof MANAGEMENT_PHASES)[number]>;
+  operations: ProjectOperationsPlan;
   evidence: Evidence[];
   warnings: string[];
 };
@@ -133,6 +136,7 @@ export function buildOperationalSchedule(
       exclusions: [...maintenance.exclusions],
     },
     managementPhases: [...MANAGEMENT_PHASES],
+    operations: buildOperationsPlan(profile, variant, species, irrigation),
     evidence,
     warnings: [...new Set([...profile.warnings, ...variant.warnings, ...irrigation.network.warnings])],
   };

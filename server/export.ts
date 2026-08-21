@@ -97,6 +97,7 @@ export function exportProjectGeoJson(project: ProjectState) {
     generatedAt: project.updatedAt,
     generation: variant?.generation ?? null,
     maintenance: project.irrigation?.systemMaintenance ?? null,
+    operations: project.operations ?? null,
     fireOperations: project.fireOperations,
     review: project.collaboration.review,
     commentCount: project.collaboration.comments.length,
@@ -115,6 +116,7 @@ export function exportProjectCsv(project: ProjectState): string {
     'maintenance_year', 'maintenance_model', 'maintenance_phase', 'maintenance_hours', 'maintenance_labor_cost',
     'vegetation_control_hours', 'training_pruning_hours', 'biomass_succession_hours', 'inspection_replanting_hours',
     'fire_controls_complete', 'fire_controls_due', 'review_status', 'review_comment_count',
+    'operations_model', 'planting_start_month', 'planting_end_month', 'pruning_start_month', 'pruning_end_month', 'operations_match',
   ];
   if (!variant) return `${headers.join(',')}\n`;
   const year = project.timelineYear;
@@ -122,6 +124,7 @@ export function exportProjectCsv(project: ProjectState): string {
   const maintenance = project.irrigation?.systemMaintenance ?? null;
   const maintenanceHours = new Map(maintenance?.tasks.map((task) => [task.id, task.hours]) ?? []);
   const speciesCosts = new Map((project.costs?.bySpecies ?? []).map((item) => [item.speciesId, item]));
+  const operationsBySpecies = new Map((project.operations?.species ?? []).map((entry) => [entry.speciesId, entry]));
   const rows = [...variant.trees]
     .sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id))
     .map((tree) => {
@@ -130,6 +133,7 @@ export function exportProjectCsv(project: ProjectState): string {
       const cost = speciesCosts.get(tree.speciesId);
       const unitPurchaseCost = cost?.unitPlantCost ?? (species ? species.referencePurchasePrice * economics.plantReferenceMultiplier * economics.exchangeRateToLocal : 0);
       const laborHours = cost?.unitLaborHours ?? species?.plantingLaborHours ?? 0;
+      const operations = operationsBySpecies.get(tree.speciesId);
       return [
         project.id,
         project.name,
@@ -175,6 +179,12 @@ export function exportProjectCsv(project: ProjectState): string {
         project.fireOperations.tasks.filter((task) => task.status === 'due').length,
         project.collaboration.review?.status ?? 'pending',
         project.collaboration.comments.length,
+        project.operations?.modelVersion ?? '',
+        operations?.resolvedPlantingWindow?.startMonth ?? '',
+        operations?.resolvedPlantingWindow?.endMonth ?? '',
+        operations?.resolvedPruningWindow?.startMonth ?? '',
+        operations?.resolvedPruningWindow?.endMonth ?? '',
+        operations?.profile.matchLevel ?? '',
       ].map(csvCell).join(',');
     });
   return `${headers.join(',')}\n${rows.join('\n')}\n`;

@@ -18,6 +18,7 @@
     "db:migrate:mongo": "tsx server/migrateMongo.ts",
     "db:migrate:brand": "tsx scripts/migrateBrandCollections.ts",
     "data:import": "tsx scripts/importCatalog.ts",
+    "data:operations": "tsx scripts/enrichOperations.ts",
     "docs:screenshots": "tsx scripts/captureReadmeScreenshots.ts"
   },
   "dependencies": {

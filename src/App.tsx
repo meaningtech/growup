@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  BookOpen,
   ArrowRight,
   Ban,
   Bot,
@@ -75,6 +76,7 @@ import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculate
 import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
+import { buildOperationsPlan } from './lib/operations';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
 import { projectAnalysisFingerprint, setProjectAnalysisFindingResolution } from './lib/projectAnalysis';
 import {
@@ -136,7 +138,7 @@ import type {
   WindClimatologyPeriod,
 } from './types';
 
-type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis';
+type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care';
 type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
 type AssistantTurnStatus = 'pending' | 'applied' | 'dismissed' | 'replaced';
 type AssistantActivity = 'asking' | 'applying' | null;
@@ -228,6 +230,7 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'fire', label: 'Fire', icon: Flame },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'analysis', label: 'Analysis', icon: ClipboardCheck },
+  { id: 'care', label: 'Care', icon: BookOpen },
 ];
 
 function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | null {
@@ -238,7 +241,8 @@ function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | nu
   if (step === 'water') return 'water';
   if (step === 'fire') return 'fire';
   if (step === 'costs') return 'costs';
-  if (step === 'review' || step === 'complete') return 'analysis';
+  if (step === 'review') return 'analysis';
+  if (step === 'care' || step === 'complete') return 'care';
   return null;
 }
 
@@ -886,6 +890,22 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
       })}</div>
     </> : <p className="inline-empty">{t('shared.noCosts')}</p>}
   </SharedSectionFrame>;
+  if (section === 'care') {
+    const plan = project.operations ?? null;
+    return <SharedSectionFrame eyebrow={t('shared.section.careEyebrow')} title={t('shared.section.careTitle')} body={t('shared.section.careBody')}>
+      {plan ? <>
+        <div className="shared-metric-grid">
+          <SharedMetric label={t('care.species')} value={String(plan.species.length)} />
+          <SharedMetric label={t('care.events')} value={String(plan.calendar.length)} />
+          <SharedMetric label={t('care.pack')} value={plan.packId ?? t('care.noPack')} />
+        </div>
+        <div className="shared-species-list">{plan.species.map((entry) => {
+          const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+          return <article key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><small>{entry.scientificName} · {t('care.count', { count: entry.count })}</small></span><b>{t(`care.match.${entry.profile.matchLevel}`)}</b></article>;
+        })}</div>
+      </> : <p className="inline-empty">{t('care.emptyBody')}</p>}
+    </SharedSectionFrame>;
+  }
   return null;
 }
 
@@ -2571,6 +2591,10 @@ function WorkspaceApp() {
       irrigation: snapshot.irrigation,
       costs: snapshot.costs,
       fireOperations,
+      operations: (() => {
+        const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
+        return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant), snapshot.irrigation) : null;
+      })(),
       section: snapshot.section,
     };
   }
@@ -2614,7 +2638,7 @@ function WorkspaceApp() {
       }));
       setProjectAnalysis(report);
       setAnalysisAgentSelectedFindingIds([]);
-      if (onboarding?.status === 'active' && onboarding.step === 'review') updateOnboarding('active', 'complete');
+      if (onboarding?.status === 'active' && onboarding.step === 'review') updateOnboarding('active', 'care');
     } catch (reviewError) {
       setAnalysisError(messageOf(reviewError));
     } finally {
@@ -3002,7 +3026,7 @@ function WorkspaceApp() {
             ? 'design'
             : !projectAnalysis
               ? 'fire'
-              : 'complete';
+              : 'care';
     updateOnboarding('active', nextStep, authUser, nextName);
     const target = onboardingWorkspaceSection(nextStep);
     if (target) setSection(target);
@@ -3035,6 +3059,9 @@ function WorkspaceApp() {
       irrigation,
       costs,
       fireOperations,
+      operations: selectedVariant && siteProfile
+        ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant), irrigation)
+        : null,
       analysis: projectAnalysis,
       collaboration,
       revision: projectRevisionRef.current,
@@ -3643,6 +3670,7 @@ function WorkspaceApp() {
     fire: fireOperations.tasks.every((task) => task.status === 'complete' || task.status === 'not-applicable'),
     costs: Boolean(costs),
     analysis: Boolean(projectAnalysis && projectAnalysis.contextFingerprint === projectAnalysisFingerprint(currentAssistantContext())),
+    care: Boolean(selectedVariant),
   };
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
   const activeWorkspaceTask = busy ?? (analysisBusy ? t('busy.formalReview') : null);
@@ -3940,6 +3968,14 @@ function WorkspaceApp() {
             onRunAgent={runAnalysisAgent}
             onStopAgent={stopAnalysisAgent}
           />}
+          {section === 'care' && <CarePanel
+            profile={siteProfile}
+            variant={selectedVariant}
+            irrigation={irrigation}
+            onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
+            onAnalysis={() => setSection('analysis')}
+            onSchedule={() => setScheduleOpen(true)}
+          />}
         </section>
       </main>
 
@@ -3964,6 +4000,7 @@ function WorkspaceApp() {
         onCalculate={calculateWaterAndCosts}
         onContinueCosts={() => continueOnboarding('costs')}
         onContinueReview={() => continueOnboarding('review')}
+        onContinueCare={() => continueOnboarding('care')}
         onContinueComplete={() => continueOnboarding('complete')}
         reviewConfigured={Boolean(config?.assistant.configured)}
         reviewReady={Boolean(site && siteProfile && selectedVariant)}
@@ -4097,6 +4134,7 @@ function OnboardingTour({
   onCalculate,
   onContinueCosts,
   onContinueReview,
+  onContinueCare,
   onContinueComplete,
   reviewConfigured,
   reviewReady,
@@ -4124,6 +4162,7 @@ function OnboardingTour({
   onCalculate: () => void;
   onContinueCosts: () => void;
   onContinueReview: () => void;
+  onContinueCare: () => void;
   onContinueComplete: () => void;
   reviewConfigured: boolean;
   reviewReady: boolean;
@@ -4146,6 +4185,7 @@ function OnboardingTour({
     fire: { title: t('onboarding.fireTitle'), body: t('onboarding.fireBody') },
     costs: { title: t('onboarding.costsTitle'), body: t('onboarding.costsBody') },
     review: { title: t('onboarding.reviewTitle'), body: t('onboarding.reviewBody') },
+    care: { title: t('onboarding.careTitle'), body: t('onboarding.careBody') },
     complete: { title: t('onboarding.completeTitle'), body: t('onboarding.completeBody') },
   }[preference.step];
 
@@ -4185,7 +4225,8 @@ function OnboardingTour({
     {preference.step === 'costs' && <button className="onboarding-primary" onClick={onContinueReview}>{t('onboarding.continueReview')}<ClipboardCheck size={16} /></button>}
     {preference.step === 'review' && (reviewConfigured
       ? <button className="onboarding-primary" disabled={!reviewReady || reviewBusy} onClick={onReview}>{reviewBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{reviewBusy ? t('projectAnalysis.running') : t('onboarding.runReview')}</button>
-      : <button className="onboarding-primary" onClick={onContinueComplete}>{t('onboarding.finishWithoutAi')}<ChevronRight size={16} /></button>)}
+      : <button className="onboarding-primary" onClick={onContinueCare}>{t('onboarding.continueCare')}<BookOpen size={16} /></button>)}
+    {preference.step === 'care' && <button className="onboarding-primary" onClick={onContinueComplete}>{t('onboarding.continueComplete')}<ChevronRight size={16} /></button>}
     {preference.step === 'complete' && <div className="onboarding-complete-actions"><button onClick={onViewAnalysis}>{t('onboarding.viewAnalysis')}</button><button className="onboarding-primary" onClick={onComplete}>{t('onboarding.finish')}<Check size={16} /></button></div>}
     <button className="onboarding-skip" onClick={onSkip}>{t('onboarding.skip')}</button>
   </aside>;
@@ -5090,6 +5131,21 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       <div className="schedule-evidence">{schedule.evidence.map((item, index) => {
         const usage = evidenceUsageKey(item);
         return <article key={`${item.source}-${item.version}-${index}`}><span><strong>{item.source}</strong><small>{item.version} · {shortDate(item.observedAt, locale)}</small></span><span><b>{t('evidence.decision')}</b><small>{t(`${usage}.decision`)}</small></span><i>{translatedStatus(item.confidence, t)}</i></article>;
+      })}</div>
+    </ScheduleSection>
+    <ScheduleSection number="06" title={t('schedule.handbookTitle')} subtitle={t('schedule.handbookBody')}>
+      <div className="schedule-handbook">{schedule.operations.species.map((entry) => {
+        const item = speciesById.get(entry.speciesId);
+        const planting = entry.resolvedPlantingWindow
+          ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) })
+          : t('care.unknown');
+        return <article key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><small>{entry.scientificName} · {entry.count}</small><p>{planting} · {t(`care.prune.${entry.profile.pruning.style ?? 'unknown'}`)}</p></span><i>{t(`care.match.${entry.profile.matchLevel}`)}</i></article>;
+      })}</div>
+    </ScheduleSection>
+    <ScheduleSection number="07" title={t('schedule.calendarTitle')} subtitle={t('schedule.calendarBody')}>
+      <div className="schedule-calendar">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => {
+        const events = schedule.operations.calendar.filter((event) => event.yearOffset === 0 && event.month === month);
+        return <span key={month}><small>{monthLabel(month)}</small><strong>{events.length}</strong><b>{events.slice(0, 3).map((event) => t(`care.event.${event.event}`)).join(' · ') || '—'}</b></span>;
       })}</div>
     </ScheduleSection>
     {schedule.warnings.length > 0 && <section className="schedule-warnings"><strong>{t('schedule.warnings')}</strong>{schedule.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</section>}
@@ -6280,6 +6336,76 @@ function SoilPropertyGroup({ title, body, properties }: { title: string; body: s
   </section>;
 }
 function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
+function CarePanel({ profile, variant, irrigation, onPrepare, onAnalysis, onSchedule }: {
+  profile: SiteProfile | null;
+  variant: LayoutVariant | null;
+  irrigation: IrrigationEstimate | null;
+  onPrepare: () => void;
+  onAnalysis: () => void;
+  onSchedule: () => void;
+}) {
+  const { t, locale } = useI18n();
+  const [tab, setTab] = useState<'handbook' | 'calendar' | 'sources'>('handbook');
+  const monthLabel = (month: number) => month >= 1 && month <= 12
+    ? new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { month: 'short' }).format(new Date(Date.UTC(2026, month - 1, 1)))
+    : t('care.unknown');
+  if (!profile || !variant) return <div className="panel-body" data-testid="care-panel"><EmptyState icon={BookOpen} title={t('care.emptyTitle')} body={t('care.emptyBody')} action={t('care.openDesign')} onAction={onPrepare} /></div>;
+  const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant), irrigation);
+  const yearEvents = plan.calendar.filter((event) => event.yearOffset === 0);
+  return <div className="panel-body persistent-action-panel care-page" data-testid="care-panel">
+    <div className="panel-scroll-content">
+      <div className="panel-intro compact">
+        <span className="eyebrow">{t('care.eyebrow')}</span>
+        <h1>{t('care.title')}</h1>
+        <p>{t('care.body')}</p>
+      </div>
+      <div className="fire-analysis-tabs" role="tablist" aria-label={t('care.tabs')}>
+        {([['handbook', BookOpen], ['calendar', ClipboardCheck], ['sources', Database]] as const).map(([id, Icon]) => (
+          <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+            <Icon size={15} /><span>{t(`care.tab.${id}`)}</span>
+          </button>
+        ))}
+      </div>
+      {tab === 'handbook' && <div className="care-handbook" data-testid="care-handbook">
+        {plan.warnings.map((warning) => <p key={warning} className="care-warning">• {warning}</p>)}
+        {plan.species.map((entry) => {
+          const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+          const plantingMonths = entry.resolvedPlantingWindow ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) }) : t('care.unknown');
+          const pruningMonths = entry.resolvedPruningWindow ? t('care.window', { start: monthLabel(entry.resolvedPruningWindow.startMonth), end: monthLabel(entry.resolvedPruningWindow.endMonth) }) : t('care.unknown');
+          return <article key={entry.speciesId} className="care-species-card">
+            <header><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><small>{t('care.count', { count: entry.count })} · {t(`care.match.${entry.profile.matchLevel}`)}</small><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><i>{entry.scientificName}</i></span></header>
+            <div className="care-facts">
+              <span><small>{t('care.planting')}</small><strong>{plantingMonths}</strong><b>{t(`care.method.${entry.profile.planting.method ?? 'unknown'}`)}</b></span>
+              <span><small>{t('care.pruning')}</small><strong>{pruningMonths}</strong><b>{t(`care.prune.${entry.profile.pruning.style ?? 'unknown'}`)}</b></span>
+              <span><small>{t('care.firstYearWater')}</small><strong>{t(`care.water.${entry.profile.care.firstYearWater ?? 'unknown'}`)}</strong></span>
+            </div>
+            <ul>{[...entry.profile.planting.steps, ...entry.profile.care.notes].map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>
+            <small>{entry.profile.limitations[0]}</small>
+          </article>;
+        })}
+      </div>}
+      {tab === 'calendar' && <div className="care-calendar" data-testid="care-calendar">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => {
+          const events = yearEvents.filter((event) => event.month === month);
+          return <section key={month}>
+            <header><strong>{monthLabel(month)}</strong><b>{events.length}</b></header>
+            {events.length === 0 ? <p>{t('care.noEvents')}</p> : events.map((event, index) => (
+              <p key={`${event.speciesId}-${event.event}-${index}`}><span className="tree-dot" style={{ background: event.speciesId ? DESIGN_SPECIES_BY_ID.get(event.speciesId)?.color ?? '#789' : '#789' }} /><span>{t(`care.event.${event.event}`)}{event.scientificName ? ` · ${event.scientificName}` : ''}</span></p>
+            ))}
+          </section>;
+        })}
+      </div>}
+      {tab === 'sources' && <div className="care-sources" data-testid="care-sources">
+        {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
+      </div>}
+    </div>
+    <div className="panel-action-bar">
+      <button className="button schedule-button" onClick={onAnalysis}>{t('care.openAnalysis')}</button>
+      <button className="button primary wide sticky-action" data-testid="open-care-schedule" onClick={onSchedule}><Printer size={16} />{t('care.print')}</button>
+    </div>
+  </div>;
+}
+
 function EmptyState({ icon: Icon, title, body, action, onAction }: { icon: typeof Leaf; title: string; body: string; action: string; onAction: () => void }) { return <div className="empty-state"><span><Icon size={27} /></span><h2>{title}</h2><p>{body}</p><button className="button primary" onClick={onAction}>{action}<ChevronRight size={17} /></button></div>; }
 
 function post(value: unknown): RequestInit { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }; }
@@ -6446,6 +6572,11 @@ function cloneSite(site: SiteBoundary): SiteBoundary {
     existingTrees: site.existingTrees.map((tree) => ({ ...tree, coordinate: { ...tree.coordinate } })),
   };
 }
+function speciesForVariant(variant: LayoutVariant): DesignSpecies[] {
+  return [...new Map(variant.trees.map((tree) => [tree.speciesId, DESIGN_SPECIES_BY_ID.get(tree.speciesId)])).values()]
+    .filter((item): item is DesignSpecies => Boolean(item));
+}
+
 function previousSection(section: WorkspaceSection) { const index = STEPS.findIndex((step) => step.id === section); return STEPS[Math.max(0, index - 1)].id; }
 function nextSection(section: WorkspaceSection) { const index = STEPS.findIndex((step) => step.id === section); return STEPS[Math.min(STEPS.length - 1, index + 1)].id; }
 function stepLabelKey(section: WorkspaceSection) { return `nav.${section}`; }

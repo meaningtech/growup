@@ -144,7 +144,7 @@ button { color: inherit; }
 @keyframes onboarding-border { to { border-color: #e9faae; } }
 
 .step-rail { grid-row: 2; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 17px 8px 12px; color: rgba(255,255,255,.45); background: #153025; border-right: 1px solid rgba(255,255,255,.05); z-index: 30; }
-.step-rail > button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; width: 68px; height: 64px; color: inherit; background: transparent; border: 0; border-radius: 13px; cursor: pointer; transition: .16s ease; }
+.step-rail > button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 68px; height: 56px; color: inherit; background: transparent; border: 0; border-radius: 13px; cursor: pointer; transition: .16s ease; }
 .step-rail > button > span:last-child { font-size: var(--text-small); font-weight: 600; letter-spacing: .04em; }
 .step-rail > button:hover { color: rgba(255,255,255,.8); background: rgba(255,255,255,.04); }
 .step-rail > button:disabled { opacity: .38; cursor: not-allowed; }
@@ -919,6 +919,8 @@ button { color: inherit; }
   .schedule-table { overflow-x: auto; }
   .schedule-table > div { min-width: 680px; }
   .schedule-months { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .schedule-calendar { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .care-facts { grid-template-columns: 1fr; }
   .schedule-evidence article { grid-template-columns: minmax(0,1fr) auto; }
   .schedule-evidence article > span:nth-child(2) { grid-column: 1 / -1; }
   .step-rail { position: fixed; inset: auto 0 0; grid-row: auto; flex-direction: row; justify-content: space-around; width: 100%; height: calc(54px + env(safe-area-inset-bottom)); padding: 3px 2px calc(3px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid rgba(255,255,255,.08); box-shadow: 0 -10px 30px rgba(6,24,15,.15); z-index: 100; }
@@ -1253,6 +1255,28 @@ button { color: inherit; }
 .fire-analysis-tabs { position: sticky; top: -1px; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; margin: 0 0 13px; padding: 4px; background: rgba(245,243,233,.96); border: 1px solid var(--line); border-radius: 11px; backdrop-filter: blur(12px); z-index: 4; }
 .fire-analysis-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 38px; padding: 0 6px; color: #6b756e; background: transparent; border: 0; border-radius: 8px; font-size: var(--text-caption); font-weight: 800; cursor: pointer; }
 .fire-analysis-tabs button.active { color: #fff7e9; background: #63301f; box-shadow: 0 5px 14px rgba(83,37,22,.2); }
+.care-page .fire-analysis-tabs { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.care-page .fire-analysis-tabs button.active { background: #315a44; box-shadow: 0 5px 14px rgba(22,52,39,.2); }
+.care-handbook, .care-sources { display: grid; gap: 12px; }
+.care-warning { margin: 0; color: #7a4a1c; font-size: var(--text-small); }
+.care-species-card { display: grid; gap: 10px; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+.care-species-card > header { display: flex; gap: 10px; align-items: center; }
+.care-species-card > header span { display: grid; gap: 2px; min-width: 0; }
+.care-species-card small { color: var(--muted); }
+.care-species-card i { color: var(--muted); font-size: var(--text-caption); font-style: italic; }
+.care-facts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.care-facts span { display: grid; gap: 3px; padding: 8px; background: #f4f2e8; border-radius: 10px; }
+.care-facts small { font-size: var(--text-caption); }
+.care-species-card ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: var(--text-small); }
+.care-calendar { display: grid; gap: 10px; }
+.care-calendar section { padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.care-calendar header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.care-calendar p { display: flex; gap: 8px; align-items: center; margin: 0 0 6px; font-size: var(--text-small); }
+.care-sources article { display: grid; gap: 4px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.schedule-handbook, .schedule-calendar { display: grid; gap: 8px; }
+.schedule-handbook article { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.schedule-calendar { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.schedule-calendar span { display: grid; gap: 4px; padding: 10px; background: #f4f2e8; border-radius: 10px; }
 .fire-analysis-overview, .fire-data-view, .fire-sources-view, .fire-operations-view { display: grid; gap: 12px; }
 .fire-analysis-hero { display: grid; grid-template-columns: 116px minmax(0,1fr); gap: 17px; align-items: center; padding: 17px; overflow: hidden; color: white; background: radial-gradient(circle at 8% 10%,rgba(255,214,133,.24),transparent 42%),linear-gradient(145deg,#3d2119,#7c3825); border-radius: 15px 15px 15px 5px; }
 .fire-analysis-hero.moderate { background: radial-gradient(circle at 8% 10%,rgba(255,232,160,.25),transparent 42%),linear-gradient(145deg,#3f3018,#8a5a24); }
@@ -1526,6 +1550,7 @@ button { color: inherit; }
 .shared-section-nav button[data-section='water'] { --shared-tab-bg: #d9eaee; --shared-tab-border: #b9d4da; --shared-tab-ink: #2b5e6b; --shared-tab-active: #2f7183; }
 .shared-section-nav button[data-section='fire'] { --shared-tab-bg: #f1ded0; --shared-tab-border: #dfc0ab; --shared-tab-ink: #7b482c; --shared-tab-active: #965537; }
 .shared-section-nav button[data-section='costs'] { --shared-tab-bg: #ebe4c6; --shared-tab-border: #d8cca0; --shared-tab-ink: #6e5b21; --shared-tab-active: #82702c; }
+.shared-section-nav button[data-section='care'] { --shared-tab-bg: #dce8d4; --shared-tab-border: #c3d5b6; --shared-tab-ink: #3d5c32; --shared-tab-active: #4a6f3c; }
 .shared-section-nav button:hover { transform: translateY(-1px); box-shadow: inset 0 1px rgba(255,255,255,.65),0 4px 10px rgba(31,59,45,.08); }
 .shared-section-nav button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shared-section-nav button[aria-current='page'] { color: white; background: var(--shared-tab-active); border-color: var(--shared-tab-active); box-shadow: 0 5px 13px rgba(22,52,39,.17); transform: none; }

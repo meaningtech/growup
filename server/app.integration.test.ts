@@ -914,6 +914,7 @@ describe('Growup API integration', () => {
     expect(csvLines[0]).toContain('unit_purchase_cost,planting_labor_hours,planting_labor_cost');
     expect(csvLines[0]).toContain('height_low_m,height_base_m,height_high_m');
     expect(csvLines[0]).toContain('maintenance_year,maintenance_model,maintenance_phase,maintenance_hours,maintenance_labor_cost');
+    expect(csvLines[0]).toContain('operations_model,planting_start_month,planting_end_month,pruning_start_month,pruning_end_month,operations_match');
     expect(csvLines[0]).toContain('fire_controls_complete,fire_controls_due,review_status,review_comment_count');
     const repeatedCsv = await request(app).get(`/api/projects/${project.id}/export.csv`).set('Cookie', sessionCookie).expect(200);
     expect(repeatedCsv.text).toBe(csvResponse.text);

@@ -73,16 +73,19 @@ test('covers fire, costs, formal review and completion as explicit checkpoints',
   await page.reload();
 
   const tour = page.getByTestId('onboarding-tour');
-  await expect(tour).toContainText('Guided setup · 8 of 11');
+  await expect(tour).toContainText('Guided setup · 8 of 12');
   await expect(tour).toContainText('Read fire conditions before planning operations.');
   await tour.getByRole('button', { name: /Continue to project costs/ }).click();
-  await expect(tour).toContainText('Guided setup · 9 of 11');
+  await expect(tour).toContainText('Guided setup · 9 of 12');
   await expect(tour).toContainText('Check every economic assumption.');
   await tour.getByRole('button', { name: /Continue to final analysis/ }).click();
-  await expect(tour).toContainText('Guided setup · 10 of 11');
+  await expect(tour).toContainText('Guided setup · 10 of 12');
   await expect(tour).toContainText('Run the formal coherence gate.');
-  await tour.getByRole('button', { name: /Finish without AI review/ }).click();
-  await expect(tour).toContainText('Guided setup · 11 of 11');
+  await tour.getByRole('button', { name: /Continue to planting care/ }).click();
+  await expect(tour).toContainText('Guided setup · 11 of 12');
+  await expect(tour).toContainText('Read when and how to plant.');
+  await tour.getByRole('button', { name: /Continue to finish/ }).click();
+  await expect(tour).toContainText('Guided setup · 12 of 12');
   await expect(tour).toContainText('Your first project is ready.');
   await tour.getByRole('button', { name: 'Finish tour' }).click();
   await expect(tour).toHaveCount(0);

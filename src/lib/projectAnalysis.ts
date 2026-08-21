@@ -19,6 +19,7 @@ export function projectAnalysisFingerprint(context: AssistantProjectContext) {
     irrigation: context.irrigation,
     costs: context.costs,
     fireOperations: context.fireOperations,
+    operations: context.operations ?? null,
   });
   let hash = 2_166_136_261;
   for (let index = 0; index < payload.length; index += 1) {
