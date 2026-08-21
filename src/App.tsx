@@ -76,7 +76,8 @@ import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculate
 import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
-import { buildOperationsPlan } from './lib/operations';
+import { buildOperationsPlan, groupOperationsByYear } from './lib/operations';
+import { waningMoonRanges } from './lib/lunar';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
 import { projectAnalysisFingerprint, setProjectAnalysisFindingResolution } from './lib/projectAnalysis';
 import {
@@ -3973,7 +3974,6 @@ function WorkspaceApp() {
             variant={selectedVariant}
             irrigation={irrigation}
             onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
-            onAnalysis={() => setSection('analysis')}
             onSchedule={() => setScheduleOpen(true)}
           />}
         </section>
@@ -5143,10 +5143,10 @@ function OperationalSchedulePanel({ projectName, site, profile, variant, species
       })}</div>
     </ScheduleSection>
     <ScheduleSection number="07" title={t('schedule.calendarTitle')} subtitle={t('schedule.calendarBody')}>
-      <div className="schedule-calendar">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => {
-        const events = schedule.operations.calendar.filter((event) => event.yearOffset === 0 && event.month === month);
-        return <span key={month}><small>{monthLabel(month)}</small><strong>{events.length}</strong><b>{events.slice(0, 3).map((event) => t(`care.event.${event.event}`)).join(' · ') || '—'}</b></span>;
-      })}</div>
+      <div className="schedule-year-plan">{groupOperationsByYear(schedule.operations.calendar, schedule.operations.species).map((item) => <article key={item.year}>
+        <h3>{t('care.year', { year: item.year })}</h3>
+        {item.tasks.map((task) => <p key={task.event}><strong>{t(`care.event.${task.event}`)}</strong> · {task.months.map(monthLabel).join(', ')}{task.companionEvents.length ? ` · ${t('care.together', { tasks: task.companionEvents.map((event) => t(`care.event.${event}`)).join(', ') })}` : ''}{task.lunarCue === 'waning' ? ` · ${t('care.lunarTitle')}` : ''}</p>)}
+      </article>)}</div>
     </ScheduleSection>
     {schedule.warnings.length > 0 && <section className="schedule-warnings"><strong>{t('schedule.warnings')}</strong>{schedule.warnings.map((warning) => <p key={warning}>• {localizedDomainMessage(warning, t)}</p>)}</section>}
     <footer className="schedule-footer"><span>growup · {t('schedule.footer')}</span><span>{t('schedule.generatedFrom', { version: variant.generation.engineVersion })}</span></footer>
@@ -6335,22 +6335,25 @@ function SoilPropertyGroup({ title, body, properties }: { title: string; body: s
   </section>;
 }
 function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
-function CarePanel({ profile, variant, irrigation, onPrepare, onAnalysis, onSchedule }: {
+function CarePanel({ profile, variant, irrigation, onPrepare, onSchedule }: {
   profile: SiteProfile | null;
   variant: LayoutVariant | null;
   irrigation: IrrigationEstimate | null;
   onPrepare: () => void;
-  onAnalysis: () => void;
   onSchedule: () => void;
 }) {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<'handbook' | 'calendar' | 'sources'>('handbook');
+  const [tab, setTab] = useState<'handbook' | 'calendar' | 'sources'>('calendar');
+  const [selectedYear, setSelectedYear] = useState(1);
   const monthLabel = (month: number) => month >= 1 && month <= 12
-    ? new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { month: 'short' }).format(new Date(Date.UTC(2026, month - 1, 1)))
+    ? new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)))
     : t('care.unknown');
   if (!profile || !variant) return <div className="panel-body" data-testid="care-panel"><EmptyState icon={BookOpen} title={t('care.emptyTitle')} body={t('care.emptyBody')} action={t('care.openDesign')} onAction={onPrepare} /></div>;
   const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant), irrigation);
-  const yearEvents = plan.calendar.filter((event) => event.yearOffset === 0);
+  const years = groupOperationsByYear(plan.calendar, plan.species);
+  const currentYear = years.find((item) => item.year === selectedYear) ?? years[0];
+  const planningYear = new Date(plan.generatedAt).getUTCFullYear() + (currentYear?.yearOffset ?? 0);
+  const monthList = (months: number[]) => months.map(monthLabel).join(', ');
   return <div className="panel-body persistent-action-panel care-page" data-testid="care-panel">
     <div className="panel-scroll-content">
       <div className="panel-intro compact">
@@ -6384,22 +6387,36 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onAnalysis, onSche
         })}
       </div>}
       {tab === 'calendar' && <div className="care-calendar" data-testid="care-calendar">
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => {
-          const events = yearEvents.filter((event) => event.month === month);
-          return <section key={month}>
-            <header><strong>{monthLabel(month)}</strong><b>{events.length}</b></header>
-            {events.length === 0 ? <p>{t('care.noEvents')}</p> : events.map((event, index) => (
-              <p key={`${event.speciesId}-${event.event}-${index}`}><span className="tree-dot" style={{ background: event.speciesId ? DESIGN_SPECIES_BY_ID.get(event.speciesId)?.color ?? '#789' : '#789' }} /><span>{t(`care.event.${event.event}`)}{event.scientificName ? ` · ${event.scientificName}` : ''}</span></p>
-            ))}
-          </section>;
-        })}
+        <p className="care-calendar-intro">{t('care.calendarIntro')}</p>
+        <div className="care-year-rail" role="tablist" aria-label={t('care.yearsLabel')}>
+          {years.map((item) => <button key={item.year} role="tab" aria-selected={currentYear?.year === item.year} className={currentYear?.year === item.year ? 'active' : ''} onClick={() => setSelectedYear(item.year)}>{t('care.year', { year: item.year })}</button>)}
+        </div>
+        {currentYear ? currentYear.tasks.map((task) => {
+          const lunarMonths = task.lunarCue === 'waning' ? task.months : [];
+          return <article key={task.event} className="care-year-task" data-event={task.event}>
+            <header>
+              <small>{monthList(task.months)}</small>
+              <strong>{t(`care.event.${task.event}`)}</strong>
+            </header>
+            <ul className="care-year-species">{task.species.map((entry) => {
+              const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+              return <li key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span>{item ? speciesDisplayName(item, t) : entry.scientificName}<small>{t('care.count', { count: entry.count })}</small></span></li>;
+            })}</ul>
+            {task.companionEvents.length > 0 && <p className="care-together">{t('care.together', { tasks: task.companionEvents.map((event) => t(`care.event.${event}`)).join(', ') })}</p>}
+            {task.overlappingPlantMonths.length > 0 && <p className="care-together">{t('care.waterWithPlanting', { months: monthList(task.overlappingPlantMonths) })}</p>}
+            {task.lunarCue === 'waning' && <div className="care-lunar" data-testid="care-lunar">
+              <strong>{t('care.lunarTitle')}</strong>
+              <p>{t('care.lunarBody')}</p>
+              {lunarMonths.flatMap((month) => waningMoonRanges(planningYear, month).map((range) => <small key={`${month}-${range.startDay}`}>{t('care.lunarRange', { month: monthLabel(month), year: planningYear, start: range.startDay, end: range.endDay })}</small>))}
+            </div>}
+          </article>;
+        }) : <p>{t('care.noEvents')}</p>}
       </div>}
       {tab === 'sources' && <div className="care-sources" data-testid="care-sources">
         {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
       </div>}
     </div>
     <div className="panel-action-bar">
-      <button className="button schedule-button" onClick={onAnalysis}>{t('care.openAnalysis')}</button>
       <button className="button primary wide sticky-action" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} />{t('schedule.open')}</button>
     </div>
   </div>;

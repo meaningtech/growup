@@ -10,6 +10,7 @@ import { mappedOperationsCountries } from '../data/operationsCountries';
 import {
   OPERATIONS_MODEL_VERSION,
   buildOperationsPlan,
+  groupOperationsByYear,
   monthsInWindow,
   resolveOperationsProfile,
   shiftWindow,
@@ -97,6 +98,17 @@ describe('operations calendar', () => {
     expect(plan.calendar.some((event) => event.event === 'prune' || event.event === 'train' || event.event === 'coppice')).toBe(true);
     expect(JSON.stringify(plan.calendar)).toBe(JSON.stringify(again.calendar));
     expect(plan.species.reduce((sum, entry) => sum + entry.count, 0)).toBe(variant.trees.length);
+
+    const years = groupOperationsByYear(plan.calendar, plan.species);
+    expect(years[0]?.year).toBe(1);
+    expect(years.some((item) => item.year > 1)).toBe(true);
+    const yearOne = years[0];
+    expect(yearOne.tasks.some((task) => task.event === 'plant')).toBe(true);
+    const plant = yearOne.tasks.find((task) => task.event === 'plant');
+    const water = yearOne.tasks.find((task) => task.event === 'water-check');
+    expect(plant?.companionEvents).toEqual(expect.arrayContaining(['mulch', 'guard-check']));
+    expect(water).toBeDefined();
+    expect(years.some((item) => item.tasks.some((task) => task.lunarCue === 'waning'))).toBe(true);
   });
 
   it('shifts Mediterranean planting windows by six months in the southern hemisphere', () => {

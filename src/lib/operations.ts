@@ -8,10 +8,14 @@ import type {
   LayoutVariant,
   MonthWindow,
   OperationsArchetypeId,
+  OperationsCalendarEventId,
   OperationsFieldBasis,
   OperationsMatchLevel,
+  OperationsYearPlan,
+  OperationsYearTask,
   ProjectOperationsCalendarEvent,
   ProjectOperationsPlan,
+  ProjectOperationsSpeciesEntry,
   ResolvedOperationsProfile,
   SiteProfile,
   SpeciesOperationsFields,
@@ -149,6 +153,9 @@ export function buildOperationsPlan(
       for (const source of resolved.sources) sourceMap.set(`${source.label}:${source.version}`, source);
 
       pushSpeciesCalendar(calendar, item.id, item.scientificName, planting, pruning, resolved, irrigation);
+      if (resolved.pruning.style) {
+        for (const source of operationsSourceList('lunarPruningTradition')) sourceMap.set(`${source.label}:${source.version}`, source);
+      }
       return {
         speciesId: item.id,
         scientificName: item.scientificName,
@@ -357,6 +364,60 @@ function pushSpeciesCalendar(
   for (const year of [0, 1, 2]) {
     pushEvent(calendar, year, 3, 'inspect', speciesId, scientificName, 'care.event.inspect', 'maintenance-model', 'medium');
   }
+}
+
+export const OPERATIONS_YEAR_TASK_ORDER: OperationsCalendarEventId[] = ['plant', 'water-check', 'train', 'prune', 'coppice', 'inspect'];
+const PLANT_COMPANIONS: OperationsCalendarEventId[] = ['mulch', 'guard-check'];
+const LUNAR_WANING_EVENTS = new Set<OperationsCalendarEventId>(['train', 'prune', 'coppice']);
+
+export function groupOperationsByYear(
+  events: ProjectOperationsCalendarEvent[],
+  species: ProjectOperationsSpeciesEntry[],
+): OperationsYearPlan[] {
+  const counts = new Map(species.map((entry) => [entry.speciesId, { scientificName: entry.scientificName, count: entry.count }]));
+  const offsets = [...new Set(events.map((event) => event.yearOffset))].sort((left, right) => left - right);
+  return offsets.map((yearOffset) => {
+    const ofYear = events.filter((event) => event.yearOffset === yearOffset);
+    const plantMonths = uniqueMonths(ofYear.filter((event) => event.event === 'plant'));
+    const tasks = OPERATIONS_YEAR_TASK_ORDER.flatMap((event): OperationsYearTask[] => {
+      const rows = ofYear.filter((item) => item.event === event);
+      if (rows.length === 0) return [];
+      const months = uniqueMonths(rows);
+      const overlappingPlantMonths = event === 'water-check' ? months.filter((month) => plantMonths.includes(month)) : [];
+      const companionEvents = event === 'plant'
+        ? [
+          ...PLANT_COMPANIONS.filter((companion) => ofYear.some((item) => item.event === companion)),
+          ...(ofYear.some((item) => item.event === 'water-check' && plantMonths.includes(item.month)) ? ['water-check' as const] : []),
+        ]
+        : [];
+      return [{
+        event,
+        months,
+        species: uniqueSpecies(rows, counts),
+        lunarCue: LUNAR_WANING_EVENTS.has(event) ? 'waning' : null,
+        companionEvents,
+        overlappingPlantMonths,
+      }];
+    });
+    return { year: yearOffset + 1, yearOffset, tasks };
+  });
+}
+
+function uniqueMonths(events: ProjectOperationsCalendarEvent[]): number[] {
+  return [...new Set(events.map((event) => event.month))].sort((left, right) => left - right);
+}
+
+function uniqueSpecies(
+  events: ProjectOperationsCalendarEvent[],
+  counts: Map<string, { scientificName: string; count: number }>,
+): OperationsYearTask['species'] {
+  const seen = new Set<string>();
+  return events.flatMap((event) => {
+    if (!event.speciesId || seen.has(event.speciesId)) return [];
+    seen.add(event.speciesId);
+    const known = counts.get(event.speciesId);
+    return [{ speciesId: event.speciesId, scientificName: event.scientificName ?? known?.scientificName ?? event.speciesId, count: known?.count ?? 0 }];
+  });
 }
 
 function pruneYearOffsets(frequency: ResolvedOperationsProfile['pruning']['frequency'], archetypeId: OperationsArchetypeId): number[] {

@@ -57,6 +57,12 @@ export const OPERATIONS_SOURCES = {
     supports: ['Country-to-climate-group planting and pruning windows'],
     version: OPERATIONS_MODEL_VERSION,
   },
+  lunarPruningTradition: {
+    label: 'Orto da Coltivare / Mayoral et al. 2020',
+    url: 'https://www.mdpi.com/2073-4395/10/7/955',
+    supports: ['Traditional waning-moon pruning cue', 'no verified sap-flow effect'],
+    version: 'Agronomy 10:955, checked 2026-08-21',
+  },
 } as const satisfies Record<string, SpeciesSource>;
 
 export function operationsSourceList(...ids: Array<keyof typeof OPERATIONS_SOURCES>): SpeciesSource[] {

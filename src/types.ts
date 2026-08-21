@@ -699,6 +699,29 @@ export type ProjectOperationsCalendarEvent = {
   confidence: Evidence['confidence'];
 };
 
+export type OperationsLunarCue = 'waning' | null;
+
+export type OperationsYearTaskSpecies = {
+  speciesId: string;
+  scientificName: string;
+  count: number;
+};
+
+export type OperationsYearTask = {
+  event: OperationsCalendarEventId;
+  months: number[];
+  species: OperationsYearTaskSpecies[];
+  lunarCue: OperationsLunarCue;
+  companionEvents: OperationsCalendarEventId[];
+  overlappingPlantMonths: number[];
+};
+
+export type OperationsYearPlan = {
+  year: number;
+  yearOffset: number;
+  tasks: OperationsYearTask[];
+};
+
 export type ProjectOperationsPlan = {
   modelVersion: string;
   generatedAt: string;

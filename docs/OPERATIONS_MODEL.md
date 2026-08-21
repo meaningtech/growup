@@ -25,6 +25,10 @@ The local database is `data/operations/IT.json`. Human-reviewed windows live in 
 
 ## Calendar
 
-The project calendar is the union of species planting and pruning windows, first-year irrigation months from the existing water model, placenta coppice years aligned with `growup-growth-1.0.0`, and inspection reminders. Maintenance person-hours stay in `growup-maintenance-1.1.0`; this model says when the work falls, not how many hours it takes.
+The project calendar is grouped by planting year. Year 1 is establishment. Tasks that share months (planting, mulch, guards and irrigation checks) are shown as one field visit. Pruning years follow the species frequency, including the three-year placenta coppice aligned with `growup-growth-1.0.0`.
+
+Waning-moon pruning is an optional Mediterranean tradition (prune after full moon). Growup can list the astronomical waning ranges for those months. It is not a measured sap-flow effect: Mayoral et al., *Agronomy* 10:955 (2020) document the belief; stem-radius studies have not confirmed a lunar water cycle. Confidence is low. Maria Thun biodynamic day-types are not used (copyrighted annual calendar, not a public dataset).
+
+Maintenance person-hours stay in `growup-maintenance-1.1.0`; this model says when the work falls, not how many hours it takes.
 
 Harvest dates, when present, are phenology context. They do not add harvest labour or yield.

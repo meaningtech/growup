@@ -1269,9 +1269,22 @@ button { color: inherit; }
 .care-facts small { font-size: var(--text-caption); }
 .care-species-card ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: var(--text-small); }
 .care-calendar { display: grid; gap: 10px; }
-.care-calendar section { padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
-.care-calendar header { display: flex; justify-content: space-between; margin-bottom: 8px; }
-.care-calendar p { display: flex; gap: 8px; align-items: center; margin: 0 0 6px; font-size: var(--text-small); }
+.care-calendar-intro { margin: 0; color: var(--muted); font-size: var(--text-small); }
+.care-year-rail { display: flex; flex-wrap: wrap; gap: 6px; }
+.care-year-rail button { min-height: 36px; padding: 0 12px; color: #3d5c32; background: #e8eedf; border: 1px solid #c3d5b6; border-radius: 999px; font-size: var(--text-caption); font-weight: 800; cursor: pointer; }
+.care-year-rail button.active { color: #fff; background: #315a44; border-color: #315a44; }
+.care-year-task { display: grid; gap: 8px; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+.care-year-task header { display: grid; gap: 2px; }
+.care-year-task header small { color: var(--muted); text-transform: capitalize; }
+.care-year-species { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.care-year-species li { display: flex; gap: 8px; align-items: center; font-size: var(--text-small); }
+.care-year-species small { display: block; color: var(--muted); }
+.care-together, .care-lunar p { margin: 0; font-size: var(--text-small); }
+.care-lunar { display: grid; gap: 4px; padding: 10px; background: #f4f2e8; border-radius: 10px; }
+.care-lunar small { color: var(--muted); }
+.schedule-year-plan { display: grid; gap: 12px; }
+.schedule-year-plan article { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.schedule-year-plan p { margin: 6px 0 0; }
 .care-sources article { display: grid; gap: 4px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .schedule-handbook, .schedule-calendar { display: grid; gap: 8px; }
 .schedule-handbook article { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
