@@ -50,6 +50,6 @@ test('edits a species unit price and applies it to project costs', async ({ page
 
   await page.getByTestId('costs-tab-installation').click();
   await expect(page.getByTestId('cost-installation-table')).toBeVisible();
-  await page.getByTestId('costs-tab-management').click();
+  await page.getByTestId('step-care').click();
   await expect(page.getByTestId('open-operational-schedule')).toBeVisible();
 });

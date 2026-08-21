@@ -6,6 +6,7 @@ import { openFieldProfile } from '../../test/fixtures/siteProfile';
 import { defaultEconomicConfiguration } from '../data/economicProfiles';
 import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from './layout';
 import { calculateIrrigation } from './irrigation';
+import { mappedOperationsCountries } from '../data/operationsCountries';
 import {
   OPERATIONS_MODEL_VERSION,
   buildOperationsPlan,
@@ -47,6 +48,30 @@ describe('operations matching', () => {
     expect(unknownPrunus.matchLevel).toBe('genus');
     expect(unknownPrunus.archetypeId).toBe('grafted-deciduous-fruit');
     expect(unknownPrunus.confidence).toBe('low');
+  });
+
+  it('applies climate groups so the same species is covered in many countries', () => {
+    const countries = mappedOperationsCountries();
+    expect(countries.length).toBeGreaterThanOrEqual(150);
+    expect(countries.filter((item) => item.group === 'mediterranean').map((item) => item.countryCode)).toEqual(expect.arrayContaining(['IT', 'ES', 'GR', 'MA', 'CL']));
+    expect(countries.filter((item) => item.group === 'temperate').map((item) => item.countryCode)).toEqual(expect.arrayContaining(['DE', 'GB', 'US', 'NZ']));
+    expect(countries.filter((item) => item.group === 'tropical').map((item) => item.countryCode)).toEqual(expect.arrayContaining(['BR', 'IN', 'KE', 'MX']));
+
+    const spain = resolveOperationsProfile({ scientificName: 'Olea europaea', countryCode: 'ES' });
+    expect(spain.matchLevel).toBe('climate-group');
+    expect(spain.packId).toBe('ES');
+    expect(spain.climateGroup).toBe('mediterranean');
+    expect(monthsInWindow(spain.planting.window!)).toEqual([11, 12, 1, 2, 3]);
+
+    const germany = resolveOperationsProfile({ scientificName: 'Olea europaea', countryCode: 'DE' });
+    expect(germany.matchLevel).toBe('climate-group');
+    expect(germany.climateGroup).toBe('temperate');
+    expect(monthsInWindow(germany.planting.window!)).toEqual([3, 4, 5]);
+
+    const brazil = resolveOperationsProfile({ scientificName: 'Olea europaea', countryCode: 'BR' });
+    expect(brazil.climateGroup).toBe('tropical');
+    expect(brazil.confidence).toBe('low');
+    expect(monthsInWindow(brazil.planting.window!)).toEqual([4, 5, 6]);
   });
 
   it('leaves unmatched non-tree names unknown instead of inventing care', () => {

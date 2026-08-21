@@ -3952,7 +3952,7 @@ function WorkspaceApp() {
             onShowLayer={() => setShowFireWeather(true)}
             onCosts={() => setSection('costs')}
           />}
-          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode))} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={recalculateCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} onSchedule={() => setScheduleOpen(true)} />}
+          {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode))} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={recalculateCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} />}
           {section === 'analysis' && <ProjectAnalysisPanel
             configured={Boolean(config?.assistant.configured)}
             context={currentAssistantContext()}
@@ -6087,7 +6087,7 @@ function WaterPanel({
   );
 }
 
-function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare, onSchedule }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void; onSchedule: () => void }) {
+function CostsPanel({ costs, irrigation, species, configuration, onConfiguration, canCalculate, onCalculate, onPrepare }: { costs: EstablishmentCost | null; irrigation: IrrigationEstimate | null; species: DesignSpecies[]; configuration: EconomicConfiguration; onConfiguration: (value: EconomicConfiguration) => void; canCalculate: boolean; onCalculate: () => void; onPrepare: () => void }) {
   const { t } = useI18n();
   const [costTab, setCostTab] = useState<'summary' | 'installation' | 'management' | 'parameters'>('summary');
   const update = (patch: Partial<EconomicConfiguration>) => onConfiguration({
@@ -6186,7 +6186,6 @@ function CostsPanel({ costs, irrigation, species, configuration, onConfiguration
       {costTab === 'management' && <>
       <CostTimelineChart costs={costs} irrigation={irrigation} />
       <MaintenanceTimelineChart costs={costs} irrigation={irrigation} />
-      <button className="button schedule-button wide" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} /> {t('schedule.open')}</button>
       </>}
       {costTab === 'installation' &&
       <div className="cost-table" data-testid="cost-installation-table"><div className="cost-table-head"><span>{t('costs.species')}</span><span>{t('costs.quantity')}</span><span>{t('costs.plant')}</span><span>{t('costs.labourShort')}</span><span>{t('costs.total')}</span></div>{costs.bySpecies.map((item) => {
@@ -6373,7 +6372,7 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onAnalysis, onSche
           const plantingMonths = entry.resolvedPlantingWindow ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) }) : t('care.unknown');
           const pruningMonths = entry.resolvedPruningWindow ? t('care.window', { start: monthLabel(entry.resolvedPruningWindow.startMonth), end: monthLabel(entry.resolvedPruningWindow.endMonth) }) : t('care.unknown');
           return <article key={entry.speciesId} className="care-species-card">
-            <header><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><small>{t('care.count', { count: entry.count })} · {t(`care.match.${entry.profile.matchLevel}`)}</small><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><i>{entry.scientificName}</i></span></header>
+            <header><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><small>{t('care.count', { count: entry.count })} · {t(`care.match.${entry.profile.matchLevel}`)}{entry.profile.climateGroup ? ` · ${t(`care.group.${entry.profile.climateGroup}`)}` : ''}{entry.profile.packId ? ` · ${entry.profile.packId}` : ''}</small><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><i>{entry.scientificName}</i></span></header>
             <div className="care-facts">
               <span><small>{t('care.planting')}</small><strong>{plantingMonths}</strong><b>{t(`care.method.${entry.profile.planting.method ?? 'unknown'}`)}</b></span>
               <span><small>{t('care.pruning')}</small><strong>{pruningMonths}</strong><b>{t(`care.prune.${entry.profile.pruning.style ?? 'unknown'}`)}</b></span>
@@ -6401,7 +6400,7 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onAnalysis, onSche
     </div>
     <div className="panel-action-bar">
       <button className="button schedule-button" onClick={onAnalysis}>{t('care.openAnalysis')}</button>
-      <button className="button primary wide sticky-action" data-testid="open-care-schedule" onClick={onSchedule}><Printer size={16} />{t('care.print')}</button>
+      <button className="button primary wide sticky-action" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} />{t('schedule.open')}</button>
     </div>
   </div>;
 }

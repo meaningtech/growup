@@ -26,7 +26,7 @@
 
 Runtime environmental requests and curated design data cite their source in the API response. The application currently uses Open-Meteo historical and forecast APIs, SoilGrids WCS, Nominatim, Overpass, FAO ECOCROP, EUFORGEN, Plants of the World Online, and official Sicilian regional price books. Their values are not redistributed as a bulk third-party dataset.
 
-The operations handbook matches taxa by scientific name against the local Italy pack in `data/operations/IT.json`, then genus archetypes. Curated windows are in `data/operations/curated-IT.json`. Rebuild with `npm run data:operations`. PFAF prose and raw PEP725 observations are not copied into the catalogue.
+The operations handbook matches taxa by scientific name against the local Italy pack in `data/operations/IT.json`, then a country climate group (Mediterranean, temperate or tropical) from `src/data/operationsCountries.ts`. Curated windows are in `data/operations/curated-IT.json`. Rebuild with `npm run data:operations`. PFAF prose and raw PEP725 observations are not copied into the catalogue.
 
 ## Existing vegetation and water context
 

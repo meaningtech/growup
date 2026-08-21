@@ -1,4 +1,5 @@
 import { GENUS_ARCHETYPES, OPERATIONS_ARCHETYPES, archetypeForDesignSpecies } from '../data/operationsArchetypes';
+import { applyClimateGroup, climateGroupForCountry, normalizeOperationsCountry } from '../data/operationsCountries';
 import { ITALY_OPERATIONS_PACK } from '../data/operationsItaly';
 import { OPERATIONS_MODEL_VERSION, operationsSourceList } from '../data/operationsSources';
 import type {
@@ -69,7 +70,8 @@ export function resolveOperationsProfile(identity: OperationsIdentity): Resolved
   const normalized = normalizeTaxonName(scientificName);
   const italy = ITALY_OPERATIONS_PACK.get(normalized);
   if (italy) {
-    return resolvedFromRecord(italy, 'country-pack', identity);
+    const adjusted = applyClimateGroup(italy, identity.countryCode);
+    return resolvedFromRecord(adjusted.record, adjusted.matchLevel, identity, adjusted.group);
   }
 
   const genus = taxonGenus(scientificName);
@@ -92,7 +94,8 @@ export function resolveOperationsProfile(identity: OperationsIdentity): Resolved
     scientificName,
     wfoId: identity.wfoId ?? null,
     speciesId: identity.speciesId ?? null,
-    packId: null,
+    packId: normalizeOperationsCountry(identity.countryCode),
+    climateGroup: climateGroupForCountry(identity.countryCode),
     archetypeId: 'woody-default',
     matchLevel: 'unknown',
     sources: WOODY_SOURCES,
@@ -140,8 +143,8 @@ export function buildOperationsPlan(
       const planting = adjustPlantingWindow(resolved.planting.window, resolved.planting.frostConstraint, profile, hemisphereOffset, warnings, item.scientificName);
       const pruning = resolved.pruning.window ? shiftWindow(resolved.pruning.window, hemisphereOffset) : null;
       if (planting) basis.push('site-climate');
-      if (countryCode && countryCode !== 'IT' && resolved.packId === 'IT') {
-        warnings.push(`Italy operations pack applied to ${item.scientificName}; the calendar is still shifted to the site climate.`);
+      if (resolved.matchLevel === 'climate-group' && resolved.climateGroup && resolved.climateGroup !== 'mediterranean') {
+        warnings.push(`${resolved.climateGroup[0]!.toUpperCase()}${resolved.climateGroup.slice(1)} climate group applied for ${resolved.packId ?? countryCode}; planting windows follow that group, then site climate.`);
       }
       for (const source of resolved.sources) sourceMap.set(`${source.label}:${source.version}`, source);
 
@@ -164,7 +167,7 @@ export function buildOperationsPlan(
   return {
     modelVersion: OPERATIONS_MODEL_VERSION,
     generatedAt,
-    packId: entries.some((entry) => entry.profile.packId === 'IT') ? 'IT' : null,
+    packId: normalizeOperationsCountry(countryCode) ?? entries[0]?.profile.packId ?? null,
     siteCountryCode: countryCode,
     species: entries,
     calendar,
@@ -184,7 +187,7 @@ export function normalizeOperationsPlan(value: ProjectOperationsPlan | null | un
   };
 }
 
-function resolvedFromRecord(record: SpeciesOperationsRecord, matchLevel: OperationsMatchLevel, identity: OperationsIdentity): ResolvedOperationsProfile {
+function resolvedFromRecord(record: SpeciesOperationsRecord, matchLevel: OperationsMatchLevel, identity: OperationsIdentity, climateGroup = climateGroupForCountry(identity.countryCode)): ResolvedOperationsProfile {
   return {
     ...cloneFields(record),
     modelVersion: OPERATIONS_MODEL_VERSION,
@@ -192,6 +195,7 @@ function resolvedFromRecord(record: SpeciesOperationsRecord, matchLevel: Operati
     wfoId: record.wfoId ?? identity.wfoId ?? null,
     speciesId: record.speciesId ?? identity.speciesId ?? identity.designSpecies?.id ?? null,
     packId: record.packId,
+    climateGroup,
     archetypeId: record.archetypeId,
     matchLevel,
     sources: [...record.sources],
@@ -214,7 +218,8 @@ function resolvedFromArchetype(
     scientificName,
     wfoId: identity.wfoId ?? null,
     speciesId: identity.speciesId ?? identity.designSpecies?.id ?? null,
-    packId: null,
+    packId: normalizeOperationsCountry(identity.countryCode),
+    climateGroup: climateGroupForCountry(identity.countryCode),
     archetypeId,
     matchLevel,
     sources: WOODY_SOURCES,

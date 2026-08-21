@@ -554,8 +554,9 @@ export type OperationsArchetypeId =
   | 'succulent-cutting'
   | 'woody-default';
 
-export type OperationsPackId = 'IT';
-export type OperationsMatchLevel = 'country-pack' | 'genus' | 'archetype' | 'woody-default' | 'unknown';
+export type OperationsPackId = string;
+export type OperationsClimateGroup = 'mediterranean' | 'temperate' | 'tropical';
+export type OperationsMatchLevel = 'country-pack' | 'climate-group' | 'genus' | 'archetype' | 'woody-default' | 'unknown';
 export type OperationsPlantingMethod = 'bare-root' | 'container' | 'cutting' | 'grafted' | 'pad';
 export type OperationsFrostConstraint = 'plant-dormant' | 'wait-after-frost' | 'autumn-evergreen-ok' | 'unknown';
 export type OperationsPruningStyle = 'training' | 'production' | 'coppice' | 'pollard' | 'sanitary-only' | 'minimal';
@@ -668,6 +669,7 @@ export type ResolvedOperationsProfile = SpeciesOperationsFields & {
   wfoId: string | null;
   speciesId: string | null;
   packId: OperationsPackId | null;
+  climateGroup: OperationsClimateGroup | null;
   archetypeId: OperationsArchetypeId;
   matchLevel: OperationsMatchLevel;
   sources: SpeciesSource[];

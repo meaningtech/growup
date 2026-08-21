@@ -179,7 +179,9 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   await expect(page.getByText('Water + operation · year 5')).toBeVisible();
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-costs.png', fullPage: false });
 
-  await page.getByTestId('costs-tab-management').click();
+  await page.getByTestId('step-care').click();
+  await expect(page.getByTestId('care-panel')).toBeVisible();
+  await expect(page.getByTestId('care-handbook')).toBeVisible();
   await page.getByTestId('open-operational-schedule').click();
   const schedule = page.getByTestId('operational-schedule');
   await expect(schedule).toContainText('Planting, irrigation and management schedule');

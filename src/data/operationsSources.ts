@@ -1,6 +1,6 @@
 import type { SpeciesSource } from '../types';
 
-export const OPERATIONS_MODEL_VERSION = 'growup-operations-1.0.0';
+export const OPERATIONS_MODEL_VERSION = 'growup-operations-1.1.0';
 
 export const OPERATIONS_SOURCES = {
   ecocrop: {
@@ -49,6 +49,12 @@ export const OPERATIONS_SOURCES = {
     label: 'Growup Italy operations pack',
     url: 'https://growup.earth/',
     supports: ['Mediterranean woody planting and pruning windows used as planning defaults'],
+    version: OPERATIONS_MODEL_VERSION,
+  },
+  climateGroup: {
+    label: 'Growup climate-group operations windows',
+    url: 'https://growup.earth/',
+    supports: ['Country-to-climate-group planting and pruning windows'],
     version: OPERATIONS_MODEL_VERSION,
   },
 } as const satisfies Record<string, SpeciesSource>;

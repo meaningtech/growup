@@ -1,6 +1,6 @@
 {
   "packId": "IT",
-  "modelVersion": "growup-operations-1.0.0",
+  "modelVersion": "growup-operations-1.1.0",
   "updatedAt": "2026-08-21T00:00:00.000Z",
   "records": [
     {
@@ -21,7 +21,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -77,7 +77,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -131,7 +131,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -140,7 +140,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -190,7 +190,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -247,7 +247,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -305,7 +305,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -347,7 +347,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -383,7 +383,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -392,7 +392,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -442,7 +442,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -498,7 +498,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -556,7 +556,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -598,7 +598,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -634,7 +634,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -643,7 +643,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -693,7 +693,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -751,7 +751,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -810,7 +810,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -852,7 +852,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -888,7 +888,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -897,7 +897,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -947,7 +947,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1003,7 +1003,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1058,7 +1058,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -1067,7 +1067,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -1117,7 +1117,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1174,7 +1174,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1232,7 +1232,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1274,7 +1274,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1310,7 +1310,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -1319,7 +1319,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -1369,7 +1369,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1425,7 +1425,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1484,7 +1484,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1521,7 +1521,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -1530,7 +1530,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -1580,7 +1580,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1636,7 +1636,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1690,7 +1690,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -1699,7 +1699,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -1749,7 +1749,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1805,7 +1805,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1863,7 +1863,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -1900,7 +1900,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -1909,7 +1909,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -1959,7 +1959,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2017,7 +2017,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2075,7 +2075,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2117,7 +2117,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2153,7 +2153,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -2162,7 +2162,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -2212,7 +2212,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2270,7 +2270,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2328,7 +2328,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2370,7 +2370,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2406,7 +2406,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -2415,7 +2415,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -2465,7 +2465,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2523,7 +2523,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2581,7 +2581,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2623,7 +2623,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2659,7 +2659,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -2668,7 +2668,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -2718,7 +2718,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2776,7 +2776,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2835,7 +2835,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2877,7 +2877,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -2913,7 +2913,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -2922,7 +2922,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -2972,7 +2972,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3028,7 +3028,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3087,7 +3087,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3124,7 +3124,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -3133,7 +3133,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -3183,7 +3183,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3239,7 +3239,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3293,7 +3293,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -3302,7 +3302,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -3352,7 +3352,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3410,7 +3410,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3469,7 +3469,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3511,7 +3511,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3547,7 +3547,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -3556,7 +3556,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -3606,7 +3606,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3663,7 +3663,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3721,7 +3721,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3763,7 +3763,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3799,7 +3799,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -3808,7 +3808,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -3858,7 +3858,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3914,7 +3914,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -3969,7 +3969,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -3978,7 +3978,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -4028,7 +4028,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4086,7 +4086,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4145,7 +4145,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4187,7 +4187,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4223,7 +4223,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -4232,7 +4232,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -4282,7 +4282,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4338,7 +4338,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4397,7 +4397,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4434,7 +4434,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -4443,7 +4443,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -4493,7 +4493,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4551,7 +4551,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4610,7 +4610,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4652,7 +4652,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4688,7 +4688,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -4697,7 +4697,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -4747,7 +4747,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4803,7 +4803,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4857,7 +4857,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -4866,7 +4866,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -4916,7 +4916,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -4973,7 +4973,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5027,7 +5027,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -5036,7 +5036,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -5086,7 +5086,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5142,7 +5142,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5200,7 +5200,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5237,7 +5237,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -5246,7 +5246,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -5296,7 +5296,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5354,7 +5354,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5413,7 +5413,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5455,7 +5455,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5491,7 +5491,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -5500,7 +5500,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -5550,7 +5550,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5606,7 +5606,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5664,7 +5664,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5701,7 +5701,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -5710,7 +5710,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -5760,7 +5760,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5818,7 +5818,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5877,7 +5877,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5919,7 +5919,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -5955,7 +5955,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -5964,7 +5964,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -6014,7 +6014,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6072,7 +6072,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6131,7 +6131,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6173,7 +6173,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6209,7 +6209,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -6218,7 +6218,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -6268,7 +6268,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6324,7 +6324,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6382,7 +6382,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6419,7 +6419,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -6428,7 +6428,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -6478,7 +6478,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6535,7 +6535,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6593,7 +6593,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6635,7 +6635,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6671,7 +6671,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -6680,7 +6680,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -6730,7 +6730,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6786,7 +6786,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6844,7 +6844,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6886,7 +6886,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -6922,7 +6922,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -6931,7 +6931,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -6981,7 +6981,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7037,7 +7037,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7091,7 +7091,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -7100,7 +7100,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -7150,7 +7150,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7206,7 +7206,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7265,7 +7265,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7301,7 +7301,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -7310,7 +7310,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -7360,7 +7360,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7417,7 +7417,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7471,7 +7471,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -7480,7 +7480,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -7530,7 +7530,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7587,7 +7587,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7641,7 +7641,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -7650,7 +7650,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -7700,7 +7700,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7757,7 +7757,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7815,7 +7815,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7857,7 +7857,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -7893,7 +7893,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -7902,7 +7902,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -7952,7 +7952,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8008,7 +8008,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8062,7 +8062,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -8071,7 +8071,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -8121,7 +8121,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8179,7 +8179,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8238,7 +8238,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8280,7 +8280,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8316,7 +8316,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -8325,7 +8325,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -8375,7 +8375,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8433,7 +8433,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8492,7 +8492,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8534,7 +8534,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8570,7 +8570,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -8579,7 +8579,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -8629,7 +8629,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8687,7 +8687,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8746,7 +8746,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8788,7 +8788,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8824,7 +8824,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -8833,7 +8833,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -8883,7 +8883,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -8941,7 +8941,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9000,7 +9000,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9042,7 +9042,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9078,7 +9078,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -9087,7 +9087,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -9137,7 +9137,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9195,7 +9195,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9254,7 +9254,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9296,7 +9296,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9332,7 +9332,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -9341,7 +9341,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -9391,7 +9391,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9449,7 +9449,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9508,7 +9508,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9550,7 +9550,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9586,7 +9586,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -9595,7 +9595,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -9645,7 +9645,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9701,7 +9701,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9755,7 +9755,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -9764,7 +9764,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -9814,7 +9814,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9870,7 +9870,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -9924,7 +9924,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -9933,7 +9933,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -9983,7 +9983,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10039,7 +10039,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10093,7 +10093,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -10102,7 +10102,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -10152,7 +10152,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10208,7 +10208,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10262,7 +10262,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -10271,7 +10271,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -10321,7 +10321,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10377,7 +10377,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10435,7 +10435,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10472,7 +10472,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -10481,7 +10481,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -10531,7 +10531,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10587,7 +10587,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10641,7 +10641,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -10650,7 +10650,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -10700,7 +10700,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10756,7 +10756,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10814,7 +10814,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10851,7 +10851,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -10860,7 +10860,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -10910,7 +10910,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -10968,7 +10968,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11027,7 +11027,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11069,7 +11069,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11105,7 +11105,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -11114,7 +11114,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -11164,7 +11164,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11220,7 +11220,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11278,7 +11278,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11315,7 +11315,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -11324,7 +11324,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -11374,7 +11374,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11430,7 +11430,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11488,7 +11488,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11525,7 +11525,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -11534,7 +11534,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -11584,7 +11584,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11641,7 +11641,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11699,7 +11699,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11741,7 +11741,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11777,7 +11777,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -11786,7 +11786,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
@@ -11836,7 +11836,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11894,7 +11894,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11953,7 +11953,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -11995,7 +11995,7 @@
               "supports": [
                 "Mediterranean woody planting and pruning windows used as planning defaults"
               ],
-              "version": "growup-operations-1.0.0"
+              "version": "growup-operations-1.1.0"
             },
             {
               "label": "FAO ECOCROP",
@@ -12031,7 +12031,7 @@
       "limitations": [
         "Planning estimate, not a cultivar-specific prescription.",
         "Local agronomist and seasonal weather review remain required before field work.",
-        "Italy operations pack growup-operations-1.0.0. Site climate still shifts the calendar."
+        "Italy operations pack growup-operations-1.1.0. Site climate still shifts the calendar."
       ],
       "sources": [
         {
@@ -12040,7 +12040,7 @@
           "supports": [
             "Mediterranean woody planting and pruning windows used as planning defaults"
           ],
-          "version": "growup-operations-1.0.0"
+          "version": "growup-operations-1.1.0"
         },
         {
           "label": "FAO ECOCROP",
