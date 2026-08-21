@@ -691,6 +691,8 @@ export type ProjectOperationsSpeciesEntry = {
 export type ProjectOperationsCalendarEvent = {
   yearOffset: number;
   month: number;
+  startDate?: string | null;
+  endDate?: string | null;
   event: OperationsCalendarEventId;
   speciesId: string | null;
   scientificName: string | null;
@@ -725,6 +727,7 @@ export type OperationsYearPlan = {
 export type ProjectOperationsPlan = {
   modelVersion: string;
   generatedAt: string;
+  plantingDate: string | null;
   packId: OperationsPackId | null;
   siteCountryCode: string | null;
   species: ProjectOperationsSpeciesEntry[];

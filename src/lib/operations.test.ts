@@ -9,9 +9,11 @@ import { calculateIrrigation } from './irrigation';
 import { mappedOperationsCountries } from '../data/operationsCountries';
 import {
   OPERATIONS_MODEL_VERSION,
+  buildOperationsMonthGrid,
   buildOperationsPlan,
   groupOperationsByYear,
   monthsInWindow,
+  normalizePlantingDate,
   resolveOperationsProfile,
   shiftWindow,
 } from './operations';
@@ -99,6 +101,8 @@ describe('operations calendar', () => {
     expect(JSON.stringify(plan.calendar)).toBe(JSON.stringify(again.calendar));
     expect(plan.species.reduce((sum, entry) => sum + entry.count, 0)).toBe(variant.trees.length);
 
+    expect(plan.plantingDate).toBeNull();
+    expect(plan.calendar.some((event) => event.event === 'inspect')).toBe(false);
     const years = groupOperationsByYear(plan.calendar, plan.species);
     expect(years[0]?.year).toBe(1);
     expect(years.some((item) => item.year > 1)).toBe(true);
@@ -109,6 +113,33 @@ describe('operations calendar', () => {
     expect(plant?.companionEvents).toEqual(expect.arrayContaining(['mulch', 'guard-check']));
     expect(water).toBeDefined();
     expect(years.some((item) => item.tasks.some((task) => task.lunarCue === 'waning'))).toBe(true);
+  });
+
+  it('anchors every dated event to the user planting date', () => {
+    const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE, 'IT');
+    const species = designReady.slice(0, 8);
+    const variant = generateLayoutVariants(TEMPERATE_OPEN_FIELD_FIXTURE, profile, species, DEFAULT_DESIGN_CONFIGURATION)[0];
+    const irrigation = calculateIrrigation(variant, species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5, null, defaultEconomicConfiguration('IT'));
+    const plantingDate = '2026-11-15';
+    const plan = buildOperationsPlan(profile, variant, species, irrigation, profile.generatedAt, plantingDate);
+    expect(plan.plantingDate).toBe(plantingDate);
+    expect(plan.calendar.some((event) => event.event === 'inspect')).toBe(false);
+    const plants = plan.calendar.filter((event) => event.event === 'plant');
+    expect(plants.length).toBeGreaterThan(0);
+    expect(plants.every((event) => event.startDate === plantingDate && event.endDate === plantingDate)).toBe(true);
+    expect(plan.calendar.filter((event) => event.event === 'water-check').every((event) => (event.startDate ?? '') >= plantingDate)).toBe(true);
+    const grid = buildOperationsMonthGrid(2026, 11, plan.calendar);
+    expect(grid).toHaveLength(42);
+    const planted = grid.find((cell) => cell.isoDate === plantingDate);
+    expect(planted?.inMonth).toBe(true);
+    expect(planted?.events).toEqual(expect.arrayContaining(['plant']));
+    expect(grid.some((cell) => cell.moon === 'waning')).toBe(true);
+  });
+
+  it('rejects malformed planting dates', () => {
+    expect(normalizePlantingDate('2026-11-15')).toBe('2026-11-15');
+    expect(normalizePlantingDate('2026-11-31')).toBeNull();
+    expect(normalizePlantingDate('15/11/2026')).toBeNull();
   });
 
   it('shifts Mediterranean planting windows by six months in the southern hemisphere', () => {

@@ -25,9 +25,11 @@ The local database is `data/operations/IT.json`. Human-reviewed windows live in 
 
 ## Calendar
 
-The project calendar is grouped by planting year. Year 1 is establishment. Tasks that share months (planting, mulch, guards and irrigation checks) are shown as one field visit. Pruning years follow the species frequency, including the three-year placenta coppice aligned with `growup-growth-1.0.0`.
+The user sets an explicit planting date on the project. That date is stored on `ProjectOperationsPlan.plantingDate` and is the origin of every later task. Planting, mulch and guards fall on that day. Irrigation checks occupy the dry months after it. Training, pruning and coppice occupy the species windows in later years. Inspection is not a calendar procedure.
 
-Waning-moon pruning is an optional Mediterranean tradition (prune after full moon). Growup can list the astronomical waning ranges for those months. It is not a measured sap-flow effect: Mayoral et al., *Agronomy* 10:955 (2020) document the belief; stem-radius studies have not confirmed a lunar water cycle. Confidence is low. Maria Thun biodynamic day-types are not used (copyrighted annual calendar, not a public dataset).
+The Care tab shows a month grid with civil dates and astronomical moon phases. Opening a task shows what to do for the species in that period.
+
+Waning-moon pruning is an optional Mediterranean tradition (prune after full moon). Growup marks waning days on the grid. It is not a measured sap-flow effect: Mayoral et al., *Agronomy* 10:955 (2020) document the belief; stem-radius studies have not confirmed a lunar water cycle. Confidence is low. Maria Thun biodynamic day-types are not used (copyrighted annual calendar, not a public dataset).
 
 Maintenance person-hours stay in `growup-maintenance-1.1.0`; this model says when the work falls, not how many hours it takes.
 

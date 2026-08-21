@@ -18,6 +18,7 @@ import {
   Database,
   Download,
   Droplets,
+  ChevronLeft,
   Eye,
   EyeOff,
   ExternalLink,
@@ -76,8 +77,18 @@ import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculate
 import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
-import { buildOperationsPlan, groupOperationsByYear } from './lib/operations';
-import { waningMoonRanges } from './lib/lunar';
+import {
+  addUtcYears,
+  buildOperationsMonthGrid,
+  buildOperationsPlan,
+  eventOverlapsDay,
+  groupOperationsByYear,
+  monthTasks,
+  normalizePlantingDate,
+  speciesSpecificLimitations,
+  stepsForCalendarEvent,
+} from './lib/operations';
+import { waningMoonRanges, type MoonPhase } from './lib/lunar';
 import { buildOperationalSchedule, type OperationalSchedule } from './lib/schedule';
 import { projectAnalysisFingerprint, setProjectAnalysisFindingResolution } from './lib/projectAnalysis';
 import {
@@ -118,6 +129,8 @@ import type {
   IrrigationConfiguration,
   LayoutVariant,
   LocationSearchResult,
+  OperationsCalendarEventId,
+  ProjectOperationsSpeciesEntry,
   ProjectState,
   SharedProjectState,
   ProjectAnalysisAgentRun,
@@ -898,7 +911,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
         <div className="shared-metric-grid">
           <SharedMetric label={t('care.species')} value={String(plan.species.length)} />
           <SharedMetric label={t('care.events')} value={String(plan.calendar.length)} />
-          <SharedMetric label={t('care.pack')} value={plan.packId ?? t('care.noPack')} />
+          <SharedMetric label={t('care.plantingDate')} value={plan.plantingDate ?? t('care.unknown')} />
         </div>
         <div className="shared-species-list">{plan.species.map((entry) => {
           const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
@@ -1102,6 +1115,7 @@ function WorkspaceApp() {
   const [economicConfiguration, setEconomicConfiguration] = useState<EconomicConfiguration>(() => defaultEconomicConfiguration(''));
   const [costs, setCosts] = useState<EstablishmentCost | null>(null);
   const [fireOperations, setFireOperations] = useState<FireOperationsPlan>(() => defaultFireOperationsPlan());
+  const [operationsPlantingDate, setOperationsPlantingDate] = useState<string | null>(null);
   const [projectAnalysis, setProjectAnalysis] = useState<ProjectAnalysisReport | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -1306,7 +1320,7 @@ function WorkspaceApp() {
       if (authUser) queueProjectSave(snapshot, serial);
     }, 1_200);
     return () => window.clearTimeout(timer);
-  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, projectAnalysis, collaboration, authUser]);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, projectAnalysis, collaboration, authUser]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -2316,6 +2330,7 @@ function WorkspaceApp() {
     projectRevisionRef.current = 0;
     setRevisions([]);
     setFireOperations(defaultFireOperationsPlan());
+    setOperationsPlantingDate(null);
     setProjectAnalysis(null);
     setAnalysisError(null);
     setAnalysisAgentSelectedFindingIds([]);
@@ -2594,7 +2609,7 @@ function WorkspaceApp() {
       fireOperations,
       operations: (() => {
         const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
-        return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant), snapshot.irrigation) : null;
+        return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant), snapshot.irrigation, siteProfile.generatedAt, operationsPlantingDate) : null;
       })(),
       section: snapshot.section,
     };
@@ -3061,7 +3076,7 @@ function WorkspaceApp() {
       costs,
       fireOperations,
       operations: selectedVariant && siteProfile
-        ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant), irrigation)
+        ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant), irrigation, siteProfile.generatedAt, operationsPlantingDate)
         : null,
       analysis: projectAnalysis,
       collaboration,
@@ -3157,6 +3172,7 @@ function WorkspaceApp() {
     setIrrigation(project.irrigation);
     setCosts(project.costs);
     setFireOperations(normalizeFireOperationsPlan(project.fireOperations, project.updatedAt));
+    setOperationsPlantingDate(normalizePlantingDate(project.operations?.plantingDate));
     const recoveredAnalysis = project.analysis?.agentRun?.status === 'running'
       ? {
         ...project.analysis,
@@ -3973,6 +3989,8 @@ function WorkspaceApp() {
             profile={siteProfile}
             variant={selectedVariant}
             irrigation={irrigation}
+            plantingDate={operationsPlantingDate}
+            onPlantingDate={setOperationsPlantingDate}
             onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
             onSchedule={() => setScheduleOpen(true)}
           />}
@@ -4086,6 +4104,7 @@ function WorkspaceApp() {
         species={selectedSpecies}
         irrigation={irrigation}
         costs={costs}
+        plantingDate={operationsPlantingDate}
         revision={projectRevision}
         calculationRunId={revisions[0]?.calculationRunId ?? null}
         onClose={() => setScheduleOpen(false)}
@@ -5074,9 +5093,9 @@ function ProjectHistoryPanel({ projectId, revisions, onRestore, onClose }: { pro
   </section></div>;
 }
 
-function OperationalSchedulePanel({ projectName, site, profile, variant, species, irrigation, costs, revision, calculationRunId, onClose }: { projectName: string; site: SiteBoundary; profile: SiteProfile; variant: LayoutVariant; species: DesignSpecies[]; irrigation: IrrigationEstimate; costs: EstablishmentCost; revision: number; calculationRunId: string | null; onClose: () => void }) {
+function OperationalSchedulePanel({ projectName, site, profile, variant, species, irrigation, costs, plantingDate, revision, calculationRunId, onClose }: { projectName: string; site: SiteBoundary; profile: SiteProfile; variant: LayoutVariant; species: DesignSpecies[]; irrigation: IrrigationEstimate; costs: EstablishmentCost; plantingDate: string | null; revision: number; calculationRunId: string | null; onClose: () => void }) {
   const { t, locale } = useI18n();
-  const schedule = buildOperationalSchedule(profile, variant, species, irrigation, costs);
+  const schedule = buildOperationalSchedule(profile, variant, species, irrigation, costs, plantingDate);
   const speciesById = new Map(species.map((item) => [item.id, item]));
   const reportLocale = locale === 'it' ? 'it-IT' : 'en-GB';
   const monthLabel = (month: number) => new Intl.DateTimeFormat(reportLocale, { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)));
@@ -6335,25 +6354,53 @@ function SoilPropertyGroup({ title, body, properties }: { title: string; body: s
   </section>;
 }
 function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
-function CarePanel({ profile, variant, irrigation, onPrepare, onSchedule }: {
+function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate, onPrepare, onSchedule }: {
   profile: SiteProfile | null;
   variant: LayoutVariant | null;
   irrigation: IrrigationEstimate | null;
+  plantingDate: string | null;
+  onPlantingDate: (value: string | null) => void;
   onPrepare: () => void;
   onSchedule: () => void;
 }) {
   const { t, locale } = useI18n();
+  const dateLocale = locale === 'it' ? 'it-IT' : 'en-GB';
   const [tab, setTab] = useState<'handbook' | 'calendar' | 'sources'>('calendar');
   const [selectedYear, setSelectedYear] = useState(1);
+  const [visibleYear, setVisibleYear] = useState(() => new Date().getUTCFullYear());
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date().getUTCMonth() + 1);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [speciesDetailId, setSpeciesDetailId] = useState<string | null>(null);
+  const [openEvent, setOpenEvent] = useState<OperationsCalendarEventId | null>(null);
   const monthLabel = (month: number) => month >= 1 && month <= 12
-    ? new Intl.DateTimeFormat(locale === 'it' ? 'it-IT' : 'en-GB', { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)))
+    ? new Intl.DateTimeFormat(dateLocale, { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)))
     : t('care.unknown');
+  useEffect(() => {
+    if (!plantingDate) return;
+    const [year, month] = plantingDate.split('-').map(Number);
+    if (!year || !month) return;
+    setVisibleYear(year);
+    setVisibleMonth(month);
+    setSelectedYear(1);
+    setSelectedDay(plantingDate);
+  }, [plantingDate]);
   if (!profile || !variant) return <div className="panel-body" data-testid="care-panel"><EmptyState icon={BookOpen} title={t('care.emptyTitle')} body={t('care.emptyBody')} action={t('care.openDesign')} onAction={onPrepare} /></div>;
-  const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant), irrigation);
+  const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant), irrigation, profile.generatedAt, plantingDate);
   const years = groupOperationsByYear(plan.calendar, plan.species);
-  const currentYear = years.find((item) => item.year === selectedYear) ?? years[0];
-  const planningYear = new Date(plan.generatedAt).getUTCFullYear() + (currentYear?.yearOffset ?? 0);
-  const monthList = (months: number[]) => months.map(monthLabel).join(', ');
+  const grid = plantingDate ? buildOperationsMonthGrid(visibleYear, visibleMonth, plan.calendar) : [];
+  const tasks = plantingDate ? monthTasks(plan.calendar, plan.species, visibleYear, visibleMonth) : [];
+  const dayEvents = selectedDay ? [...new Set(plan.calendar.filter((event) => eventOverlapsDay(event, selectedDay)).map((event) => event.event))] : [];
+  const speciesDetail = plan.species.find((entry) => entry.speciesId === speciesDetailId) ?? null;
+  const openTask = tasks.find((task) => task.event === openEvent) ?? null;
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(dateLocale, { weekday: 'short' }).format(new Date(Date.UTC(2026, 5, 1 + index))));
+  const windowHint = uniquePlantingWindows(plan.species, monthLabel, t);
+  const shiftVisibleMonth = (delta: number) => {
+    const next = new Date(Date.UTC(visibleYear, visibleMonth - 1 + delta, 1));
+    setVisibleYear(next.getUTCFullYear());
+    setVisibleMonth(next.getUTCMonth() + 1);
+    setSelectedDay(null);
+    setOpenEvent(null);
+  };
   return <div className="panel-body persistent-action-panel care-page" data-testid="care-panel">
     <div className="panel-scroll-content">
       <div className="panel-intro compact">
@@ -6361,6 +6408,11 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onSchedule }: {
         <h1>{t('care.title')}</h1>
         <p>{t('care.body')}</p>
       </div>
+      <label className="care-planting-date">
+        <span>{t('care.plantingDate')}</span>
+        <input data-testid="care-planting-date" type="date" value={plantingDate ?? ''} onChange={(event) => onPlantingDate(normalizePlantingDate(event.target.value))} />
+        <small>{windowHint ? t('care.plantingDateHint', { window: windowHint }) : t('care.unknown')}</small>
+      </label>
       <div className="fire-analysis-tabs" role="tablist" aria-label={t('care.tabs')}>
         {([['handbook', BookOpen], ['calendar', ClipboardCheck], ['sources', Database]] as const).map(([id, Icon]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
@@ -6369,48 +6421,65 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onSchedule }: {
         ))}
       </div>
       {tab === 'handbook' && <div className="care-handbook" data-testid="care-handbook">
-        {plan.warnings.map((warning) => <p key={warning} className="care-warning">• {warning}</p>)}
         {plan.species.map((entry) => {
           const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
           const plantingMonths = entry.resolvedPlantingWindow ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) }) : t('care.unknown');
           const pruningMonths = entry.resolvedPruningWindow ? t('care.window', { start: monthLabel(entry.resolvedPruningWindow.startMonth), end: monthLabel(entry.resolvedPruningWindow.endMonth) }) : t('care.unknown');
           return <article key={entry.speciesId} className="care-species-card">
-            <header><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><small>{t('care.count', { count: entry.count })} · {t(`care.match.${entry.profile.matchLevel}`)}{entry.profile.climateGroup ? ` · ${t(`care.group.${entry.profile.climateGroup}`)}` : ''}{entry.profile.packId ? ` · ${entry.profile.packId}` : ''}</small><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><i>{entry.scientificName}</i></span></header>
+            <header>
+              <span className="tree-dot" style={{ background: item?.color ?? '#789' }} />
+              <span><small>{t('care.count', { count: entry.count })} · {t(`care.match.${entry.profile.matchLevel}`)}</small><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><i>{entry.scientificName}</i></span>
+              <button type="button" className="care-eye" data-testid={`care-species-detail-${entry.speciesId}`} aria-label={t('care.openSpecies')} onClick={() => setSpeciesDetailId(entry.speciesId)}><Eye size={16} /></button>
+            </header>
             <div className="care-facts">
               <span><small>{t('care.planting')}</small><strong>{plantingMonths}</strong><b>{t(`care.method.${entry.profile.planting.method ?? 'unknown'}`)}</b></span>
               <span><small>{t('care.pruning')}</small><strong>{pruningMonths}</strong><b>{t(`care.prune.${entry.profile.pruning.style ?? 'unknown'}`)}</b></span>
               <span><small>{t('care.firstYearWater')}</small><strong>{t(`care.water.${entry.profile.care.firstYearWater ?? 'unknown'}`)}</strong></span>
             </div>
-            <ul>{[...entry.profile.planting.steps, ...entry.profile.care.notes].map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>
-            <small>{entry.profile.limitations[0]}</small>
           </article>;
         })}
       </div>}
       {tab === 'calendar' && <div className="care-calendar" data-testid="care-calendar">
-        <p className="care-calendar-intro">{t('care.calendarIntro')}</p>
-        <div className="care-year-rail" role="tablist" aria-label={t('care.yearsLabel')}>
-          {years.map((item) => <button key={item.year} role="tab" aria-selected={currentYear?.year === item.year} className={currentYear?.year === item.year ? 'active' : ''} onClick={() => setSelectedYear(item.year)}>{t('care.year', { year: item.year })}</button>)}
-        </div>
-        {currentYear ? currentYear.tasks.map((task) => {
-          const lunarMonths = task.lunarCue === 'waning' ? task.months : [];
-          return <article key={task.event} className="care-year-task" data-event={task.event}>
-            <header>
-              <small>{monthList(task.months)}</small>
-              <strong>{t(`care.event.${task.event}`)}</strong>
-            </header>
-            <ul className="care-year-species">{task.species.map((entry) => {
-              const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
-              return <li key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span>{item ? speciesDisplayName(item, t) : entry.scientificName}<small>{t('care.count', { count: entry.count })}</small></span></li>;
-            })}</ul>
-            {task.companionEvents.length > 0 && <p className="care-together">{t('care.together', { tasks: task.companionEvents.map((event) => t(`care.event.${event}`)).join(', ') })}</p>}
-            {task.overlappingPlantMonths.length > 0 && <p className="care-together">{t('care.waterWithPlanting', { months: monthList(task.overlappingPlantMonths) })}</p>}
-            {task.lunarCue === 'waning' && <div className="care-lunar" data-testid="care-lunar">
-              <strong>{t('care.lunarTitle')}</strong>
-              <p>{t('care.lunarBody')}</p>
-              {lunarMonths.flatMap((month) => waningMoonRanges(planningYear, month).map((range) => <small key={`${month}-${range.startDay}`}>{t('care.lunarRange', { month: monthLabel(month), year: planningYear, start: range.startDay, end: range.endDay })}</small>))}
-            </div>}
-          </article>;
-        }) : <p>{t('care.noEvents')}</p>}
+        {!plantingDate ? <p className="care-calendar-intro">{t('care.pickPlantingDate')}</p> : <>
+          <div className="care-year-rail" role="tablist" aria-label={t('care.yearsLabel')}>
+            {years.map((item) => <button key={item.year} role="tab" aria-selected={selectedYear === item.year} className={selectedYear === item.year ? 'active' : ''} onClick={() => {
+              const jump = addUtcYears(plantingDate, item.yearOffset);
+              const [year, month] = jump.split('-').map(Number);
+              setSelectedYear(item.year);
+              if (year && month) { setVisibleYear(year); setVisibleMonth(month); }
+              setSelectedDay(null);
+            }}>{t('care.year', { year: item.year })}</button>)}
+          </div>
+          <div className="care-month-nav">
+            <button type="button" aria-label={t('care.prevMonth')} onClick={() => shiftVisibleMonth(-1)}><ChevronLeft size={16} /></button>
+            <strong>{new Intl.DateTimeFormat(dateLocale, { month: 'long', year: 'numeric' }).format(new Date(Date.UTC(visibleYear, visibleMonth - 1, 1)))}</strong>
+            <button type="button" aria-label={t('care.nextMonth')} onClick={() => shiftVisibleMonth(1)}><ArrowRight size={16} /></button>
+          </div>
+          <div className="care-month-grid" data-testid="care-month-grid">
+            {weekdayLabels.map((label) => <span key={label} className="care-weekday">{label}</span>)}
+            {grid.map((cell) => <button
+              key={cell.isoDate}
+              type="button"
+              className={`care-day${cell.inMonth ? '' : ' outside'}${selectedDay === cell.isoDate ? ' selected' : ''}${cell.events.length ? ' has-work' : ''}${cell.waning ? ' waning' : ''}`}
+              onClick={() => setSelectedDay(cell.isoDate)}
+            >
+              <b>{cell.day}</b>
+              <i className={`care-moon ${cell.moon}`} title={t(`care.moon.${cell.moon}`)} aria-label={t(`care.moon.${cell.moon}`)}>{MOON_GLYPH[cell.moon]}</i>
+              <span className="care-day-dots">{cell.events.slice(0, 4).map((event) => <em key={event} data-event={event} />)}</span>
+            </button>)}
+          </div>
+          <div className="care-month-tasks">
+            <small>{selectedDay ? t('care.dayEvents', { date: new Intl.DateTimeFormat(dateLocale, { day: 'numeric', month: 'long' }).format(new Date(`${selectedDay}T12:00:00.000Z`)) }) : t('care.thisMonth')}</small>
+            {(selectedDay ? tasks.filter((task) => dayEvents.includes(task.event)) : tasks).length === 0
+              ? <p>{t('care.noMonthEvents')}</p>
+              : (selectedDay ? tasks.filter((task) => dayEvents.includes(task.event)) : tasks).map((task) => (
+                <button key={task.event} type="button" className="care-month-task" data-event={task.event} data-testid={`care-task-${task.event}`} onClick={() => setOpenEvent(task.event)}>
+                  <strong>{t(`care.event.${task.event}`)}</strong>
+                  <span>{task.species.map((entry) => DESIGN_SPECIES_BY_ID.get(entry.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(entry.speciesId)!, t) : entry.scientificName).join(', ')}</span>
+                </button>
+              ))}
+          </div>
+        </>}
       </div>}
       {tab === 'sources' && <div className="care-sources" data-testid="care-sources">
         {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
@@ -6419,6 +6488,56 @@ function CarePanel({ profile, variant, irrigation, onPrepare, onSchedule }: {
     <div className="panel-action-bar">
       <button className="button primary wide sticky-action" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} />{t('schedule.open')}</button>
     </div>
+    {speciesDetail && <CareDetailModal title={DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)!, t) : speciesDetail.scientificName} onClose={() => setSpeciesDetailId(null)}>
+      <p><i>{speciesDetail.scientificName}</i></p>
+      <p>{t(`care.match.${speciesDetail.profile.matchLevel}`)}{speciesDetail.profile.climateGroup ? ` · ${t(`care.group.${speciesDetail.profile.climateGroup}`)}` : ''}</p>
+      <ul>{[...speciesDetail.profile.planting.steps, ...speciesDetail.profile.care.notes].map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>
+      {speciesSpecificLimitations(speciesDetail.profile.limitations).map((item) => <small key={item}>{item}</small>)}
+    </CareDetailModal>}
+    {openEvent && <CareDetailModal title={t(`care.event.${openEvent}`)} onClose={() => setOpenEvent(null)}>
+      <p>{t(`care.howto.${openEvent}`)}</p>
+      {openTask?.lunarCue === 'waning' && <div className="care-lunar" data-testid="care-lunar">
+        <strong>{t('care.lunarTitle')}</strong>
+        {waningMoonRanges(visibleYear, visibleMonth).map((range) => <small key={`${range.startDay}`}>{t('care.lunarRange', { month: monthLabel(visibleMonth), year: visibleYear, start: range.startDay, end: range.endDay })}</small>)}
+      </div>}
+      {(openTask?.species ?? []).map((row) => {
+        const entry = plan.species.find((item) => item.speciesId === row.speciesId);
+        const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+        const steps = entry ? stepsForCalendarEvent(entry, openEvent) : [];
+        return <article key={row.speciesId} className="care-howto-species">
+          <strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong>
+          <small>{t('care.count', { count: row.count })}</small>
+          {steps.length > 0 && <ul>{steps.map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>}
+        </article>;
+      })}
+    </CareDetailModal>}
+  </div>;
+}
+
+const MOON_GLYPH: Record<MoonPhase, string> = { new: '●', waxing: '☽', full: '○', waning: '☾' };
+
+function uniquePlantingWindows(
+  species: ProjectOperationsSpeciesEntry[],
+  monthLabel: (month: number) => string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) {
+  const labels = [...new Set(species.map((entry) => entry.resolvedPlantingWindow
+    ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) })
+    : null).filter((value): value is string => Boolean(value)))];
+  return labels.join(' · ');
+}
+
+function CareDetailModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const { t } = useI18n();
+  return <div className="care-modal-layer" data-testid="care-detail-modal">
+    <button type="button" className="care-modal-backdrop" aria-label={t('care.closeDetail')} onClick={onClose} />
+    <section className="care-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <header>
+        <strong>{title}</strong>
+        <button type="button" aria-label={t('care.closeDetail')} onClick={onClose}><X size={16} /></button>
+      </header>
+      <div>{children}</div>
+    </section>
   </div>;
 }
 

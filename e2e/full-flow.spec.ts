@@ -181,7 +181,8 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
 
   await page.getByTestId('step-care').click();
   await expect(page.getByTestId('care-panel')).toBeVisible();
-  await expect(page.getByTestId('care-handbook')).toBeVisible();
+  await expect(page.getByTestId('care-calendar')).toBeVisible();
+  await expect(page.getByTestId('care-planting-date')).toBeVisible();
   await page.getByTestId('open-operational-schedule').click();
   const schedule = page.getByTestId('operational-schedule');
   await expect(schedule).toContainText('Planting, irrigation and management schedule');

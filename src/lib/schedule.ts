@@ -63,6 +63,7 @@ export function buildOperationalSchedule(
   species: DesignSpecies[],
   irrigation: IrrigationEstimate,
   costs: EstablishmentCost,
+  plantingDate: string | null = null,
 ): OperationalSchedule {
   const speciesById = new Map(species.map((item) => [item.id, item]));
   const maintenance = irrigation.systemMaintenance ?? legacyMaintenance(irrigation);
@@ -136,7 +137,7 @@ export function buildOperationalSchedule(
       exclusions: [...maintenance.exclusions],
     },
     managementPhases: [...MANAGEMENT_PHASES],
-    operations: buildOperationsPlan(profile, variant, species, irrigation),
+    operations: buildOperationsPlan(profile, variant, species, irrigation, profile.generatedAt, plantingDate),
     evidence,
     warnings: [...new Set([...profile.warnings, ...variant.warnings, ...irrigation.network.warnings])],
   };

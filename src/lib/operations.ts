@@ -2,6 +2,7 @@ import { GENUS_ARCHETYPES, OPERATIONS_ARCHETYPES, archetypeForDesignSpecies } fr
 import { applyClimateGroup, climateGroupForCountry, normalizeOperationsCountry } from '../data/operationsCountries';
 import { ITALY_OPERATIONS_PACK } from '../data/operationsItaly';
 import { OPERATIONS_MODEL_VERSION, operationsSourceList } from '../data/operationsSources';
+import { daysInUtcMonth, isWaningMoon, moonPhase, utcIsoDate, utcNoon, type MoonPhase } from './lunar';
 import type {
   DesignSpecies,
   IrrigationEstimate,
@@ -11,6 +12,7 @@ import type {
   OperationsCalendarEventId,
   OperationsFieldBasis,
   OperationsMatchLevel,
+  OperationsStepId,
   OperationsYearPlan,
   OperationsYearTask,
   ProjectOperationsCalendarEvent,
@@ -118,6 +120,7 @@ export function buildOperationsPlan(
   species: DesignSpecies[],
   irrigation: IrrigationEstimate | null,
   generatedAt = profile.generatedAt,
+  plantingDate: string | null = null,
 ): ProjectOperationsPlan {
   const speciesById = new Map(species.map((item) => [item.id, item]));
   const counts = new Map<string, number>();
@@ -125,6 +128,7 @@ export function buildOperationsPlan(
 
   const hemisphereOffset = profile.centroid.lat < 0 ? 6 : 0;
   const countryCode = profile.location.countryCode;
+  const plantedOn = normalizePlantingDate(plantingDate);
   const warnings: string[] = [];
   const sourceMap = new Map<string, SpeciesSource>();
   const calendar: ProjectOperationsCalendarEvent[] = [];
@@ -152,7 +156,10 @@ export function buildOperationsPlan(
       }
       for (const source of resolved.sources) sourceMap.set(`${source.label}:${source.version}`, source);
 
-      pushSpeciesCalendar(calendar, item.id, item.scientificName, planting, pruning, resolved, irrigation);
+      if (plantedOn && planting && !monthsInWindow(planting).includes(Number(plantedOn.slice(5, 7)))) {
+        warnings.push(`${item.scientificName} planting window does not include ${plantedOn}.`);
+      }
+      pushSpeciesCalendar(calendar, item.id, item.scientificName, planting, pruning, resolved, irrigation, plantedOn);
       if (resolved.pruning.style) {
         for (const source of operationsSourceList('lunarPruningTradition')) sourceMap.set(`${source.label}:${source.version}`, source);
       }
@@ -169,11 +176,16 @@ export function buildOperationsPlan(
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
-  calendar.sort((left, right) => left.yearOffset - right.yearOffset || left.month - right.month || (left.speciesId ?? '').localeCompare(right.speciesId ?? '') || left.event.localeCompare(right.event));
+  calendar.sort((left, right) => {
+    const leftDate = left.startDate ?? '';
+    const rightDate = right.startDate ?? '';
+    return leftDate.localeCompare(rightDate) || left.yearOffset - right.yearOffset || left.month - right.month || (left.speciesId ?? '').localeCompare(right.speciesId ?? '') || left.event.localeCompare(right.event);
+  });
 
   return {
     modelVersion: OPERATIONS_MODEL_VERSION,
     generatedAt,
+    plantingDate: plantedOn,
     packId: normalizeOperationsCountry(countryCode) ?? entries[0]?.profile.packId ?? null,
     siteCountryCode: countryCode,
     species: entries,
@@ -187,11 +199,24 @@ export function normalizeOperationsPlan(value: ProjectOperationsPlan | null | un
   if (!value || value.modelVersion !== OPERATIONS_MODEL_VERSION) return value ?? null;
   return {
     ...value,
+    plantingDate: normalizePlantingDate(value.plantingDate),
     species: value.species.map((entry) => ({ ...entry, profile: { ...entry.profile, sources: [...entry.profile.sources] } })),
-    calendar: value.calendar.map((event) => ({ ...event })),
+    calendar: value.calendar.map((event) => ({
+      ...event,
+      startDate: normalizePlantingDate(event.startDate) ?? event.startDate ?? null,
+      endDate: normalizePlantingDate(event.endDate) ?? event.endDate ?? null,
+    })),
     warnings: [...value.warnings],
     sources: [...value.sources],
   };
+}
+
+export function normalizePlantingDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const iso = utcIsoDate(year, month, day);
+  return iso === value ? iso : null;
 }
 
 function resolvedFromRecord(record: SpeciesOperationsRecord, matchLevel: OperationsMatchLevel, identity: OperationsIdentity, climateGroup = climateGroupForCountry(identity.countryCode)): ResolvedOperationsProfile {
@@ -333,12 +358,20 @@ function pushSpeciesCalendar(
   pruning: MonthWindow | null,
   profile: ResolvedOperationsProfile,
   irrigation: IrrigationEstimate | null,
+  plantingDate: string | null,
 ) {
   const plantMonths = planting ? monthsInWindow(planting) : [];
-  for (const month of plantMonths) {
-    pushEvent(calendar, 0, month, 'plant', speciesId, scientificName, 'care.event.plant', profile.matchLevel === 'country-pack' ? 'species-record' : 'archetype', profile.confidence);
-    if (profile.care.mulch) pushEvent(calendar, 0, month, 'mulch', speciesId, scientificName, 'care.event.mulch', 'archetype', profile.confidence);
-    if (profile.care.guards) pushEvent(calendar, 0, month, 'guard-check', speciesId, scientificName, 'care.event.guard-check', 'archetype', profile.confidence);
+  if (plantingDate) {
+    const planted = civilParts(plantingDate);
+    pushDated(calendar, plantingDate, plantingDate, 'plant', speciesId, scientificName, 'care.event.plant', profile.matchLevel === 'country-pack' ? 'species-record' : 'archetype', profile.confidence, plantingDate);
+    if (profile.care.mulch) pushDated(calendar, plantingDate, plantingDate, 'mulch', speciesId, scientificName, 'care.event.mulch', 'archetype', profile.confidence, plantingDate);
+    if (profile.care.guards) pushDated(calendar, plantingDate, plantingDate, 'guard-check', speciesId, scientificName, 'care.event.guard-check', 'archetype', profile.confidence, plantingDate);
+  } else {
+    for (const month of plantMonths) {
+      pushEvent(calendar, 0, month, 'plant', speciesId, scientificName, 'care.event.plant', profile.matchLevel === 'country-pack' ? 'species-record' : 'archetype', profile.confidence);
+      if (profile.care.mulch) pushEvent(calendar, 0, month, 'mulch', speciesId, scientificName, 'care.event.mulch', 'archetype', profile.confidence);
+      if (profile.care.guards) pushEvent(calendar, 0, month, 'guard-check', speciesId, scientificName, 'care.event.guard-check', 'archetype', profile.confidence);
+    }
   }
 
   const dryMonths = irrigation
@@ -347,7 +380,16 @@ function pushSpeciesCalendar(
   if (profile.care.firstYearWater === 'critical' || profile.care.firstYearWater === 'moderate') {
     for (const month of dryMonths) {
       for (let year = 0; year < profile.planting.establishmentYears; year += 1) {
-        pushEvent(calendar, year, month, 'water-check', speciesId, scientificName, 'care.event.water-check', 'irrigation-model', irrigation?.satelliteScheduling.confidence ?? 'medium');
+        if (plantingDate) {
+          const civil = addYearsToMonth(firstMonthOnOrAfter(plantingDate, month), year);
+          const start = clipAfter(utcIsoDate(civil.year, civil.month, 1), plantingDate);
+          const end = utcIsoDate(civil.year, civil.month, daysInUtcMonth(civil.year, civil.month));
+          if (end < plantingDate) continue;
+          if (start >= addUtcYears(plantingDate, profile.planting.establishmentYears)) continue;
+          pushDated(calendar, start, end, 'water-check', speciesId, scientificName, 'care.event.water-check', 'irrigation-model', irrigation?.satelliteScheduling.confidence ?? 'medium', plantingDate);
+        } else {
+          pushEvent(calendar, year, month, 'water-check', speciesId, scientificName, 'care.event.water-check', 'irrigation-model', irrigation?.satelliteScheduling.confidence ?? 'medium');
+        }
       }
     }
   }
@@ -357,18 +399,24 @@ function pushSpeciesCalendar(
   for (const year of pruneYears) {
     for (const month of pruneMonths) {
       const event = profile.pruning.style === 'coppice' || profile.pruning.style === 'pollard' ? 'coppice' : year === 0 ? 'train' : 'prune';
-      pushEvent(calendar, year, month, event, speciesId, scientificName, `care.event.${event}`, profile.pruning.window ? 'species-record' : 'archetype', profile.confidence);
+      const basis = profile.pruning.window ? 'species-record' : 'archetype';
+      if (plantingDate) {
+        const civil = addYearsToMonth(firstMonthOnOrAfter(plantingDate, month), year);
+        const start = clipAfter(utcIsoDate(civil.year, civil.month, 1), plantingDate);
+        const end = utcIsoDate(civil.year, civil.month, daysInUtcMonth(civil.year, civil.month));
+        if (end < plantingDate) continue;
+        pushDated(calendar, start, end, event, speciesId, scientificName, `care.event.${event}`, basis, profile.confidence, plantingDate);
+      } else {
+        pushEvent(calendar, year, month, event, speciesId, scientificName, `care.event.${event}`, basis, profile.confidence);
+      }
     }
-  }
-
-  for (const year of [0, 1, 2]) {
-    pushEvent(calendar, year, 3, 'inspect', speciesId, scientificName, 'care.event.inspect', 'maintenance-model', 'medium');
   }
 }
 
-export const OPERATIONS_YEAR_TASK_ORDER: OperationsCalendarEventId[] = ['plant', 'water-check', 'train', 'prune', 'coppice', 'inspect'];
+export const OPERATIONS_YEAR_TASK_ORDER: OperationsCalendarEventId[] = ['plant', 'water-check', 'train', 'prune', 'coppice'];
 const PLANT_COMPANIONS: OperationsCalendarEventId[] = ['mulch', 'guard-check'];
 const LUNAR_WANING_EVENTS = new Set<OperationsCalendarEventId>(['train', 'prune', 'coppice']);
+const GENERIC_LIMITATION = /planning estimate|cultivar-specific prescription|local agronomist|italy operations pack|site climate still shifts/i;
 
 export function groupOperationsByYear(
   events: ProjectOperationsCalendarEvent[],
@@ -437,6 +485,148 @@ function pushEvent(
   titleKey: string,
   basis: OperationsFieldBasis,
   confidence: ProjectOperationsCalendarEvent['confidence'],
+  startDate: string | null = null,
+  endDate: string | null = null,
 ) {
-  calendar.push({ yearOffset, month, event, speciesId, scientificName, titleKey, basis, confidence });
+  calendar.push({ yearOffset, month, startDate, endDate, event, speciesId, scientificName, titleKey, basis, confidence });
+}
+
+function pushDated(
+  calendar: ProjectOperationsCalendarEvent[],
+  startDate: string,
+  endDate: string,
+  event: ProjectOperationsCalendarEvent['event'],
+  speciesId: string | null,
+  scientificName: string | null,
+  titleKey: string,
+  basis: OperationsFieldBasis,
+  confidence: ProjectOperationsCalendarEvent['confidence'],
+  plantingDate: string,
+) {
+  const parts = civilParts(startDate);
+  pushEvent(calendar, yearOffsetFrom(plantingDate, startDate), parts.month, event, speciesId, scientificName, titleKey, basis, confidence, startDate, endDate);
+}
+
+export type OperationsMonthCell = {
+  isoDate: string;
+  day: number;
+  inMonth: boolean;
+  moon: MoonPhase;
+  waning: boolean;
+  events: OperationsCalendarEventId[];
+};
+
+export function eventOverlapsDay(event: ProjectOperationsCalendarEvent, isoDate: string): boolean {
+  if (!event.startDate || !event.endDate) return false;
+  return event.startDate <= isoDate && isoDate <= event.endDate;
+}
+
+export function eventOverlapsMonth(event: ProjectOperationsCalendarEvent, year: number, month: number): boolean {
+  if (!event.startDate || !event.endDate) return false;
+  const start = utcIsoDate(year, month, 1);
+  const end = utcIsoDate(year, month, daysInUtcMonth(year, month));
+  return event.startDate <= end && event.endDate >= start;
+}
+
+export function buildOperationsMonthGrid(
+  year: number,
+  month: number,
+  events: ProjectOperationsCalendarEvent[],
+): OperationsMonthCell[] {
+  const first = utcNoon(utcIsoDate(year, month, 1));
+  const leading = (first.getUTCDay() + 6) % 7;
+  const days = daysInUtcMonth(year, month);
+  const cells: OperationsMonthCell[] = [];
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(Date.UTC(year, month - 1, 1 - leading + index, 12));
+    const isoDate = date.toISOString().slice(0, 10);
+    const inMonth = date.getUTCMonth() === month - 1;
+    const ofDay = events.filter((event) => eventOverlapsDay(event, isoDate)).map((event) => event.event);
+    cells.push({
+      isoDate,
+      day: date.getUTCDate(),
+      inMonth,
+      moon: moonPhase(date),
+      waning: isWaningMoon(date),
+      events: [...new Set(ofDay)],
+    });
+  }
+  return cells;
+}
+
+export function monthTasks(
+  events: ProjectOperationsCalendarEvent[],
+  species: ProjectOperationsSpeciesEntry[],
+  year: number,
+  month: number,
+): OperationsYearTask[] {
+  const ofMonth = events.filter((event) => eventOverlapsMonth(event, year, month));
+  const counts = new Map(species.map((entry) => [entry.speciesId, { scientificName: entry.scientificName, count: entry.count }]));
+  const plantMonths = uniqueMonths(ofMonth.filter((event) => event.event === 'plant'));
+  return OPERATIONS_YEAR_TASK_ORDER.flatMap((event): OperationsYearTask[] => {
+    const rows = ofMonth.filter((item) => item.event === event);
+    if (rows.length === 0) return [];
+    return [{
+      event,
+      months: uniqueMonths(rows),
+      species: uniqueSpecies(rows, counts),
+      lunarCue: LUNAR_WANING_EVENTS.has(event) ? 'waning' : null,
+      companionEvents: event === 'plant'
+        ? PLANT_COMPANIONS.filter((companion) => ofMonth.some((item) => item.event === companion))
+        : [],
+      overlappingPlantMonths: event === 'water-check' ? uniqueMonths(rows).filter((item) => plantMonths.includes(item)) : [],
+    }];
+  });
+}
+
+export function speciesSpecificLimitations(limitations: string[]): string[] {
+  return limitations.filter((item) => !GENERIC_LIMITATION.test(item));
+}
+
+export function stepsForCalendarEvent(entry: ProjectOperationsSpeciesEntry, event: OperationsCalendarEventId): OperationsStepId[] {
+  const planting = entry.profile.planting.steps;
+  const notes = entry.profile.care.notes;
+  if (event === 'plant') return planting;
+  if (event === 'mulch') {
+    const mulch = [...notes, ...planting].filter((step) => step.includes('mulch'));
+    return [...new Set(mulch)];
+  }
+  if (event === 'guard-check') return notes.filter((step) => step.includes('guard'));
+  if (event === 'water-check') return notes.filter((step) => step.includes('water'));
+  if (event === 'coppice') return notes.filter((step) => step.startsWith('coppice.') || step.startsWith('prune.'));
+  if (event === 'train' || event === 'prune') return notes.filter((step) => step.startsWith('prune.'));
+  return [];
+}
+
+export function addUtcYears(isoDate: string, years: number): string {
+  const parts = civilParts(isoDate);
+  const day = Math.min(parts.day, daysInUtcMonth(parts.year + years, parts.month));
+  return utcIsoDate(parts.year + years, parts.month, day);
+}
+
+function firstMonthOnOrAfter(isoDate: string, month: number): { year: number; month: number } {
+  const parts = civilParts(isoDate);
+  if (month >= parts.month) return { year: parts.year, month };
+  return { year: parts.year + 1, month };
+}
+
+function addYearsToMonth(value: { year: number; month: number }, years: number): { year: number; month: number } {
+  return { year: value.year + years, month: value.month };
+}
+
+function yearOffsetFrom(plantingDate: string, isoDate: string): number {
+  const planted = civilParts(plantingDate);
+  const event = civilParts(isoDate);
+  let years = event.year - planted.year;
+  if (event.month < planted.month || (event.month === planted.month && event.day < planted.day)) years -= 1;
+  return Math.max(0, years);
+}
+
+function civilParts(isoDate: string): { year: number; month: number; day: number } {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return { year: year ?? 0, month: month ?? 0, day: day ?? 0 };
+}
+
+function clipAfter(isoDate: string, earliest: string): string {
+  return isoDate < earliest ? earliest : isoDate;
 }

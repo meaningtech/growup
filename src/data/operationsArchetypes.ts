@@ -229,9 +229,6 @@ function fields(input: {
       harvest: null,
       leafFall: null,
     },
-    limitations: [
-      'Planning estimate, not a cultivar-specific prescription.',
-      'Local agronomist and seasonal weather review remain required before field work.',
-    ],
+    limitations: [],
   };
 }

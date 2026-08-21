@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('opens the last-step care handbook as an empty state until a design exists', async ({ page }) => {
+test('opens the last-step care calendar as an empty state until a design exists', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('step-care').click();
   await expect(page.getByTestId('care-panel')).toBeVisible();
