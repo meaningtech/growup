@@ -238,6 +238,9 @@ type CatalogueFilters = {
   evidenceMinimum: number;
 };
 
+const LOCAL_DRAFT_KEY = 'growup:draft:v2';
+const WORKSPACE_SESSION_KEY = 'growup:session:v1';
+
 const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }> = [
   { id: 'site', label: 'Site', icon: MapIcon },
   { id: 'profile', label: 'Evidence', icon: FlaskConical },
@@ -250,6 +253,42 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'care', label: 'Care', icon: BookOpen },
   { id: 'harvest', label: 'Yield', icon: Grape },
 ];
+
+function isWorkspaceSection(value: unknown): value is WorkspaceSection {
+  return STEPS.some((step) => step.id === value);
+}
+
+function readLocalProjectDraft(): ProjectState | null {
+  try {
+    const stored = window.localStorage.getItem(LOCAL_DRAFT_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as ProjectState;
+    return parsed?.site?.polygon?.length >= 3 ? parsed : null;
+  } catch {
+    window.localStorage.removeItem(LOCAL_DRAFT_KEY);
+    return null;
+  }
+}
+
+function readWorkspaceSession(): { projectId: string; section: WorkspaceSection } | null {
+  try {
+    const stored = window.localStorage.getItem(WORKSPACE_SESSION_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as { projectId?: unknown; section?: unknown };
+    if (typeof parsed.projectId !== 'string' || !parsed.projectId.trim()) return null;
+    return { projectId: parsed.projectId, section: isWorkspaceSection(parsed.section) ? parsed.section : 'site' };
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspaceSession(projectId: string, section: WorkspaceSection) {
+  window.localStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify({ projectId, section, updatedAt: new Date().toISOString() }));
+}
+
+function clearWorkspaceSession() {
+  window.localStorage.removeItem(WORKSPACE_SESSION_KEY);
+}
 
 function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | null {
   if (step === 'location' || step === 'boundary') return 'site';
@@ -1217,7 +1256,6 @@ function WorkspaceApp() {
   const [projectShareTarget, setProjectShareTarget] = useState<ProjectShareTarget | null>(null);
   const [projectShareBusy, setProjectShareBusy] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [recoveryDraft, setRecoveryDraft] = useState<ProjectState | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingPreference | null>(() => readOnboardingPreference(window.localStorage) ?? newOnboardingPreference());
   const createdAtRef = useRef(new Date().toISOString());
   const projectRevisionRef = useRef(0);
@@ -1276,8 +1314,10 @@ function WorkspaceApp() {
   const mapTooltipSpecies = mapTooltipTree ? DESIGN_SPECIES_BY_ID.get(mapTooltipTree.speciesId) ?? null : null;
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([api<AppConfig>('/api/config'), api<CatalogueStats>('/api/catalog/stats'), api<AuthSession>('/api/auth/session')])
-      .then(([appConfig, stats, session]) => {
+      .then(async ([appConfig, stats, session]) => {
+        if (cancelled) return;
         setConfig(appConfig);
         setCatalogueStats(stats);
         const localOnboarding = readOnboardingPreference(window.localStorage);
@@ -1295,23 +1335,36 @@ function WorkspaceApp() {
             .then(setAuthUser)
             .catch((syncError) => setError(messageOf(syncError)));
         }
-        if (session.user) void refreshProjects();
+        const workspace = readWorkspaceSession();
+        if (!readLocalProjectDraft() && session.user && workspace?.projectId) {
+          try {
+            const project = await api<ProjectState>(`/api/projects/${workspace.projectId}`);
+            if (cancelled) return;
+            loadProjectIntoWorkspace(project, 'saved', workspace.section);
+            setRevisions(await api<ProjectRevisionSummary[]>(`/api/projects/${project.id}/revisions`));
+          } catch {
+            clearWorkspaceSession();
+          }
+        }
+        if (session.user) void refreshProjects(workspace?.projectId).catch((refreshError) => setError(messageOf(refreshError)));
         setBusy(null);
       })
       .catch((loadError) => {
+        if (cancelled) return;
         setError(messageOf(loadError));
         setBusy(null);
       });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('growup:draft:v2');
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as ProjectState;
-      if (parsed?.site?.polygon?.length >= 3) setRecoveryDraft(parsed);
+      const draft = readLocalProjectDraft();
+      if (!draft) return;
+      const workspace = readWorkspaceSession();
+      loadProjectIntoWorkspace(draft, 'local', workspace?.projectId === draft.id ? workspace.section : undefined);
     } catch {
-      window.localStorage.removeItem('growup:draft:v2');
+      window.localStorage.removeItem(LOCAL_DRAFT_KEY);
     }
   }, []);
 
@@ -1336,7 +1389,7 @@ function WorkspaceApp() {
       const snapshot = currentProjectState(new Date().toISOString());
       if (!snapshot) return;
       try {
-        window.localStorage.setItem('growup:draft:v2', JSON.stringify(snapshot));
+        window.localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(snapshot));
       } catch {
         setError(t('errors.localDraftStorage'));
       }
@@ -1344,6 +1397,11 @@ function WorkspaceApp() {
     }, 1_200);
     return () => window.clearTimeout(timer);
   }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, harvestPriceOverrides, projectAnalysis, collaboration, authUser]);
+
+  useEffect(() => {
+    if (!site) return;
+    writeWorkspaceSession(projectId, section);
+  }, [projectId, section, site]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -2372,7 +2430,8 @@ function WorkspaceApp() {
     setCollaboration(defaultProjectCollaboration());
     setSharePath(null);
     setSaveStatus('idle');
-    window.localStorage.removeItem('growup:draft:v2');
+    window.localStorage.removeItem(LOCAL_DRAFT_KEY);
+    clearWorkspaceSession();
     projectNameEditedRef.current = false;
     setProjectName(t('project.newTitle'));
     createdAtRef.current = new Date().toISOString();
@@ -3139,7 +3198,6 @@ function WorkspaceApp() {
         setProjectRevision(revision);
         if (serial === dirtySerialRef.current) {
           setSaveStatus('saved');
-          window.localStorage.removeItem('growup:draft:v2');
         } else {
           setSaveStatus('unsaved');
         }
@@ -3174,7 +3232,7 @@ function WorkspaceApp() {
     }
   }
 
-  function loadProjectIntoWorkspace(project: ProjectState, status: SaveStatus) {
+  function loadProjectIntoWorkspace(project: ProjectState, status: SaveStatus, preferredSection?: WorkspaceSection) {
     suppressDirtyRef.current = true;
     const revision = project.revision ?? 0;
     const normalizedDesign = normalizeDesignConfiguration(project.designConfiguration);
@@ -3236,7 +3294,8 @@ function WorkspaceApp() {
     setHiddenPlannedSpeciesIds([]);
     setSharePath(null);
     fittedSiteRef.current = null;
-    setSection(project.costs ? 'costs' : project.irrigation ? 'water' : normalizedVariants.length ? 'layout' : project.siteProfile ? 'profile' : 'site');
+    const fallbackSection = project.costs ? 'costs' : project.irrigation ? 'water' : normalizedVariants.length ? 'layout' : project.siteProfile ? 'profile' : 'site';
+    setSection(preferredSection ?? fallbackSection);
     setSaveStatus(status);
     if (project.siteProfile) {
       void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives }))
@@ -3351,18 +3410,6 @@ function WorkspaceApp() {
       setHistoryOpen(false);
       setNotice(t('auth.restored', { revision }));
     });
-  }
-
-  function recoverLocalDraft() {
-    if (!recoveryDraft) return;
-    loadProjectIntoWorkspace(recoveryDraft, 'local');
-    setRecoveryDraft(null);
-    setNotice(t('auth.draftRecovered'));
-  }
-
-  function discardLocalDraft() {
-    window.localStorage.removeItem('growup:draft:v2');
-    setRecoveryDraft(null);
   }
 
   async function authenticateGoogle(credential: string) {
@@ -3816,7 +3863,7 @@ function WorkspaceApp() {
         </aside>
       </div>}
 
-      {recoveryDraft && !site && <div className="recovery-banner" role="status"><span><Save size={16} /><strong>{t('auth.recoveryTitle')}</strong><small>{t('auth.recoveryBody', { name: recoveryDraft.name })}</small></span><button onClick={recoverLocalDraft}>{t('auth.recover')}</button><button onClick={discardLocalDraft}>{t('auth.discard')}</button></div>}
+
 
       <aside className="step-rail" aria-label={t('nav.workflow')}>
         {STEPS.map(renderStepButton)}

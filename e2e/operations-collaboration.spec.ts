@@ -130,12 +130,12 @@ async function mockBase(page: Page, authenticated = false, assistantConfigured =
   }));
 }
 
-async function loadRecoveryDraft(page: Page, project: ProjectState, recoveryLabel = 'Recover') {
+async function loadRecoveryDraft(page: Page, project: ProjectState) {
   await page.addInitScript((value) => {
-    if (!window.localStorage.getItem('growup:draft:v2')) window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
+    window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
   }, project);
   await page.goto('/');
-  await page.getByRole('button', { name: recoveryLabel }).click();
+  await expect(page.getByText(project.name)).toBeVisible();
 }
 
 test('persists fire operations and advanced group edits through local recovery', async ({ page }) => {
@@ -184,7 +184,6 @@ test('persists fire operations and advanced group edits through local recovery',
   expect(savedVariant.trees.some((tree) => tree.locked && tree.speciesId === replacement)).toBe(true);
 
   await page.reload();
-  await page.getByRole('button', { name: 'Recover' }).click();
   await page.getByTestId('step-fire').click();
   await page.getByTestId('fire-operations-panel').getByRole('tab', { name: 'Operations' }).click();
   await expect(page.getByTestId('fire-operations-panel')).toContainText('1 of 5 controls closed');
@@ -587,8 +586,9 @@ test('keeps the populated water page locked to the mobile viewport', async ({ pa
   await page.addInitScript(() => window.localStorage.setItem('growup.locale', 'it'));
   const project = projectFixture();
   await mockBase(page);
-  await loadRecoveryDraft(page, project, 'Recupera bozza');
-  await page.locator('.toast button').click();
+  await loadRecoveryDraft(page, project);
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count()) await toastClose.click();
   await page.getByTestId('step-water').click();
   await expect(page.getByTestId('system-water-model')).toBeVisible();
   const timeline = page.locator('.timeline-control');

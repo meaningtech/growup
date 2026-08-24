@@ -38,7 +38,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --workers=1 e2e/onboarding.spec.ts e2e/responsive-accessibility.spec.ts e2e/assistant-keyboard.spec.ts e2e/seo.spec.ts e2e/planning-workspace.spec.ts
+      - run: npx playwright test --workers=1 e2e/onboarding.spec.ts e2e/responsive-accessibility.spec.ts e2e/assistant-keyboard.spec.ts e2e/seo.spec.ts e2e/planning-workspace.spec.ts e2e/persistence.spec.ts
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
