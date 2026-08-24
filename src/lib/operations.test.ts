@@ -133,7 +133,7 @@ describe('operations calendar', () => {
     const planted = grid.find((cell) => cell.isoDate === plantingDate);
     expect(planted?.inMonth).toBe(true);
     expect(planted?.events).toEqual(expect.arrayContaining(['plant']));
-    expect(grid.some((cell) => cell.moon === 'waning')).toBe(true);
+    expect(grid.some((cell) => cell.waning && cell.moon.startsWith('waning'))).toBe(true);
   });
 
   it('rejects malformed planting dates', () => {

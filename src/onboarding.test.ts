@@ -61,6 +61,7 @@ describe('onboarding persistence', () => {
       'costs',
       'review',
       'care',
+      'harvest',
       'complete',
     ]);
     for (const step of ONBOARDING_STEPS) {

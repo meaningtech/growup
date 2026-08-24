@@ -25,6 +25,7 @@ import {
   Flame,
   FlaskConical,
   FolderOpen,
+  Grape,
   Github,
   Info,
   Layers3,
@@ -44,6 +45,7 @@ import {
   Satellite,
   Save,
   ScanLine,
+  Scissors,
   Search,
   Send,
   Share2,
@@ -77,6 +79,7 @@ import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculate
 import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
+import { buildHarvestPlan, HARVEST_HORIZON_YEARS, normalizeHarvestPriceOverrides } from './lib/harvest';
 import {
   addUtcYears,
   buildOperationsMonthGrid,
@@ -152,7 +155,7 @@ import type {
   WindClimatologyPeriod,
 } from './types';
 
-type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care';
+type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care' | 'harvest';
 type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
 type AssistantTurnStatus = 'pending' | 'applied' | 'dismissed' | 'replaced';
 type AssistantActivity = 'asking' | 'applying' | null;
@@ -245,6 +248,7 @@ const STEPS: Array<{ id: WorkspaceSection; label: string; icon: typeof MapIcon }
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
   { id: 'analysis', label: 'Analysis', icon: ClipboardCheck },
   { id: 'care', label: 'Care', icon: BookOpen },
+  { id: 'harvest', label: 'Yield', icon: Grape },
 ];
 
 function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | null {
@@ -256,7 +260,8 @@ function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | nu
   if (step === 'fire') return 'fire';
   if (step === 'costs') return 'costs';
   if (step === 'review') return 'analysis';
-  if (step === 'care' || step === 'complete') return 'care';
+  if (step === 'care') return 'care';
+  if (step === 'harvest' || step === 'complete') return 'harvest';
   return null;
 }
 
@@ -920,6 +925,23 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
       </> : <p className="inline-empty">{t('care.emptyBody')}</p>}
     </SharedSectionFrame>;
   }
+  if (section === 'harvest') {
+    const plan = project.harvest ?? null;
+    const showMoney = Boolean(project.economicConfiguration);
+    return <SharedSectionFrame eyebrow={t('harvest.eyebrow')} title={t('harvest.title')} body={t('harvest.body')}>
+      {plan ? <>
+        <div className="shared-metric-grid">
+          <SharedMetric label={t('harvest.kgYear', { year: plan.current.year })} value={`${formatNumber(plan.current.kgBase, 0)} kg`} />
+          {showMoney && <SharedMetric label={t('harvest.valueYear', { year: plan.current.year })} value={currency(plan.current.valueBase, project.economicConfiguration!)} />}
+          <SharedMetric label={t('harvest.unknownSpecies')} value={String(plan.current.unknownSpecies)} />
+        </div>
+        <div className="shared-species-list">{plan.current.rows.filter((row) => !row.derived).map((row) => {
+          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          return <article key={`${row.speciesId}-${row.productId}`}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong><small>{t(`harvest.product.${row.productId}`)} · {formatNumber(row.kgBase, 0)} kg</small></span><b>{row.count}</b></article>;
+        })}</div>
+      </> : <p className="inline-empty">{t('harvest.emptyBody')}</p>}
+    </SharedSectionFrame>;
+  }
   return null;
 }
 
@@ -1116,6 +1138,7 @@ function WorkspaceApp() {
   const [costs, setCosts] = useState<EstablishmentCost | null>(null);
   const [fireOperations, setFireOperations] = useState<FireOperationsPlan>(() => defaultFireOperationsPlan());
   const [operationsPlantingDate, setOperationsPlantingDate] = useState<string | null>(null);
+  const [harvestPriceOverrides, setHarvestPriceOverrides] = useState<Record<string, number>>({});
   const [projectAnalysis, setProjectAnalysis] = useState<ProjectAnalysisReport | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -1320,7 +1343,7 @@ function WorkspaceApp() {
       if (authUser) queueProjectSave(snapshot, serial);
     }, 1_200);
     return () => window.clearTimeout(timer);
-  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, projectAnalysis, collaboration, authUser]);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, harvestPriceOverrides, projectAnalysis, collaboration, authUser]);
 
   useEffect(() => {
     if (!projectNameEditedRef.current) setProjectName(t('project.newTitle'));
@@ -1482,6 +1505,7 @@ function WorkspaceApp() {
       strokeWeight: 3,
       fillColor: '#b8d96f',
       fillOpacity: 0.13,
+      clickable: drawMode === 'edit-site' && index === 0,
       editable: drawMode === 'edit-site' && index === 0,
       zIndex: 10,
     })) : [];
@@ -1521,6 +1545,7 @@ function WorkspaceApp() {
         strokeWeight: 2,
         fillColor: kind === 'hole' ? '#6e4d1f' : '#b94031',
         fillOpacity: 0.3,
+        clickable: drawMode === 'edit-constraints',
         editable: drawMode === 'edit-constraints',
         zIndex: 12,
       });
@@ -1539,7 +1564,7 @@ function WorkspaceApp() {
       return overlay;
     });
     const pathOverlays = (showManagementPaths ? site.paths : []).map((path, index) => {
-      const overlay = new maps.Polyline({ map, path: path.points, strokeColor: '#f7e6a5', strokeOpacity: 0.95, strokeWeight: Math.max(3, Math.min(12, path.widthM * 1.7)), editable: drawMode === 'edit-constraints', zIndex: 13 });
+      const overlay = new maps.Polyline({ map, path: path.points, strokeColor: '#f7e6a5', strokeOpacity: 0.95, strokeWeight: Math.max(3, Math.min(12, path.widthM * 1.7)), clickable: drawMode === 'edit-constraints', editable: drawMode === 'edit-constraints', zIndex: 13 });
       if (drawMode === 'edit-constraints') {
         const overlayPath = overlay.getPath();
         const sync = () => {
@@ -1625,8 +1650,8 @@ function WorkspaceApp() {
     draftPointOverlaysRef.current = [];
     if (draftPoints.length) {
       draftOverlayRef.current = draftPoints.length >= 3
-        ? new maps.Polygon({ map, paths: draftPoints, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#ffffff', fillOpacity: 0.12, zIndex: 50 })
-        : new maps.Polyline({ map, path: draftPoints, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 50 });
+        ? new maps.Polygon({ map, paths: draftPoints, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#ffffff', fillOpacity: 0.12, clickable: false, zIndex: 50 })
+        : new maps.Polyline({ map, path: draftPoints, strokeColor: '#ffffff', strokeWeight: 3, clickable: false, zIndex: 50 });
       draftPointOverlaysRef.current = draftPoints.map((point, index) => new maps.Marker({
         map,
         position: point,
@@ -1650,9 +1675,18 @@ function WorkspaceApp() {
   }, [draftPoints, drawMode]);
 
   useEffect(() => {
-    const drawing = isGeometryDrawMode(drawMode);
+    const drawing = section === 'site' && isGeometryDrawMode(drawMode);
     mapRef.current?.setOptions({ draggableCursor: drawing ? 'crosshair' : null, draggingCursor: drawing ? 'crosshair' : null });
-  }, [drawMode]);
+  }, [drawMode, section]);
+
+  useEffect(() => {
+    setDrawMode((mode) => {
+      if (section !== 'site' && isSiteDrawMode(mode)) return 'idle';
+      if (section !== 'layout' && (mode === 'add-tree' || mode === 'move-tree')) return 'idle';
+      return mode;
+    });
+    if (section !== 'site') setDraftPoints((points) => points.length === 0 ? points : []);
+  }, [section]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2165,6 +2199,7 @@ function WorkspaceApp() {
   }, [showGroundwater, groundwaterOpacity, siteProfile?.groundwater, mapReady]);
 
   mapClickRef.current = (coordinate) => {
+    if (isSiteDrawMode(drawMode) && section !== 'site') return;
     if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion') {
       setDraftPoints((points) => [...points, coordinate]);
       return;
@@ -2225,10 +2260,10 @@ function WorkspaceApp() {
       if (validation.reason === 'Access, water and existing-tree points must lie inside the site.') {
         if (site && drawMode === 'edit-site') setSite(cloneSite(site));
         showBoundaryGuidance();
-        return;
+        return false;
       }
       setError(localizedDomainMessage(validation.reason, t));
-      return;
+      return false;
     }
     if (site) siteUndoRef.current.push(cloneSite(site));
     siteRedoRef.current = [];
@@ -2240,6 +2275,7 @@ function WorkspaceApp() {
     setIrrigation(null);
     setCosts(null);
     setNotice(t('notices.boundaryChanged'));
+    return true;
   }
 
   function finishDraft() {
@@ -2253,7 +2289,7 @@ function WorkspaceApp() {
         ? { ...site, polygon: draftPoints }
         : normalizeSiteBoundary({ id: `site-${crypto.randomUUID()}`, name: t('site.untitledName'), polygon: draftPoints });
       fittedSiteRef.current = null;
-      invalidateSite(nextSite);
+      if (!invalidateSite(nextSite)) return;
       setDraftPoints([]);
       setDrawMode('idle');
       return;
@@ -2262,8 +2298,12 @@ function WorkspaceApp() {
       setError(t('site.drawFirst'));
       return;
     }
-    if (drawMode === 'hole') invalidateSite({ ...site, holes: [...site.holes, draftPoints] });
-    if (drawMode === 'exclusion') invalidateSite({ ...site, exclusions: [...site.exclusions, draftPoints] });
+    const accepted = drawMode === 'hole'
+      ? invalidateSite({ ...site, holes: [...site.holes, draftPoints] })
+      : drawMode === 'exclusion'
+        ? invalidateSite({ ...site, exclusions: [...site.exclusions, draftPoints] })
+        : false;
+    if (!accepted) return;
     setDraftPoints([]);
     setDrawMode('idle');
   }
@@ -2331,6 +2371,7 @@ function WorkspaceApp() {
     setRevisions([]);
     setFireOperations(defaultFireOperationsPlan());
     setOperationsPlantingDate(null);
+    setHarvestPriceOverrides({});
     setProjectAnalysis(null);
     setAnalysisError(null);
     setAnalysisAgentSelectedFindingIds([]);
@@ -2610,6 +2651,10 @@ function WorkspaceApp() {
       operations: (() => {
         const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
         return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant), snapshot.irrigation, siteProfile.generatedAt, operationsPlantingDate) : null;
+      })(),
+      harvest: (() => {
+        const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
+        return variant ? buildHarvestPlan(variant, speciesForVariant(variant), economicConfiguration, snapshot.irrigation, snapshot.timelineYear, harvestPriceOverrides) : null;
       })(),
       section: snapshot.section,
     };
@@ -3078,6 +3123,10 @@ function WorkspaceApp() {
       operations: selectedVariant && siteProfile
         ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant), irrigation, siteProfile.generatedAt, operationsPlantingDate)
         : null,
+      harvest: selectedVariant
+        ? buildHarvestPlan(selectedVariant, speciesForVariant(selectedVariant), economicConfiguration, irrigation, timelineYear, harvestPriceOverrides)
+        : null,
+      harvestPriceOverrides,
       analysis: projectAnalysis,
       collaboration,
       revision: projectRevisionRef.current,
@@ -3173,6 +3222,7 @@ function WorkspaceApp() {
     setCosts(project.costs);
     setFireOperations(normalizeFireOperationsPlan(project.fireOperations, project.updatedAt));
     setOperationsPlantingDate(normalizePlantingDate(project.operations?.plantingDate));
+    setHarvestPriceOverrides(normalizeHarvestPriceOverrides(project.harvestPriceOverrides));
     const recoveredAnalysis = project.analysis?.agentRun?.status === 'running'
       ? {
         ...project.analysis,
@@ -3688,6 +3738,7 @@ function WorkspaceApp() {
     costs: Boolean(costs),
     analysis: Boolean(projectAnalysis && projectAnalysis.contextFingerprint === projectAnalysisFingerprint(currentAssistantContext())),
     care: Boolean(selectedVariant),
+    harvest: Boolean(selectedVariant),
   };
   const onboardingLocationReady = isOnboardingLocationReady(locationSelected, mapZoom);
   const activeWorkspaceTask = busy ?? (analysisBusy ? t('busy.formalReview') : null);
@@ -3786,22 +3837,24 @@ function WorkspaceApp() {
       </aside>
 
       <main className="workspace">
-        <section className={`map-stage ${isGeometryDrawMode(drawMode) ? 'drawing' : ''} ${selectedVariant ? 'has-timeline' : ''}`} aria-label={t('map.interactive')}>
+        <section className={`map-stage ${section === 'site' && isGeometryDrawMode(drawMode) ? 'drawing' : ''} ${selectedVariant ? 'has-timeline' : ''}`} aria-label={t('map.interactive')}>
           <div ref={mapElementRef} className="map-canvas" />
           {mapError && <div className="map-error"><Satellite size={22} /><strong>{t('map.unavailable')}</strong><span>{mapError}</span></div>}
-          {isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
+          {section === 'site' && isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
             <span><PencilRuler size={15} />{t(`map.drawMode.${drawMode}`)}</span>
             <strong>{t('map.pointsPlaced', { count: draftPoints.length })}</strong>
             <small>{draftPoints.length < 3 ? t('map.pointsRemaining', { count: 3 - draftPoints.length }) : t('map.readyToFinish')}</small>
           </div>}
           <div className="map-toolbar">
-            <MapToolbarButton icon={MousePointer2} label={t('map.editSite')} hint={t('map.tooltip.editSite')} active={drawMode === 'edit-site'} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} />
-            <MapToolbarButton icon={ScanLine} label={t('map.editConstraints')} hint={t('map.tooltip.editConstraints')} active={drawMode === 'edit-constraints'} onClick={() => activateDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints')} />
-            <MapToolbarButton icon={PencilRuler} label={t('map.drawSite')} hint={t('map.tooltip.drawSite')} active={drawMode === 'site'} onClick={() => activateDrawMode('site')} />
-            <MapToolbarButton icon={CircleOff} label={t('map.drawHole')} hint={t('map.tooltip.drawHole')} active={drawMode === 'hole'} onClick={() => activateDrawMode('hole')} />
-            <MapToolbarButton icon={Ban} label={t('map.drawExclusion')} hint={t('map.tooltip.drawExclusion')} active={drawMode === 'exclusion'} onClick={() => activateDrawMode('exclusion')} />
-            {isGeometryDrawMode(drawMode) && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
-            <span />
+            {section === 'site' && <>
+              <MapToolbarButton icon={MousePointer2} label={t('map.editSite')} hint={t('map.tooltip.editSite')} active={drawMode === 'edit-site'} onClick={() => activateDrawMode(drawMode === 'edit-site' ? 'idle' : 'edit-site')} />
+              <MapToolbarButton icon={ScanLine} label={t('map.editConstraints')} hint={t('map.tooltip.editConstraints')} active={drawMode === 'edit-constraints'} onClick={() => activateDrawMode(drawMode === 'edit-constraints' ? 'idle' : 'edit-constraints')} />
+              <MapToolbarButton icon={PencilRuler} label={t('map.drawSite')} hint={t('map.tooltip.drawSite')} active={drawMode === 'site'} onClick={() => activateDrawMode('site')} />
+              <MapToolbarButton icon={CircleOff} label={t('map.drawHole')} hint={t('map.tooltip.drawHole')} active={drawMode === 'hole'} onClick={() => activateDrawMode('hole')} />
+              <MapToolbarButton icon={Ban} label={t('map.drawExclusion')} hint={t('map.tooltip.drawExclusion')} active={drawMode === 'exclusion'} onClick={() => activateDrawMode('exclusion')} />
+              {isGeometryDrawMode(drawMode) && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
+              <span />
+            </>}
             <MapToolbarButton icon={Layers3} label={t('map.layers')} hint={t('map.tooltip.layers')} active={showLayerPanel} className="layers" expanded={showLayerPanel} onClick={() => setShowLayerPanel((value) => !value)} />
             <MapToolbarButton icon={Waypoints} label={t('map.editIrrigation')} hint={t('map.tooltip.editIrrigation')} active={editingIrrigation} className="water" disabled={!irrigation} onClick={() => { setShowIrrigation(true); setEditingIrrigation((value) => !value); }} />
           </div>
@@ -3994,6 +4047,17 @@ function WorkspaceApp() {
             onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
             onSchedule={() => setScheduleOpen(true)}
           />}
+          {section === 'harvest' && <HarvestPanel
+            variant={selectedVariant}
+            economics={economicConfiguration}
+            irrigation={irrigation}
+            year={timelineYear}
+            onYear={setTimelineYear}
+            overrides={harvestPriceOverrides}
+            onOverrides={setHarvestPriceOverrides}
+            includeMoney
+            onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')}
+          />}
         </section>
       </main>
 
@@ -4019,6 +4083,7 @@ function WorkspaceApp() {
         onContinueCosts={() => continueOnboarding('costs')}
         onContinueReview={() => continueOnboarding('review')}
         onContinueCare={() => continueOnboarding('care')}
+        onContinueHarvest={() => continueOnboarding('harvest')}
         onContinueComplete={() => continueOnboarding('complete')}
         reviewConfigured={Boolean(config?.assistant.configured)}
         reviewReady={Boolean(site && siteProfile && selectedVariant)}
@@ -4154,6 +4219,7 @@ function OnboardingTour({
   onContinueCosts,
   onContinueReview,
   onContinueCare,
+  onContinueHarvest,
   onContinueComplete,
   reviewConfigured,
   reviewReady,
@@ -4182,6 +4248,7 @@ function OnboardingTour({
   onContinueCosts: () => void;
   onContinueReview: () => void;
   onContinueCare: () => void;
+  onContinueHarvest: () => void;
   onContinueComplete: () => void;
   reviewConfigured: boolean;
   reviewReady: boolean;
@@ -4205,6 +4272,7 @@ function OnboardingTour({
     costs: { title: t('onboarding.costsTitle'), body: t('onboarding.costsBody') },
     review: { title: t('onboarding.reviewTitle'), body: t('onboarding.reviewBody') },
     care: { title: t('onboarding.careTitle'), body: t('onboarding.careBody') },
+    harvest: { title: t('onboarding.harvestTitle'), body: t('onboarding.harvestBody') },
     complete: { title: t('onboarding.completeTitle'), body: t('onboarding.completeBody') },
   }[preference.step];
 
@@ -4245,7 +4313,8 @@ function OnboardingTour({
     {preference.step === 'review' && (reviewConfigured
       ? <button className="onboarding-primary" disabled={!reviewReady || reviewBusy} onClick={onReview}>{reviewBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{reviewBusy ? t('projectAnalysis.running') : t('onboarding.runReview')}</button>
       : <button className="onboarding-primary" onClick={onContinueCare}>{t('onboarding.continueCare')}<BookOpen size={16} /></button>)}
-    {preference.step === 'care' && <button className="onboarding-primary" onClick={onContinueComplete}>{t('onboarding.continueComplete')}<ChevronRight size={16} /></button>}
+    {preference.step === 'care' && <button className="onboarding-primary" onClick={onContinueHarvest}>{t('onboarding.continueHarvest')}<Grape size={16} /></button>}
+    {preference.step === 'harvest' && <button className="onboarding-primary" onClick={onContinueComplete}>{t('onboarding.continueComplete')}<ChevronRight size={16} /></button>}
     {preference.step === 'complete' && <div className="onboarding-complete-actions"><button onClick={onViewAnalysis}>{t('onboarding.viewAnalysis')}</button><button className="onboarding-primary" onClick={onComplete}>{t('onboarding.finish')}<Check size={16} /></button></div>}
     <button className="onboarding-skip" onClick={onSkip}>{t('onboarding.skip')}</button>
   </aside>;
@@ -5516,7 +5585,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const visible = recommendations.filter((item) => item.status !== 'blocked').slice(0, 18);
   const blocked = recommendations.filter((item) => item.status === 'blocked');
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
-  const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? recommendations[0] ?? null;
+  const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? null;
   const minimumSpecies = design.system === 'syntropic' ? 3 : design.system === 'monoculture' ? 1 : 2;
   const selectedOptions = recommendations.map((item) => item.species).filter((item) => selectedIds.includes(item.id) && item.treeLike && item.productiveFromYear !== null);
   const selectedSpecies = selectedIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item));
@@ -5694,9 +5763,22 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         </div>;
       })}</div>}
       {inspected && <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
-        <header><span className="species-swatch" style={{ background: inspected.species.color }} /><span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>{inspected.status === 'blocked' && <CircleOff size={20} />}</header>
-        <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
-        {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
+        <header>
+          <span className="species-swatch" style={{ background: inspected.species.color }} />
+          <span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>
+          <span className="species-inspector-actions">
+            {inspected.status === 'blocked' && <CircleOff size={20} />}
+            {inspectedId && <button type="button" aria-label={t('actions.close')} onClick={() => setInspectedId(null)}><X size={16} /></button>}
+          </span>
+        </header>
+        {inspected.status === 'blocked' ? (
+          <div className="mitigation-list"><strong>{t('species.excludedFromLayouts')}</strong>{inspected.mitigations.map((item) => <p key={item}>{localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>
+        ) : (
+          <>
+            <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
+            {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
+          </>
+        )}
         <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
       </div>}
       </>}
@@ -6372,6 +6454,7 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [speciesDetailId, setSpeciesDetailId] = useState<string | null>(null);
   const [openEvent, setOpenEvent] = useState<OperationsCalendarEventId | null>(null);
+  const [moonOpen, setMoonOpen] = useState(false);
   const monthLabel = (month: number) => month >= 1 && month <= 12
     ? new Intl.DateTimeFormat(dateLocale, { month: 'long' }).format(new Date(Date.UTC(2026, month - 1, 1)))
     : t('care.unknown');
@@ -6390,6 +6473,8 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
   const grid = plantingDate ? buildOperationsMonthGrid(visibleYear, visibleMonth, plan.calendar) : [];
   const tasks = plantingDate ? monthTasks(plan.calendar, plan.species, visibleYear, visibleMonth) : [];
   const dayEvents = selectedDay ? [...new Set(plan.calendar.filter((event) => eventOverlapsDay(event, selectedDay)).map((event) => event.event))] : [];
+  const visibleTasks = selectedDay ? tasks.filter((task) => dayEvents.includes(task.event)) : tasks;
+  const moonCell = (selectedDay ? grid.find((cell) => cell.isoDate === selectedDay) : grid.find((cell) => cell.inMonth)) ?? null;
   const speciesDetail = plan.species.find((entry) => entry.speciesId === speciesDetailId) ?? null;
   const openTask = tasks.find((task) => task.event === openEvent) ?? null;
   const weekdayLabels = Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(dateLocale, { weekday: 'short' }).format(new Date(Date.UTC(2026, 5, 1 + index))));
@@ -6463,16 +6548,25 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
               className={`care-day${cell.inMonth ? '' : ' outside'}${selectedDay === cell.isoDate ? ' selected' : ''}${cell.events.length ? ' has-work' : ''}${cell.waning ? ' waning' : ''}`}
               onClick={() => setSelectedDay(cell.isoDate)}
             >
-              <b>{cell.day}</b>
-              <i className={`care-moon ${cell.moon}`} title={t(`care.moon.${cell.moon}`)} aria-label={t(`care.moon.${cell.moon}`)}>{MOON_GLYPH[cell.moon]}</i>
+              <span className="care-day-head">
+                <b>{cell.day}</b>
+                <CareMoon phase={cell.moon} label={t(`care.moon.${cell.moon}`)} />
+              </span>
               <span className="care-day-dots">{cell.events.slice(0, 4).map((event) => <em key={event} data-event={event} />)}</span>
             </button>)}
           </div>
           <div className="care-month-tasks">
             <small>{selectedDay ? t('care.dayEvents', { date: new Intl.DateTimeFormat(dateLocale, { day: 'numeric', month: 'long' }).format(new Date(`${selectedDay}T12:00:00.000Z`)) }) : t('care.thisMonth')}</small>
-            {(selectedDay ? tasks.filter((task) => dayEvents.includes(task.event)) : tasks).length === 0
+            {moonCell && <button type="button" className="care-month-task care-moon-task" data-testid="care-task-moon" onClick={() => setMoonOpen(true)}>
+              <CareMoon phase={moonCell.moon} label={t(`care.moon.${moonCell.moon}`)} />
+              <span>
+                <strong>{t(`care.moon.${moonCell.moon}`)}</strong>
+                <span>{moonCell.waning ? t('care.moonPruneCue') : t('care.moonNotPrune')}</span>
+              </span>
+            </button>}
+            {visibleTasks.length === 0
               ? <p>{t('care.noMonthEvents')}</p>
-              : (selectedDay ? tasks.filter((task) => dayEvents.includes(task.event)) : tasks).map((task) => (
+              : visibleTasks.map((task) => (
                 <button key={task.event} type="button" className="care-month-task" data-event={task.event} data-testid={`care-task-${task.event}`} onClick={() => setOpenEvent(task.event)}>
                   <strong>{t(`care.event.${task.event}`)}</strong>
                   <span>{task.species.map((entry) => DESIGN_SPECIES_BY_ID.get(entry.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(entry.speciesId)!, t) : entry.scientificName).join(', ')}</span>
@@ -6488,33 +6582,73 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
     <div className="panel-action-bar">
       <button className="button primary wide sticky-action" data-testid="open-operational-schedule" onClick={onSchedule}><ClipboardCheck size={17} />{t('schedule.open')}</button>
     </div>
-    {speciesDetail && <CareDetailModal title={DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)!, t) : speciesDetail.scientificName} onClose={() => setSpeciesDetailId(null)}>
-      <p><i>{speciesDetail.scientificName}</i></p>
+    {speciesDetail && <CareDetailModal
+      eyebrow={speciesDetail.scientificName}
+      title={DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)!, t) : speciesDetail.scientificName}
+      mark={<span className="tree-dot care-modal-dot" style={{ background: DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)?.color ?? '#789' }} />}
+      onClose={() => setSpeciesDetailId(null)}
+    >
       <p>{t(`care.match.${speciesDetail.profile.matchLevel}`)}{speciesDetail.profile.climateGroup ? ` · ${t(`care.group.${speciesDetail.profile.climateGroup}`)}` : ''}</p>
-      <ul>{[...speciesDetail.profile.planting.steps, ...speciesDetail.profile.care.notes].map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>
+      <ol className="care-modal-steps">{[...speciesDetail.profile.planting.steps, ...speciesDetail.profile.care.notes].map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ol>
       {speciesSpecificLimitations(speciesDetail.profile.limitations).map((item) => <small key={item}>{item}</small>)}
     </CareDetailModal>}
-    {openEvent && <CareDetailModal title={t(`care.event.${openEvent}`)} onClose={() => setOpenEvent(null)}>
-      <p>{t(`care.howto.${openEvent}`)}</p>
-      {openTask?.lunarCue === 'waning' && <div className="care-lunar" data-testid="care-lunar">
-        <strong>{t('care.lunarTitle')}</strong>
-        {waningMoonRanges(visibleYear, visibleMonth).map((range) => <small key={`${range.startDay}`}>{t('care.lunarRange', { month: monthLabel(visibleMonth), year: visibleYear, start: range.startDay, end: range.endDay })}</small>)}
+    {moonOpen && moonCell && <CareDetailModal
+      eyebrow={selectedDay ? t('care.dayEvents', { date: new Intl.DateTimeFormat(dateLocale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${selectedDay}T12:00:00.000Z`)) }) : t('care.thisMonth')}
+      title={t(`care.moon.${moonCell.moon}`)}
+      mark={<CareMoon phase={moonCell.moon} label={t(`care.moon.${moonCell.moon}`)} />}
+      onClose={() => setMoonOpen(false)}
+    >
+      <p>{moonCell.waning ? t('care.moonPruneCue') : t('care.moonNotPrune')}</p>
+      <p>{t('care.lunarBody')}</p>
+    </CareDetailModal>}
+    {openEvent && <CareDetailModal
+      eyebrow={selectedDay ? t('care.dayEvents', { date: new Intl.DateTimeFormat(dateLocale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${selectedDay}T12:00:00.000Z`)) }) : t(`care.event.${openEvent}`)}
+      title={t(`care.event.${openEvent}`)}
+      mark={careEventMark(openEvent)}
+      onClose={() => setOpenEvent(null)}
+    >
+      <p className="care-modal-howto">{t(`care.howto.${openEvent}`)}</p>
+      {openTask?.lunarCue === 'waning' && <aside className="care-modal-note" data-testid="care-lunar">
+        {moonCell && <CareMoon phase={moonCell.moon} label={t(`care.moon.${moonCell.moon}`)} />}
+        <span>
+          <strong>{t('care.lunarTitle')}</strong>
+          <small>{t('care.lunarDays', { month: monthLabel(visibleMonth), year: visibleYear, ranges: waningMoonRanges(visibleYear, visibleMonth).map((range) => `${range.startDay}–${range.endDay}`).join(', ') })}</small>
+        </span>
+      </aside>}
+      {(openTask?.species ?? []).length > 0 && <div className="care-modal-plants">
+        <small>{t('care.taskPlants')}</small>
+        {(openTask?.species ?? []).map((row) => {
+          const entry = plan.species.find((item) => item.speciesId === row.speciesId);
+          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          const steps = entry ? stepsForCalendarEvent(entry, openEvent) : [];
+          return <article key={row.speciesId}>
+            <span className="tree-dot" style={{ background: item?.color ?? '#789' }} />
+            <span>
+              <strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong>
+              <b>{t('care.count', { count: row.count })}</b>
+              {steps.length > 0 && <ol className="care-modal-steps">{steps.map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ol>}
+            </span>
+          </article>;
+        })}
       </div>}
-      {(openTask?.species ?? []).map((row) => {
-        const entry = plan.species.find((item) => item.speciesId === row.speciesId);
-        const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
-        const steps = entry ? stepsForCalendarEvent(entry, openEvent) : [];
-        return <article key={row.speciesId} className="care-howto-species">
-          <strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong>
-          <small>{t('care.count', { count: row.count })}</small>
-          {steps.length > 0 && <ul>{steps.map((step) => <li key={step}>{t(`care.step.${step}`)}</li>)}</ul>}
-        </article>;
-      })}
     </CareDetailModal>}
   </div>;
 }
 
-const MOON_GLYPH: Record<MoonPhase, string> = { new: '●', waxing: '☽', full: '○', waning: '☾' };
+function CareMoon({ phase, label }: { phase: MoonPhase; label: string }) {
+  return <svg className={`care-moon phase-${phase}`} viewBox="0 0 16 16" role="img" aria-label={label}>
+    <title>{label}</title>
+    <circle cx="8" cy="8" r="6.5" className="unlit" />
+    {phase === 'full' && <circle cx="8" cy="8" r="6.5" className="lit" />}
+    {phase === 'first-quarter' && <path className="lit" d="M8 1.5A6.5 6.5 0 0 1 8 14.5V1.5Z" />}
+    {phase === 'last-quarter' && <path className="lit" d="M8 1.5A6.5 6.5 0 0 0 8 14.5V1.5Z" />}
+    {phase === 'waxing-crescent' && <path className="lit" fillRule="evenodd" d="M8 1.5A6.5 6.5 0 1 1 8 14.5 6.5 6.5 0 1 1 8 1.5M5.2 1.5A6.5 6.5 0 1 1 5.2 14.5 6.5 6.5 0 1 1 5.2 1.5" />}
+    {phase === 'waning-crescent' && <path className="lit" fillRule="evenodd" d="M8 1.5A6.5 6.5 0 1 1 8 14.5 6.5 6.5 0 1 1 8 1.5M10.8 1.5A6.5 6.5 0 1 1 10.8 14.5 6.5 6.5 0 1 1 10.8 1.5" />}
+    {phase === 'waxing-gibbous' && <path className="lit" fillRule="evenodd" d="M8 1.5A6.5 6.5 0 1 1 8 14.5 6.5 6.5 0 1 1 8 1.5M3.4 3.2A5.4 5.4 0 1 0 3.4 12.8 5.4 5.4 0 1 0 3.4 3.2" />}
+    {phase === 'waning-gibbous' && <path className="lit" fillRule="evenodd" d="M8 1.5A6.5 6.5 0 1 1 8 14.5 6.5 6.5 0 1 1 8 1.5M12.6 3.2A5.4 5.4 0 1 0 12.6 12.8 5.4 5.4 0 1 0 12.6 3.2" />}
+    <circle cx="8" cy="8" r="6.5" className="ring" />
+  </svg>;
+}
 
 function uniquePlantingWindows(
   species: ProjectOperationsSpeciesEntry[],
@@ -6527,17 +6661,125 @@ function uniquePlantingWindows(
   return labels.join(' · ');
 }
 
-function CareDetailModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function careEventMark(event: OperationsCalendarEventId) {
+  if (event === 'plant' || event === 'mulch') return <Sprout size={18} />;
+  if (event === 'water-check') return <Droplets size={18} />;
+  if (event === 'guard-check') return <ShieldCheck size={18} />;
+  return <Scissors size={18} />;
+}
+
+function CareDetailModal({ eyebrow, title, mark, onClose, children }: {
+  eyebrow?: string;
+  title: string;
+  mark?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}) {
   const { t } = useI18n();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return <div className="care-modal-layer" data-testid="care-detail-modal">
     <button type="button" className="care-modal-backdrop" aria-label={t('care.closeDetail')} onClick={onClose} />
-    <section className="care-modal" role="dialog" aria-modal="true" aria-label={title}>
+    <section className="care-modal" role="dialog" aria-modal="true" aria-labelledby="care-modal-title">
       <header>
-        <strong>{title}</strong>
+        {mark && <span className="care-modal-mark">{mark}</span>}
+        <span>
+          {eyebrow && <small>{eyebrow}</small>}
+          <h2 id="care-modal-title">{title}</h2>
+        </span>
         <button type="button" aria-label={t('care.closeDetail')} onClick={onClose}><X size={16} /></button>
       </header>
-      <div>{children}</div>
+      <div className="care-modal-body">{children}</div>
     </section>
+  </div>;
+}
+
+function HarvestPanel({ variant, economics, irrigation, year, onYear, overrides, onOverrides, includeMoney, onPrepare }: {
+  variant: LayoutVariant | null;
+  economics: EconomicConfiguration;
+  irrigation: IrrigationEstimate | null;
+  year: number;
+  onYear: (year: number) => void;
+  overrides: Record<string, number>;
+  onOverrides: (value: Record<string, number>) => void;
+  includeMoney: boolean;
+  onPrepare: () => void;
+}) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<'summary' | 'species' | 'sources'>('summary');
+  if (!variant) return <div className="panel-body" data-testid="harvest-panel"><EmptyState icon={Grape} title={t('harvest.emptyTitle')} body={t('harvest.emptyBody')} action={t('harvest.openDesign')} onAction={onPrepare} /></div>;
+  const plan = buildHarvestPlan(variant, speciesForVariant(variant), economics, irrigation, year, overrides);
+  const width = 640;
+  const height = 168;
+  const padding = { top: 12, right: 12, bottom: 24, left: 36 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maximum = Math.max(1, ...plan.years.map((item) => item.kgBase));
+  const x = (index: number) => padding.left + index / Math.max(1, plan.years.length - 1) * plotWidth;
+  const y = (value: number) => padding.top + plotHeight - value / maximum * plotHeight;
+  const line = plan.years.map((item, index) => `${index === 0 ? 'M' : 'L'} ${x(index).toFixed(1)} ${y(item.kgBase).toFixed(1)}`).join(' ');
+  const currentIndex = Math.max(0, Math.min(plan.years.length - 1, plan.current.year - 1));
+  const primaries = plan.current.rows.filter((row) => !row.derived);
+  const derivatives = plan.current.rows.filter((row) => row.derived);
+  return <div className="panel-body persistent-action-panel harvest-page" data-testid="harvest-panel">
+    <div className="panel-scroll-content">
+      <div className="panel-intro compact">
+        <span className="eyebrow">{t('harvest.eyebrow')}</span>
+        <h1>{t('harvest.title')}</h1>
+        <p>{t('harvest.body')}</p>
+      </div>
+      <label className="harvest-year">
+        <span>{t('harvest.year', { year: plan.current.year })}</span>
+        <input type="range" min={1} max={HARVEST_HORIZON_YEARS} value={plan.current.year} onChange={(event) => onYear(Number(event.target.value))} />
+      </label>
+      <div className="fire-analysis-tabs" role="tablist" aria-label={t('harvest.tabs')}>
+        {([['summary', Grape], ['species', Leaf], ['sources', Database]] as const).map(([id, Icon]) => (
+          <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+            <Icon size={15} /><span>{t(`harvest.tab.${id}`)}</span>
+          </button>
+        ))}
+      </div>
+      {tab === 'summary' && <div className="harvest-summary" data-testid="harvest-summary">
+        <div className="harvest-totals">
+          <span><small>{t('harvest.primaryKg')}</small><strong>{formatNumber(plan.current.kgBase, 0)} kg</strong></span>
+          {includeMoney && <span><small>{t('harvest.value')}</small><strong>{currency(plan.current.valueBase, economics)}</strong></span>}
+          <span><small>{t('harvest.unknownSpecies')}</small><strong>{plan.current.unknownSpecies}</strong></span>
+        </div>
+        <svg className="harvest-year-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('harvest.timelineAria')}>
+          <path d={`${line} L ${x(plan.years.length - 1).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} L ${x(0).toFixed(1)} ${(padding.top + plotHeight).toFixed(1)} Z`} fill="rgba(184,219,85,.28)" />
+          <path d={line} fill="none" stroke="#315a44" strokeWidth="2.2" />
+          <line x1={x(currentIndex)} x2={x(currentIndex)} y1={padding.top} y2={padding.top + plotHeight} stroke="#315a44" strokeDasharray="3 3" />
+          <text x={x(0)} y={height - 6} fontSize="11">1</text>
+          <text x={x(plan.years.length - 1)} y={height - 6} textAnchor="end" fontSize="11">{HARVEST_HORIZON_YEARS}</text>
+        </svg>
+        <p className="harvest-note">{t('harvest.limitation')}</p>
+        {plan.warnings.filter((warning) => !warning.startsWith('Per-tree')).map((warning) => <p key={warning} className="care-warning">• {warning}</p>)}
+      </div>}
+      {tab === 'species' && <div className="harvest-species" data-testid="harvest-species">
+        {primaries.length === 0 && <p>{t('harvest.noYieldingSpecies')}</p>}
+        {primaries.map((row) => {
+          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          const derived = derivatives.filter((entry) => entry.speciesId === row.speciesId);
+          return <article key={`${row.speciesId}-${row.productId}`} className="care-species-card">
+            <header>
+              <span className="tree-dot" style={{ background: item?.color ?? '#789' }} />
+              <span><small>{t('care.count', { count: row.count })} · {t(`status.${row.confidence}`)}</small><strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong><i>{item?.scientificName ?? row.scientificName}</i></span>
+            </header>
+            <div className="care-facts">
+              <span><small>{t(`harvest.product.${row.productId}`)}</small><strong>{formatNumber(row.kgBase, 0)} kg</strong><b>{formatNumber(row.kgLow, 0)}–{formatNumber(row.kgHigh, 0)}</b></span>
+              {derived.map((entry) => <span key={entry.productId}><small>{t(`harvest.product.${entry.productId}`)}</small><strong>{formatNumber(entry.kgBase, 0)} kg</strong><b>{includeMoney ? currency(entry.valueBase, economics) : t(`status.${entry.confidence}`)}</b></span>)}
+              {includeMoney && [row, ...derived].map((entry) => <span key={`price-${entry.productId}`}><small>{t('harvest.unitPrice')} · {t(`harvest.product.${entry.productId}`)}</small><strong><input type="number" min={0} step="0.01" value={entry.unitPriceLocal} onChange={(event) => onOverrides({ ...overrides, [entry.productId]: Number(event.target.value) || 0 })} /></strong><b>{economics.currencyCode}/{t('harvest.perKg')}</b></span>)}
+            </div>
+          </article>;
+        })}
+      </div>}
+      {tab === 'sources' && <div className="care-sources" data-testid="harvest-sources">
+        {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
+      </div>}
+    </div>
   </div>;
 }
 
@@ -6834,6 +7076,9 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
 function monthName(month: number) { return ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'][month - 1]; }
 function isGeometryDrawMode(mode: DrawMode): mode is 'site' | 'hole' | 'exclusion' {
   return mode === 'site' || mode === 'hole' || mode === 'exclusion';
+}
+function isSiteDrawMode(mode: DrawMode) {
+  return isGeometryDrawMode(mode) || mode === 'edit-site' || mode === 'edit-constraints' || mode === 'access-point' || mode === 'water-point' || mode === 'existing-tree';
 }
 function evidenceUsageKey(item: Evidence) {
   const source = item.source.toLowerCase();

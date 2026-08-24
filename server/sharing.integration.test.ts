@@ -9,6 +9,7 @@ import { defaultProjectCollaboration } from '../src/lib/collaboration';
 import { calculateEstablishmentCost } from '../src/lib/costs';
 import { defaultFireOperationsPlan } from '../src/lib/fireOperations';
 import { calculateIrrigation, DEFAULT_IRRIGATION_CONFIGURATION } from '../src/lib/irrigation';
+import { buildHarvestPlan } from '../src/lib/harvest';
 import { DEFAULT_DESIGN_CONFIGURATION, generateLayoutVariants } from '../src/lib/layout';
 import type { ProjectState } from '../src/types';
 import { createApp, type GrowupAppConfig } from './app';
@@ -44,6 +45,7 @@ describe('shared project review integration', () => {
     const economics = defaultEconomicConfiguration(profile.location.countryCode ?? '');
     const irrigation = calculateIrrigation(variants[0], species, TEMPERATE_OPEN_FIELD_FIXTURE, profile, 5, DEFAULT_IRRIGATION_CONFIGURATION, economics);
     const costs = calculateEstablishmentCost(variants[0], species, irrigation, economics);
+    const harvest = buildHarvestPlan(variants[0], species, economics, irrigation, 5, {}, now);
     let project: ProjectState = {
       id: 'shared-project',
       name: 'Shared project',
@@ -58,6 +60,7 @@ describe('shared project review integration', () => {
       timelineYear: 5,
       irrigation,
       costs,
+      harvest,
       fireOperations: defaultFireOperationsPlan(now),
       collaboration: defaultProjectCollaboration(),
       revision: 1,
@@ -107,7 +110,15 @@ describe('shared project review integration', () => {
       fireOperations: expect.any(Object),
       economicConfiguration: null,
       costs: null,
+      harvest: expect.objectContaining({
+        current: expect.objectContaining({
+          kgBase: harvest.current.kgBase,
+          valueBase: 0,
+        }),
+      }),
     }));
+    expect(viewOnlyProject.body.harvest.priceOverrides).toEqual({});
+    expect(viewOnlyProject.body.harvest.current.rows.every((row: { valueBase: number; unitPriceLocal: number }) => row.valueBase === 0 && row.unitPriceLocal === 0)).toBe(true);
     expect(viewOnlyProject.body.siteProfile.generatedAt).toBe(profile.generatedAt);
     expect(viewOnlyProject.body.siteProfile.soil.verticalProfile).toEqual(profile.soil.verticalProfile);
     expect(viewOnlyProject.body.siteProfile.soil.depthToBedrock).toEqual(profile.soil.depthToBedrock);
@@ -160,6 +171,7 @@ describe('shared project review integration', () => {
     const publicRead = await request(app).get(`/api/shared/projects/${token}`).expect(200);
     expect(publicRead.body.economicConfiguration).toEqual(expect.objectContaining({ currencyCode: economics.currencyCode }));
     expect(publicRead.body.costs).toEqual(expect.objectContaining({ totalCost: costs.totalCost }));
+    expect(publicRead.body.harvest.current.valueBase).toBe(harvest.current.valueBase);
     expect(publicRead.body.irrigation.economics).toEqual(expect.objectContaining({ currencyCode: economics.currencyCode }));
     expect(publicRead.body.collaboration.share).not.toHaveProperty('tokenVersion');
     expect(publicRead.body).not.toHaveProperty('analysis');

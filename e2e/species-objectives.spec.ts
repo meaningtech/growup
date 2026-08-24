@@ -13,7 +13,18 @@ test('applies objectives to suitability, filters the source catalogue and checks
 
   await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.getByTestId('design-objectives')).toBeVisible();
+  await expect(page.locator('.drawing-status')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Draw a new field' })).toHaveCount(0);
+  await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
   await expect(page.getByTestId('species-inspector')).toContainText('Linked evidence');
+  await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
+  await page.getByTestId('species-safety-gate').getByRole('button', { name: 'Inspect' }).click();
+  await expect(page.getByTestId('species-inspector')).toHaveClass(/blocked/);
+  await expect(page.getByTestId('species-inspector')).toContainText('Excluded from generated layouts');
+  await expect(page.getByTestId('species-inspector')).not.toContainText('Checks before use');
+  await expect(page.getByTestId('species-inspector')).not.toContainText('Evidence readiness');
+  await page.getByTestId('species-inspector').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
   await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
 
   const rerankResponse = page.waitForResponse((response) => response.url().endsWith('/api/recommendations') && response.request().method() === 'POST');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWaningMoon, moonAgeDays, moonPhase, waningMoonRanges } from './lunar';
+import { MOON_PHASES, isWaningMoon, moonAgeDays, moonPhase, utcIsoDate, utcNoon, waningMoonRanges } from './lunar';
 
 describe('lunar phase helper', () => {
   it('places 6 January 2000 near a new moon', () => {
@@ -7,11 +7,15 @@ describe('lunar phase helper', () => {
     expect(moonPhase(new Date(Date.UTC(2000, 0, 6, 18, 14)))).toBe('new');
   });
 
-  it('treats the days after full moon as waning', () => {
+  it('walks through eight distinct shapes in one synodic month', () => {
     expect(isWaningMoon(new Date(Date.UTC(2000, 0, 22, 12)))).toBe(true);
     expect(isWaningMoon(new Date(Date.UTC(2000, 0, 8, 12)))).toBe(false);
-    expect(moonPhase(new Date(Date.UTC(2000, 0, 12, 12)))).toBe('waxing');
-    expect(moonPhase(new Date(Date.UTC(2000, 0, 26, 12)))).toBe('waning');
+    expect(moonPhase(new Date(Date.UTC(2000, 0, 10, 12)))).toBe('waxing-crescent');
+    expect(moonPhase(new Date(Date.UTC(2000, 0, 21, 12)))).toBe('full');
+    expect(moonPhase(new Date(Date.UTC(2000, 0, 25, 12)))).toBe('waning-gibbous');
+    const seen = new Set(Array.from({ length: 30 }, (_, day) => moonPhase(utcNoon(utcIsoDate(2000, 1, day + 1)))));
+    expect([...seen]).toEqual(expect.arrayContaining([...MOON_PHASES]));
+    expect(seen.size).toBe(8);
   });
 
   it('returns compact waning ranges inside a month', () => {

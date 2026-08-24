@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { IrrigationEstimate, SharedIrrigationEstimate, ProjectState, SharedProjectState } from '../src/types.js';
+import type { IrrigationEstimate, ProjectHarvestPlan, SharedIrrigationEstimate, ProjectState, SharedProjectState } from '../src/types.js';
 import type { AuthConfig } from './auth.js';
 
 type ShareTokenPayload = {
@@ -54,6 +54,7 @@ export function publicProject(project: ProjectState): SharedProjectState {
     economicConfiguration: includeCosts ? project.economicConfiguration : null,
     irrigation: includeCosts ? project.irrigation : publicIrrigation(project.irrigation),
     costs: includeCosts ? project.costs : null,
+    harvest: includeCosts ? project.harvest : publicHarvest(project.harvest),
     collaboration: {
       ...project.collaboration,
       share: {
@@ -101,6 +102,16 @@ function publicIrrigation(irrigation: IrrigationEstimate | null): SharedIrrigati
     assumptions: assumptions.filter((assumption) => !/(cost|price|tariff|rate|currency|labour|labor)/i.test(`${assumption.label} ${assumption.value}`)),
     monthly: sharedMonthly,
   };
+}
+
+function publicHarvest(plan: ProjectHarvestPlan | null | undefined): ProjectHarvestPlan | null {
+  if (!plan) return null;
+  const strip = (year: ProjectHarvestPlan['current']) => ({
+    ...year,
+    valueBase: 0,
+    rows: year.rows.map((row) => ({ ...row, valueLow: 0, valueBase: 0, valueHigh: 0, unitPriceLocal: 0 })),
+  });
+  return { ...plan, current: strip(plan.current), years: plan.years.map(strip), priceOverrides: {} };
 }
 
 function signature(value: string, config: AuthConfig) {

@@ -4,6 +4,7 @@ import { normalizeEconomicConfiguration } from '../src/data/economicProfiles.js'
 import { normalizeProjectCollaboration } from '../src/lib/collaboration.js';
 import { disabledFirebreakPlan } from '../src/lib/firebreak.js';
 import { normalizeFireOperationsPlan } from '../src/lib/fireOperations.js';
+import { normalizeHarvestPlan } from '../src/lib/harvest.js';
 import { normalizeOperationsPlan } from '../src/lib/operations.js';
 import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
 import { normalizeDesignConfiguration } from '../src/lib/layout.js';
@@ -399,6 +400,8 @@ function normalizeProject(project: ProjectState): ProjectState {
     economicConfiguration: normalizeEconomicConfiguration(project.economicConfiguration, countryCode),
     fireOperations: normalizeFireOperationsPlan(project.fireOperations, stableTimestamp),
     operations: normalizeOperationsPlan(project.operations),
+    harvest: normalizeHarvestPlan(project.harvest),
+    harvestPriceOverrides: project.harvestPriceOverrides ?? {},
     collaboration: normalizeProjectCollaboration(project.collaboration ?? {
       share: {
         enabled: false,

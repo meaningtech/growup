@@ -1,8 +1,18 @@
 const SYNODIC_DAYS = 29.530588853;
 const KNOWN_NEW_MOON_MS = Date.UTC(2000, 0, 6, 18, 14, 0);
-const PRINCIPAL_PHASE_DAYS = 1.85;
 
-export type MoonPhase = 'new' | 'waxing' | 'full' | 'waning';
+export const MOON_PHASES = [
+  'new',
+  'waxing-crescent',
+  'first-quarter',
+  'waxing-gibbous',
+  'full',
+  'waning-gibbous',
+  'last-quarter',
+  'waning-crescent',
+] as const;
+
+export type MoonPhase = (typeof MOON_PHASES)[number];
 
 export type MoonDayRange = {
   startDay: number;
@@ -15,10 +25,8 @@ export function moonAgeDays(date: Date): number {
 }
 
 export function moonPhase(date: Date): MoonPhase {
-  const age = moonAgeDays(date);
-  if (age < PRINCIPAL_PHASE_DAYS || age > SYNODIC_DAYS - PRINCIPAL_PHASE_DAYS) return 'new';
-  if (Math.abs(age - SYNODIC_DAYS / 2) < PRINCIPAL_PHASE_DAYS) return 'full';
-  return age < SYNODIC_DAYS / 2 ? 'waxing' : 'waning';
+  const index = Math.round((moonAgeDays(date) / SYNODIC_DAYS) * MOON_PHASES.length) % MOON_PHASES.length;
+  return MOON_PHASES[index] ?? 'new';
 }
 
 export function isWaningMoon(date: Date): boolean {

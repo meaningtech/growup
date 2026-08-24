@@ -240,7 +240,7 @@ Review these eight dimensions independently:
 4. water: demand, source assumptions, network coherence, drought signal, satellite scheduling limits and maintenance;
 5. fire: climate and wind indicators, fuels, terrain, firebreak width basis, windward treatment, access and local-review requirements;
 6. operations: build sequence, maintenance capacity, access, crossings and unresolved tasks;
-7. economics: completeness, units, currency, cost assumptions and consistency with design quantities;
+7. economics: completeness, units, currency, cost assumptions, harvest kg/value if present, and consistency with design quantities;
 8. coherence: contradictions and stale/missing dependent calculations across all project sections.
 
 Rules:

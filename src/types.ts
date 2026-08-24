@@ -736,6 +736,75 @@ export type ProjectOperationsPlan = {
   sources: SpeciesSource[];
 };
 
+export type HarvestProductId =
+  | 'olives'
+  | 'olive-oil'
+  | 'carob-pods'
+  | 'carob-kernel'
+  | 'almonds-inshell'
+  | 'grapes'
+  | 'wine'
+  | 'figs'
+  | 'citrus-fruit'
+  | 'pistachios-inshell'
+  | 'prickly-pear';
+
+export type HarvestKgRange = { low: number; base: number; high: number };
+
+export type HarvestProductRecord = {
+  id: HarvestProductId;
+  kgPerTreeMature: HarvestKgRange;
+  conversionFrom?: { productId: HarvestProductId; ratio: number };
+  sources: SpeciesSource[];
+  confidence: Evidence['confidence'];
+};
+
+export type HarvestSpeciesRecord = {
+  scientificName: string;
+  speciesId: string;
+  plateauYear: number;
+  bearing: 'annual' | 'alternate';
+  irrigatedFactor: number;
+  products: HarvestProductRecord[];
+  limitations: string[];
+};
+
+export type HarvestYearRow = {
+  speciesId: string;
+  scientificName: string;
+  count: number;
+  productId: HarvestProductId;
+  derived: boolean;
+  kgLow: number;
+  kgBase: number;
+  kgHigh: number;
+  valueLow: number;
+  valueBase: number;
+  valueHigh: number;
+  unitPriceLocal: number;
+  confidence: Evidence['confidence'];
+};
+
+export type HarvestYearPlan = {
+  year: number;
+  rows: HarvestYearRow[];
+  kgBase: number;
+  valueBase: number;
+  unknownSpecies: number;
+};
+
+export type ProjectHarvestPlan = {
+  modelVersion: string;
+  generatedAt: string;
+  year: number;
+  irrigated: boolean;
+  priceOverrides: Record<string, number>;
+  years: HarvestYearPlan[];
+  current: HarvestYearPlan;
+  sources: SpeciesSource[];
+  warnings: string[];
+};
+
 export type MaintenanceTaskEstimate = {
   id: MaintenanceTaskId;
   hours: number;
@@ -1191,6 +1260,8 @@ export type ProjectState = {
   costs: EstablishmentCost | null;
   fireOperations: FireOperationsPlan;
   operations?: ProjectOperationsPlan | null;
+  harvest?: ProjectHarvestPlan | null;
+  harvestPriceOverrides?: Record<string, number>;
   analysis?: ProjectAnalysisReport | null;
   collaboration: ProjectCollaboration;
   revision?: number;
@@ -1337,7 +1408,8 @@ export type AssistantProjectContext = {
   costs: EstablishmentCost | null;
   fireOperations: FireOperationsPlan;
   operations?: ProjectOperationsPlan | null;
-  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care';
+  harvest?: ProjectHarvestPlan | null;
+  section: 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care' | 'harvest';
 };
 
 export type AssistantAction =

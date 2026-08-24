@@ -1,4 +1,4 @@
-export const ONBOARDING_STEPS = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'care', 'complete'] as const;
+export const ONBOARDING_STEPS = ['welcome', 'location', 'boundary', 'analysis', 'species', 'design', 'water', 'fire', 'costs', 'review', 'care', 'harvest', 'complete'] as const;
 
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 
