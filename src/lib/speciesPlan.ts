@@ -14,7 +14,9 @@ export function normalizeSpeciesMix(value: unknown): Record<string, SpeciesMixEn
       const successionOverride = SUCCESSION_PHASES.includes(entry.successionOverride as SuccessionPhase)
         ? entry.successionOverride as SuccessionPhase
         : null;
-      return [[speciesId, { targetPercent, successionOverride }] as const];
+      const spacing = Number(entry.spacingOverrideM);
+      const spacingOverrideM = entry.spacingOverrideM == null || !Number.isFinite(spacing) ? null : clamp(spacing, 1.6, 30);
+      return [[speciesId, { targetPercent, successionOverride, spacingOverrideM }] as const];
     });
   return Object.fromEntries(entries);
 }
@@ -30,6 +32,7 @@ export function resolvedSpeciesMix(
     speciesId: item.id,
     weight: normalized[item.id]?.targetPercent ?? fallbackWeight,
     successionOverride: normalized[item.id]?.successionOverride ?? null,
+    spacingOverrideM: normalized[item.id]?.spacingOverrideM ?? null,
   }));
   const total = weights.reduce((sum, item) => sum + item.weight, 0);
   const basis = total > 0 ? weights.map((item) => item.weight / total * 100) : weights.map(() => fallbackWeight);
@@ -37,6 +40,7 @@ export function resolvedSpeciesMix(
   return Object.fromEntries(weights.map((item, index) => [item.speciesId, {
     targetPercent: rounded[index],
     successionOverride: item.successionOverride,
+    spacingOverrideM: item.spacingOverrideM,
   }]));
 }
 
@@ -62,6 +66,7 @@ export function synchronizeSpeciesMix(
   return Object.fromEntries(nextSpeciesIds.map((id, index) => [id, {
     targetPercent: rounded[index],
     successionOverride: mix[id]?.successionOverride ?? null,
+    spacingOverrideM: mix[id]?.spacingOverrideM ?? null,
   }]));
 }
 
@@ -86,11 +91,16 @@ export function rebalanceSpeciesMix(
   return Object.fromEntries(species.map((item, index) => [item.id, {
     targetPercent: rounded[index],
     successionOverride: current[item.id].successionOverride,
+    spacingOverrideM: current[item.id].spacingOverrideM,
   }]));
 }
 
 export function effectiveSuccession(species: DesignSpecies, mix: Record<string, SpeciesMixEntry>): SuccessionPhase {
   return mix[species.id]?.successionOverride ?? species.succession;
+}
+
+export function effectiveSpacingM(species: DesignSpecies, mix: Record<string, SpeciesMixEntry>): number {
+  return mix[species.id]?.spacingOverrideM ?? species.spacingM;
 }
 
 function roundPercentages(values: number[], fixedIndex = -1) {

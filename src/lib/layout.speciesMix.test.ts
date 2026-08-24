@@ -15,9 +15,9 @@ describe('layout species targets and succession overrides', () => {
       {
         ...DEFAULT_DESIGN_CONFIGURATION,
         speciesMix: {
-          'olea-europaea': { targetPercent: 50, successionOverride: 'placenta' },
-          'prunus-dulcis': { targetPercent: 30, successionOverride: null },
-          'tamarix-gallica': { targetPercent: 20, successionOverride: null },
+          'olea-europaea': { targetPercent: 50, successionOverride: 'placenta', spacingOverrideM: null },
+          'prunus-dulcis': { targetPercent: 30, successionOverride: null, spacingOverrideM: null },
+          'tamarix-gallica': { targetPercent: 20, successionOverride: null, spacingOverrideM: null },
         },
       },
     )[0];

@@ -14,7 +14,7 @@ describe('species planning configuration', () => {
       'olea-europaea': { ...initial['olea-europaea'], successionOverride: 'placenta' as const },
     };
     const rebalanced = rebalanceSpeciesMix(species, withOverride, 'olea-europaea', 60);
-    expect(rebalanced['olea-europaea']).toEqual({ targetPercent: 60, successionOverride: 'placenta' });
+    expect(rebalanced['olea-europaea']).toEqual({ targetPercent: 60, successionOverride: 'placenta', spacingOverrideM: null });
     expect(rebalanced['prunus-dulcis'].targetPercent).toBe(20);
     expect(rebalanced['spartium-junceum'].targetPercent).toBe(20);
     expect(total(rebalanced)).toBe(100);
@@ -35,10 +35,19 @@ describe('species planning configuration', () => {
       broken: 'value',
     });
     expect(normalized).toEqual({
-      'olea-europaea': { targetPercent: 100, successionOverride: 'climax' },
-      'prunus-dulcis': { targetPercent: 0, successionOverride: null },
+      'olea-europaea': { targetPercent: 100, successionOverride: 'climax', spacingOverrideM: null },
+      'prunus-dulcis': { targetPercent: 0, successionOverride: null, spacingOverrideM: null },
     });
     expect(total(resolvedSpeciesMix(species, normalized))).toBe(100);
+  });
+
+  it('keeps a manual planting distance when rebalancing shares', () => {
+    const withSpacing = synchronizeSpeciesMix([], species.map((item) => item.id), {
+      'olea-europaea': { targetPercent: 40, successionOverride: null, spacingOverrideM: 8 },
+    });
+    expect(withSpacing['olea-europaea'].spacingOverrideM).toBe(8);
+    const rebalanced = rebalanceSpeciesMix(species, withSpacing, 'prunus-dulcis', 50);
+    expect(rebalanced['olea-europaea'].spacingOverrideM).toBe(8);
   });
 });
 

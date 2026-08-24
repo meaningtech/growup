@@ -604,6 +604,7 @@ describe('Growup API integration', () => {
       {
         targetPercent: index === 0 ? 50 : 6.25,
         successionOverride: index === 0 ? 'placenta' : null,
+        spacingOverrideM: null,
       },
     ]));
 
@@ -826,6 +827,7 @@ describe('Growup API integration', () => {
     expect(storedResponse.body.designConfiguration.speciesMix[selectedSpeciesIds[0]]).toEqual({
       targetPercent: 50,
       successionOverride: 'placenta',
+      spacingOverrideM: null,
     });
     expect(storedResponse.body.economicConfiguration.plantUnitCostOverrides).toEqual({ [pricedSpeciesId]: 42.35 });
     expect(storedResponse.body.fireOperations).toEqual(expect.objectContaining({

@@ -29,6 +29,11 @@ export function exportProjectGeoJson(project: ProjectState) {
     geometry: { type: 'LineString', coordinates: path.points.map(coordinatePair) },
     properties: { kind: 'management_path', id: path.id, name: path.name, widthM: path.widthM },
   }));
+  [...(project.designConfiguration.plantingLines ?? [])].sort(byId).forEach((line, index) => features.push({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: line.points.map(coordinatePair) },
+    properties: { kind: 'planting_line', id: line.id, index: index + 1 },
+  }));
   [...project.site.accessPoints].sort(byId).forEach((point) => features.push(pointFeature(point.coordinate, {
     kind: 'access_point', id: point.id, name: point.name,
   })));

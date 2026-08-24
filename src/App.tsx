@@ -38,6 +38,7 @@ import {
   Menu,
   MousePointer2,
   PencilRuler,
+  PenLine,
   Plus,
   Printer,
   Redo2,
@@ -63,7 +64,7 @@ import {
   Wind as WindIcon,
   X,
 } from 'lucide-react';
-import { DESIGN_SPECIES_BY_ID } from './data/designSpecies';
+import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from './data/designSpecies';
 import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
 import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope, normalizeFirebreakConfiguration } from './data/firebreak';
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope, normalizeMachineryConfiguration } from './data/machinery';
@@ -156,7 +157,7 @@ import type {
 } from './types';
 
 type WorkspaceSection = 'site' | 'profile' | 'species' | 'layout' | 'water' | 'fire' | 'costs' | 'analysis' | 'care' | 'harvest';
-type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'add-tree' | 'move-tree';
+type DrawMode = 'idle' | 'site' | 'hole' | 'exclusion' | 'access-point' | 'water-point' | 'existing-tree' | 'edit-site' | 'edit-constraints' | 'planting-line' | 'edit-planting-lines' | 'add-tree' | 'move-tree';
 type AssistantTurnStatus = 'pending' | 'applied' | 'dismissed' | 'replaced';
 type AssistantActivity = 'asking' | 'applying' | null;
 type AssistantApplyStage = 'preparing' | 'layout' | 'calculations' | 'finalizing';
@@ -424,6 +425,15 @@ function SharedProjectPage({ token }: { token: string }) {
       return overlay;
     };
 
+    (project.designConfiguration.plantingLines ?? []).forEach((line) => add(new maps.Polyline({
+      map,
+      path: line.points,
+      strokeColor: '#c7e36f',
+      strokeOpacity: 0.95,
+      strokeWeight: 4,
+      clickable: false,
+      zIndex: 14,
+    })));
     if (layers.boundary) {
       sitePolygons(project.site).forEach((polygon) => add(new maps.Polygon({
         map,
@@ -1208,6 +1218,7 @@ function WorkspaceApp() {
   const [showInfrastructure, setShowInfrastructure] = useState(true);
   const [showObservedTrees, setShowObservedTrees] = useState(true);
   const [showPlannedTrees, setShowPlannedTrees] = useState(true);
+  const [showPlantingLines, setShowPlantingLines] = useState(true);
   const [hiddenPlannedSpeciesIds, setHiddenPlannedSpeciesIds] = useState<string[]>([]);
   const [showMachinery, setShowMachinery] = useState(true);
   const [showFirebreaks, setShowFirebreaks] = useState(true);
@@ -1270,6 +1281,7 @@ function WorkspaceApp() {
   const existingVegetationRef = useRef<any[]>([]);
   const draftOverlayRef = useRef<any>(null);
   const draftPointOverlaysRef = useRef<any[]>([]);
+  const plantingLineOverlaysRef = useRef<any[]>([]);
   const treeOverlaysRef = useRef<any[]>([]);
   const machineryOverlaysRef = useRef<any[]>([]);
   const firebreakOverlaysRef = useRef<any[]>([]);
@@ -1699,9 +1711,9 @@ function WorkspaceApp() {
     draftPointOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
     draftPointOverlaysRef.current = [];
     if (draftPoints.length) {
-      draftOverlayRef.current = draftPoints.length >= 3
+      draftOverlayRef.current = drawMode !== 'planting-line' && draftPoints.length >= 3
         ? new maps.Polygon({ map, paths: draftPoints, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#ffffff', fillOpacity: 0.12, clickable: false, zIndex: 50 })
-        : new maps.Polyline({ map, path: draftPoints, strokeColor: '#ffffff', strokeWeight: 3, clickable: false, zIndex: 50 });
+        : new maps.Polyline({ map, path: draftPoints, strokeColor: drawMode === 'planting-line' ? '#c7e36f' : '#ffffff', strokeWeight: 3, clickable: false, zIndex: 50 });
       draftPointOverlaysRef.current = draftPoints.map((point, index) => new maps.Marker({
         map,
         position: point,
@@ -1725,17 +1737,60 @@ function WorkspaceApp() {
   }, [draftPoints, drawMode]);
 
   useEffect(() => {
-    const drawing = section === 'site' && isGeometryDrawMode(drawMode);
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    plantingLineOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    plantingLineOverlaysRef.current = [];
+    if (!showPlantingLines) return;
+    designConfiguration.plantingLines.forEach((line, index) => {
+      const overlay = new maps.Polyline({
+        map,
+        path: line.points,
+        strokeColor: '#c7e36f',
+        strokeOpacity: 0.95,
+        strokeWeight: 4,
+        clickable: drawMode === 'edit-planting-lines',
+        editable: drawMode === 'edit-planting-lines',
+        zIndex: 22,
+        icons: [{ icon: { path: 'M 0,-1 0,1', strokeColor: '#17351f', strokeOpacity: 0.85, strokeWeight: 2, scale: 2 }, offset: '0', repeat: '14px' }],
+      });
+      if (drawMode === 'edit-planting-lines') {
+        const path = overlay.getPath();
+        const sync = () => {
+          const points = coordinatesFromPath(path);
+          if (points.length < 2) return;
+          if (points.some((point) => site && !siteContainsCoordinate(site, point))) {
+            showBoundaryGuidance();
+            return;
+          }
+          updateDesignConfiguration({
+            ...designConfiguration,
+            plantingLines: designConfiguration.plantingLines.map((item, itemIndex) => itemIndex === index ? { ...item, points } : item),
+          });
+        };
+        path.addListener('set_at', sync);
+        path.addListener('insert_at', sync);
+        path.addListener('remove_at', sync);
+      }
+      plantingLineOverlaysRef.current.push(overlay);
+    });
+    return () => plantingLineOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
+  }, [designConfiguration.plantingLines, drawMode, showPlantingLines, site, mapReady]);
+
+  useEffect(() => {
+    const drawing = (section === 'site' && isGeometryDrawMode(drawMode)) || ((section === 'species' || section === 'layout') && drawMode === 'planting-line');
     mapRef.current?.setOptions({ draggableCursor: drawing ? 'crosshair' : null, draggingCursor: drawing ? 'crosshair' : null });
   }, [drawMode, section]);
 
   useEffect(() => {
     setDrawMode((mode) => {
       if (section !== 'site' && isSiteDrawMode(mode)) return 'idle';
+      if (section !== 'species' && section !== 'layout' && (mode === 'planting-line' || mode === 'edit-planting-lines')) return 'idle';
       if (section !== 'layout' && (mode === 'add-tree' || mode === 'move-tree')) return 'idle';
       return mode;
     });
-    if (section !== 'site') setDraftPoints((points) => points.length === 0 ? points : []);
+    if (section !== 'site' && section !== 'species' && section !== 'layout') setDraftPoints((points) => points.length === 0 ? points : []);
   }, [section]);
 
   useEffect(() => {
@@ -2250,7 +2305,14 @@ function WorkspaceApp() {
 
   mapClickRef.current = (coordinate) => {
     if (isSiteDrawMode(drawMode) && section !== 'site') return;
-    if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion') {
+    if (drawMode === 'site' || drawMode === 'hole' || drawMode === 'exclusion' || drawMode === 'planting-line') {
+      if (drawMode === 'planting-line') {
+        if (section !== 'species' && section !== 'layout') return;
+        if (site && !siteContainsCoordinate(site, coordinate)) {
+          showBoundaryGuidance();
+          return;
+        }
+      }
       setDraftPoints((points) => [...points, coordinate]);
       return;
     }
@@ -2329,6 +2391,28 @@ function WorkspaceApp() {
   }
 
   function finishDraft() {
+    if (drawMode === 'planting-line') {
+      if (draftPoints.length < 2) {
+        setError(t('errors.minimumPoints', { count: 2 }));
+        return;
+      }
+      if (!site) {
+        setError(t('site.drawFirst'));
+        return;
+      }
+      if (draftPoints.some((point) => !siteContainsCoordinate(site, point))) {
+        showBoundaryGuidance();
+        return;
+      }
+      updateDesignConfiguration({
+        ...designConfiguration,
+        plantingLines: [...designConfiguration.plantingLines, { id: `planting-line-${crypto.randomUUID()}`, points: draftPoints }],
+      });
+      setDraftPoints([]);
+      setDrawMode('idle');
+      setNotice(t('notices.plantingLineAdded'));
+      return;
+    }
     const minimumPoints = 3;
     if (draftPoints.length < minimumPoints) {
       setError(t('errors.minimumPoints', { count: minimumPoints }));
@@ -2461,6 +2545,7 @@ function WorkspaceApp() {
     if (mode === 'access-point' || mode === 'water-point') setShowInfrastructure(true);
     if (mode === 'existing-tree') setShowObservedTrees(true);
     if (mode === 'add-tree' || mode === 'move-tree') setShowPlannedTrees(true);
+    if (mode === 'planting-line' || mode === 'edit-planting-lines') setShowPlantingLines(true);
     if (mode === 'edit-constraints') {
       setShowNoPlantAreas(true);
       setShowManagementPaths(true);
@@ -2973,6 +3058,7 @@ function WorkspaceApp() {
           speciesMix: Object.fromEntries(action.entries.map((entry) => [entry.speciesId, {
             targetPercent: entry.targetPercent,
             successionOverride: entry.successionOverride,
+            spacingOverrideM: null,
           }])),
         });
       }
@@ -3875,13 +3961,18 @@ function WorkspaceApp() {
       </aside>
 
       <main className="workspace">
-        <section className={`map-stage ${section === 'site' && isGeometryDrawMode(drawMode) ? 'drawing' : ''} ${selectedVariant ? 'has-timeline' : ''}`} aria-label={t('map.interactive')}>
+        <section className={`map-stage ${(section === 'site' && isGeometryDrawMode(drawMode)) || drawMode === 'planting-line' ? 'drawing' : ''} ${selectedVariant ? 'has-timeline' : ''}`} aria-label={t('map.interactive')}>
           <div ref={mapElementRef} className="map-canvas" />
           {mapError && <div className="map-error"><Satellite size={22} /><strong>{t('map.unavailable')}</strong><span>{mapError}</span></div>}
           {section === 'site' && isGeometryDrawMode(drawMode) && <div className="drawing-status" role="status">
             <span><PencilRuler size={15} />{t(`map.drawMode.${drawMode}`)}</span>
             <strong>{t('map.pointsPlaced', { count: draftPoints.length })}</strong>
             <small>{draftPoints.length < 3 ? t('map.pointsRemaining', { count: 3 - draftPoints.length }) : t('map.readyToFinish')}</small>
+          </div>}
+          {drawMode === 'planting-line' && <div className="drawing-status" role="status">
+            <span><PenLine size={15} />{t('map.drawMode.planting-line')}</span>
+            <strong>{t('map.pointsPlaced', { count: draftPoints.length })}</strong>
+            <small>{draftPoints.length < 2 ? t('map.pointsRemaining', { count: 2 - draftPoints.length }) : t('map.readyToFinish')}</small>
           </div>}
           <div className="map-toolbar">
             {section === 'site' && <>
@@ -3891,6 +3982,12 @@ function WorkspaceApp() {
               <MapToolbarButton icon={CircleOff} label={t('map.drawHole')} hint={t('map.tooltip.drawHole')} active={drawMode === 'hole'} onClick={() => activateDrawMode('hole')} />
               <MapToolbarButton icon={Ban} label={t('map.drawExclusion')} hint={t('map.tooltip.drawExclusion')} active={drawMode === 'exclusion'} onClick={() => activateDrawMode('exclusion')} />
               {isGeometryDrawMode(drawMode) && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
+              <span />
+            </>}
+            {(section === 'species' || section === 'layout') && <>
+              <MapToolbarButton icon={PenLine} label={t('map.drawPlantingLine')} hint={t('map.tooltip.drawPlantingLine')} active={drawMode === 'planting-line'} onClick={() => activateDrawMode(drawMode === 'planting-line' ? 'idle' : 'planting-line')} />
+              <MapToolbarButton icon={ScanLine} label={t('map.editPlantingLines')} hint={t('map.tooltip.editPlantingLines')} active={drawMode === 'edit-planting-lines'} disabled={!designConfiguration.plantingLines.length} onClick={() => activateDrawMode(drawMode === 'edit-planting-lines' ? 'idle' : 'edit-planting-lines')} />
+              {drawMode === 'planting-line' && <MapToolbarButton icon={Check} label={t('map.finish')} hint={t('map.tooltip.finish')} className="finish" onClick={finishDraft} />}
               <span />
             </>}
             <MapToolbarButton icon={Layers3} label={t('map.layers')} hint={t('map.tooltip.layers')} active={showLayerPanel} className="layers" expanded={showLayerPanel} onClick={() => setShowLayerPanel((value) => !value)} />
@@ -3911,6 +4008,7 @@ function WorkspaceApp() {
             <MapLayerToggle icon={LocateFixed} tone="infrastructure" active={showInfrastructure} disabled={!site || (!site.accessPoints.length && !site.waterPoints.length)} label={t('map.layerInfrastructure')} hint={t('map.layerInfrastructureHint')} toggleLabel={t('map.toggleInfrastructure')} onToggle={() => setShowInfrastructure((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="observed" active={showObservedTrees} disabled={!site?.existingTrees.length} label={t('map.layerObservedTrees')} hint={t('map.layerObservedTreesHint')} toggleLabel={t('map.toggleObservedTrees')} onToggle={() => setShowObservedTrees((value) => !value)} />
             <MapLayerToggle icon={Sprout} tone="trees" active={showPlannedTrees} disabled={!selectedVariant} label={t('map.layerTrees')} hint={t('map.layerTreesHint')} toggleLabel={t('map.toggleTrees')} onToggle={() => setShowPlannedTrees((value) => !value)} />
+            <MapLayerToggle icon={PenLine} tone="trees" active={showPlantingLines} disabled={!designConfiguration.plantingLines.length} label={t('map.layerPlantingLines')} hint={t('map.layerPlantingLinesHint')} toggleLabel={t('map.togglePlantingLines')} onToggle={() => setShowPlantingLines((value) => !value)} />
             <MapLayerToggle icon={CloudSun} tone="solar" active={showSolarExposure} disabled={dailySolarExposure?.status !== 'available'} label={t('map.layerSolarExposure')} hint={t('map.layerSolarExposureHint')} toggleLabel={t('map.toggleSolarExposure')} onToggle={() => setShowSolarExposure((value) => !value)} />
             <MapLayerToggle icon={Tractor} tone="machinery" active={showMachinery} disabled={!selectedVariant?.machinery.enabled} label={t('map.layerMachinery')} hint={t('map.layerMachineryHint')} toggleLabel={t('map.toggleMachinery')} onToggle={() => setShowMachinery((value) => !value)} />
             <MapLayerToggle icon={Flame} tone="firebreak" active={showFirebreaks} disabled={!selectedVariant?.firebreak?.enabled} label={t('map.layerFirebreak')} hint={t('map.layerFirebreakHint')} toggleLabel={t('map.toggleFirebreak')} onToggle={() => setShowFirebreaks((value) => !value)} />
@@ -5620,7 +5718,13 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
     droughtMinimum: 0,
     evidenceMinimum: 0,
   });
-  const visible = recommendations.filter((item) => item.status !== 'blocked').slice(0, 18);
+  const visible = recommendations.filter((item) => item.status !== 'blocked');
+  const addQuery = query.trim().toLowerCase();
+  const addableSpecies = DESIGN_SPECIES.filter((species) => {
+    if (species.invasiveStatus === 'blocked' || selectedIds.includes(species.id)) return false;
+    if (!addQuery) return true;
+    return species.scientificName.toLowerCase().includes(addQuery) || speciesDisplayName(species, t).toLowerCase().includes(addQuery);
+  }).slice(0, addQuery ? 24 : 12);
   const blocked = recommendations.filter((item) => item.status === 'blocked');
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
   const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? null;
@@ -5686,9 +5790,35 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
                 <option value="">{t('species.mixSuggested', { phase: localizedEnum(species.succession, t) })}</option>
                 {(['placenta', 'secondary', 'climax'] as const).map((phase) => <option key={phase} value={phase}>{localizedEnum(phase, t)}</option>)}
               </select></label>
+              <label><span>{t('species.mixSpacing')}</span><span className="species-mix-number"><input aria-label={t('species.mixSpacingFor', { name: displayName })} type="number" min="1.6" max="30" step="0.1" value={entry.spacingOverrideM ?? species.spacingM} onChange={(event) => update({ speciesMix: {
+                ...selectedMix,
+                [species.id]: { ...entry, spacingOverrideM: Number(event.target.value) || species.spacingM },
+              } })} /><b>m</b></span></label>
             </article>;
           })}
         </div>
+      </div>}
+      <div className="species-add" data-testid="species-add">
+        <div className="card-heading"><div><Plus size={17} /><span><small>{t('species.addEyebrow')}</small><strong>{t('species.addTitle')}</strong></span></div></div>
+        <p>{t('species.addBody')}</p>
+        {addableSpecies.map((species) => {
+          const displayName = speciesDisplayName(species, t);
+          return <div key={species.id} className="species-add-row">
+            <span className="species-swatch" style={{ background: species.color }} />
+            <span><strong>{displayName}</strong><i>{species.scientificName}</i><small>{localizedEnum(species.succession, t)} · {species.spacingM} m</small></span>
+            <button type="button" onClick={() => onToggle(species.id)}>{t('species.addShort')}</button>
+          </div>;
+        })}
+        {addableSpecies.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
+      </div>
+      {design.plantingLines.length > 0 && <div className="planting-lines" data-testid="planting-lines">
+        <div className="card-heading"><div><PenLine size={17} /><span><small>{t('plantingLines.eyebrow')}</small><strong>{t('plantingLines.title')}</strong></span></div></div>
+        <p>{t('plantingLines.body')}</p>
+        {design.plantingLines.map((line, index) => <span key={line.id}>
+          <strong>{t('plantingLines.row', { count: index + 1 })}</strong>
+          <small>{t('plantingLines.vertices', { count: line.points.length })}</small>
+          <button type="button" aria-label={t('plantingLines.remove', { count: index + 1 })} onClick={() => update({ plantingLines: design.plantingLines.filter((item) => item.id !== line.id) })}><X size={13} /></button>
+        </span>)}
       </div>}
       <div className="objective-panel" data-testid="design-objectives">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
@@ -5788,7 +5918,12 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         <label><span>{t('species.filterEvidence')}</span><select aria-label={t('species.filterEvidence')} value={filters.evidenceMinimum} onChange={(event) => setFilters({ ...filters, evidenceMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[2, 3, 4].map((value) => <option key={value} value={value}>{value}+</option>)}</select></label>
       </div>
       <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
-      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}</span></span>)}</div>}
+      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => {
+        const designSpecies = DESIGN_SPECIES_BY_ID.get(item.id);
+        const selected = Boolean(designSpecies && selectedIds.includes(designSpecies.id));
+        const blocked = designSpecies?.invasiveStatus === 'blocked';
+        return <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}{designSpecies && !blocked && <button type="button" onClick={() => onToggle(designSpecies.id)}>{selected ? t('species.removeShort') : t('species.addShort')}</button>}</span></span>;
+      })}</div>}
       {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
         const selected = selectedIds.includes(item.species.id);
         return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>

@@ -35,7 +35,7 @@ test('stores exact species targets and manual succession in the generated plan',
   expect(response.ok()).toBeTruthy();
   const { variants } = await response.json() as { variants: LayoutVariant[] };
   const entry = variants[0].design.speciesMix[speciesId!];
-  expect(entry).toEqual({ targetPercent: 60, successionOverride: 'placenta' });
+  expect(entry).toEqual({ targetPercent: 60, successionOverride: 'placenta', spacingOverrideM: null });
   const count = variants[0].trees.filter((tree) => tree.speciesId === speciesId).length;
   expect(count / variants[0].trees.length * 100).toBeGreaterThan(20);
   expect(variants[0].warnings).toEqual(expect.arrayContaining([

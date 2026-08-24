@@ -521,7 +521,24 @@ button { color: inherit; }
 .species-mix-config .card-heading output { padding: 4px 7px; color: var(--forest); background: var(--lime); border-radius: 7px; font: var(--text-caption) 'DM Mono', monospace; white-space: nowrap; }
 .species-mix-config > p { margin: 0 0 11px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
 .species-mix-rows { display: grid; gap: 6px; }
-.species-mix-rows article { display: grid; grid-template-columns: minmax(0,1.3fr) 82px minmax(128px,.9fr); align-items: end; gap: 8px; padding: 9px; background: #f5f5ee; border: 1px solid #e1e3d7; border-radius: 9px; }
+.species-mix-rows article { display: grid; grid-template-columns: minmax(0,1.2fr) 70px minmax(110px,.8fr) 72px; align-items: end; gap: 8px; padding: 9px; background: #f5f5ee; border: 1px solid #e1e3d7; border-radius: 9px; }
+.species-add { margin: 0 0 12px; padding: 13px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.species-add > p { margin: 0 0 10px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
+.species-add-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #eceadf; }
+.species-add-row:first-of-type { border-top: 0; }
+.species-add-row span { display: grid; min-width: 0; }
+.species-add-row strong { overflow: hidden; font-size: var(--text-label); text-overflow: ellipsis; white-space: nowrap; }
+.species-add-row i { overflow: hidden; color: var(--muted); font-size: var(--text-caption); font-style: italic; text-overflow: ellipsis; white-space: nowrap; }
+.species-add-row small { color: #6f7b72; font-size: var(--text-micro); }
+.species-add-row button { min-height: 30px; padding: 0 9px; color: var(--forest); background: var(--lime); border: 0; border-radius: 7px; font-size: var(--text-caption); font-weight: 800; cursor: pointer; }
+.planting-lines { margin: 0 0 12px; padding: 13px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.planting-lines > p { margin: 0 0 10px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
+.planting-lines > span { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #eceadf; }
+.planting-lines > span:first-of-type { border-top: 0; }
+.planting-lines strong { font-size: var(--text-label); }
+.planting-lines small { color: var(--muted); font-size: var(--text-caption); }
+.planting-lines button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #5e6a61; background: #f3f1e7; border: 1px solid #e1e3d7; border-radius: 7px; cursor: pointer; }
+.catalogue-results button { margin-left: 6px; min-height: 24px; padding: 0 7px; color: var(--forest); background: var(--lime); border: 0; border-radius: 6px; font-size: var(--text-micro); font-weight: 800; cursor: pointer; }
 .species-mix-name { display: grid; grid-template-columns: 9px minmax(0,1fr); align-items: center; gap: 8px; min-width: 0; }
 .species-mix-name > i { width: 9px; height: 30px; border-radius: 5px; }
 .species-mix-name > span { display: grid; min-width: 0; }
@@ -988,13 +1005,13 @@ button { color: inherit; }
 
 @media (max-width: 480px) {
   .network-lines > .irrigation-layer-controls { grid-template-columns: 1fr; }
-  .species-mix-rows article { grid-template-columns: minmax(0,1fr) 82px; }
+  .species-mix-rows article { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .solar-time-controls { grid-template-columns: 1fr; }
   .solar-day-timeline { grid-template-columns: repeat(16,24px); overflow-x: auto; scrollbar-width: thin; }
   .daily-solar-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .selected-plant-solar { align-items: flex-start; flex-direction: column; }
   .selected-plant-solar b { max-width: none; text-align: left; }
-  .species-mix-rows article > label:last-child { grid-column: 1 / -1; }
+  .species-mix-rows article > .species-mix-name { grid-column: 1 / -1; }
   .auth-panel { padding: 31px 22px 25px; }
   .assistant-panel {
     inset: 68px 8px calc(64px + env(safe-area-inset-bottom));

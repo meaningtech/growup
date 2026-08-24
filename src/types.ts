@@ -870,6 +870,12 @@ export type DesignObjectives = {
 export type SpeciesMixEntry = {
   targetPercent: number;
   successionOverride: SuccessionPhase | null;
+  spacingOverrideM: number | null;
+};
+
+export type PlantingLine = {
+  id: string;
+  points: Coordinate[];
 };
 
 export type DesignConfiguration = {
@@ -885,6 +891,7 @@ export type DesignConfiguration = {
   seed: number;
   objectives: DesignObjectives;
   speciesMix: Record<string, SpeciesMixEntry>;
+  plantingLines: PlantingLine[];
   machinery: MachineryConfiguration;
   firebreak: FirebreakConfiguration;
 };

@@ -142,3 +142,21 @@ test('keeps harvest products on one row and does not resize irrigation when the 
   await page.waitForTimeout(500);
   expect(costCalls).toBe(before);
 });
+
+test('adds a catalogue species and stores an editable planting row', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await expect(page.getByRole('button', { name: 'Analyse this field' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+
+  await expect(page.getByTestId('species-add')).toBeVisible();
+  await page.getByTestId('species-add').getByRole('button', { name: 'Add' }).first().click();
+  await expect(page.getByTestId('species-mix-config').getByLabel(/Planting distance/)).not.toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Draw a planting row' }).click();
+  await expect(page.locator('.drawing-status')).toContainText('Drawing planting row');
+  await expect(page.getByRole('button', { name: 'Finish geometry' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit planting rows' })).toBeVisible();
+});
