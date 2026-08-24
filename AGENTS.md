@@ -9,7 +9,7 @@
 - Backend and API behavior requires integration tests.
 - Production code uses static imports only.
 - Runtime-test behavior changes before committing or pushing.
-- If the user says `vai`, do it immediately. Do not ask for confirmation, do not offer a later step, and do not wait. For Growup that means finish the current work, then commit, push `main`, deploy Cloud Run service `growup` in `europe-west1`, and shift 100% traffic to the new revision.
+- If the user says `vai`, `pusha`, `pushalo` or `pubblica`, do it immediately. Do not ask for confirmation, do not offer a later step, and do not wait. For Growup that means finish the current work, then commit, push `main`, deploy Cloud Run service `growup` in `europe-west1`, and shift 100% traffic to the new revision.
 
 ## Current architecture
 

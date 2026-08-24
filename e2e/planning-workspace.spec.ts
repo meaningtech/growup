@@ -109,3 +109,36 @@ test('cuts a hole after the outer field perimeter is already finished', async ({
   await expect(page.getByText('Site hole', { exact: true })).toBeVisible();
   await expect(page.locator('.drawing-status')).toHaveCount(0);
 });
+
+test('keeps harvest products on one row and does not resize irrigation when the year changes', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  let costCalls = 0;
+  await page.route('**/api/costs/calculate', async (route) => {
+    costCalls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: { irrigation: { designYear: 5, annualWaterM3: 1 }, establishment: { totalCost: 1 } },
+    });
+  });
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await expect(page.getByRole('button', { name: 'Analyse this field' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  await expect(page.getByTestId('layout-composition')).toBeVisible();
+  await page.getByTestId('step-harvest').click();
+  await page.getByRole('tab', { name: 'Species' }).click();
+  const facts = page.locator('.harvest-facts').first();
+  await expect(facts).toBeVisible();
+  expect(await facts.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length)).toBe(4);
+  await page.getByRole('tab', { name: 'Sources' }).click();
+  await expect(page.getByTestId('harvest-sources').locator('.fire-evidence-card').first()).toBeVisible();
+  await expect(page.getByTestId('harvest-sources').locator('.fire-evidence-card').first()).toContainText('Open source');
+  const before = costCalls;
+  await page.locator('.harvest-year input').fill('18');
+  await page.getByTestId('succession-timeline').locator('input[type="range"]').fill('12');
+  await page.waitForTimeout(500);
+  expect(costCalls).toBe(before);
+});

@@ -1418,14 +1418,6 @@ function WorkspaceApp() {
   }, [onboarding?.status, onboarding?.step]);
 
   useEffect(() => {
-    if (!irrigation || irrigation.designYear === timelineYear || !site || !siteProfile || !selectedVariant) return;
-    const timer = window.setTimeout(() => {
-      void recalculateWaterAndCosts(site, irrigationConfiguration, timelineYear, t('notices.timelineRecalculated', { year: timelineYear }));
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [timelineYear, irrigation?.designYear]);
-
-  useEffect(() => {
     const objectiveKey = JSON.stringify(designConfiguration.objectives);
     if (!siteProfile || objectiveKey === recommendationObjectiveRef.current) return;
     recommendationObjectiveRef.current = objectiveKey;
@@ -2958,12 +2950,11 @@ function WorkspaceApp() {
     if (speciesChanged && nextSpeciesIds.length < minimumSpecies) throw new Error(t('errors.systemMinimumSpecies', { count: minimumSpecies }));
     const designChanged = JSON.stringify(nextDesignConfiguration) !== JSON.stringify(snapshot.designConfiguration);
     const irrigationChanged = JSON.stringify(nextIrrigationConfiguration) !== JSON.stringify(snapshot.irrigationConfiguration);
-    const timelineChanged = nextTimelineYear !== snapshot.timelineYear;
     const selectedVariantChanged = nextVariantId !== snapshot.selectedVariantId;
     const regenerate = actions.some((action) => action.type === 'regenerate_layout') || speciesChanged || designChanged;
     const recalculate = actions.some((action) => action.type === 'recalculate_water_and_costs')
       || irrigationChanged
-      || ((regenerate || timelineChanged || selectedVariantChanged) && Boolean(snapshot.irrigation || snapshot.costs));
+      || ((regenerate || selectedVariantChanged) && Boolean(snapshot.irrigation || snapshot.costs));
     if (regenerate) {
       setAssistantApplyStage('layout');
       if (!site || !siteProfile) throw new Error(t('errors.evidenceBeforeRegenerate'));
@@ -6768,16 +6759,27 @@ function HarvestPanel({ variant, economics, irrigation, year, onYear, overrides,
               <span className="tree-dot" style={{ background: item?.color ?? '#789' }} />
               <span><small>{t('care.count', { count: row.count })} · {t(`status.${row.confidence}`)}</small><strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong><i>{item?.scientificName ?? row.scientificName}</i></span>
             </header>
-            <div className="care-facts">
+            <div className="harvest-facts">
               <span><small>{t(`harvest.product.${row.productId}`)}</small><strong>{formatNumber(row.kgBase, 0)} kg</strong><b>{formatNumber(row.kgLow, 0)}–{formatNumber(row.kgHigh, 0)}</b></span>
               {derived.map((entry) => <span key={entry.productId}><small>{t(`harvest.product.${entry.productId}`)}</small><strong>{formatNumber(entry.kgBase, 0)} kg</strong><b>{includeMoney ? currency(entry.valueBase, economics) : t(`status.${entry.confidence}`)}</b></span>)}
-              {includeMoney && [row, ...derived].map((entry) => <span key={`price-${entry.productId}`}><small>{t('harvest.unitPrice')} · {t(`harvest.product.${entry.productId}`)}</small><strong><input type="number" min={0} step="0.01" value={entry.unitPriceLocal} onChange={(event) => onOverrides({ ...overrides, [entry.productId]: Number(event.target.value) || 0 })} /></strong><b>{economics.currencyCode}/{t('harvest.perKg')}</b></span>)}
+              {includeMoney && [row, ...derived].map((entry) => <span key={`price-${entry.productId}`}>
+                <small>{t('harvest.unitPrice')} · {t(`harvest.product.${entry.productId}`)}</small>
+                <label className="harvest-price-input">
+                  <input type="number" min={0} step="0.01" aria-label={`${t('harvest.unitPrice')} · ${t(`harvest.product.${entry.productId}`)}`} value={entry.unitPriceLocal} onChange={(event) => onOverrides({ ...overrides, [entry.productId]: Number(event.target.value) || 0 })} />
+                  <b>{economics.currencyCode}/{t('harvest.perKg')}</b>
+                </label>
+              </span>)}
             </div>
           </article>;
         })}
       </div>}
-      {tab === 'sources' && <div className="care-sources" data-testid="harvest-sources">
-        {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
+      {tab === 'sources' && <div className="fire-sources-view" data-testid="harvest-sources">
+        {plan.sources.map((source) => <article className="fire-evidence-card" key={`${source.label}-${source.version}`}>
+          <span><Database size={16} /><i><strong>{source.label}</strong><small>{source.version}</small></i></span>
+          <b>{t('harvest.sourceKind')}</b>
+          <p>{source.supports.join(' · ')}</p>
+          <a href={source.url} target="_blank" rel="noreferrer">{t('evidence.openSource')} <ChevronRight size={13} /></a>
+        </article>)}
       </div>}
     </div>
   </div>;

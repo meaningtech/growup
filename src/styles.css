@@ -1266,7 +1266,14 @@ button { color: inherit; }
 .harvest-year-chart { width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .harvest-note { margin: 10px 0 0; color: var(--muted); font-size: var(--text-small); line-height: 1.5; }
 .harvest-species { display: grid; gap: 12px; }
-.harvest-species input { width: 100%; min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; font-size: var(--text-small); }
+.harvest-facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.harvest-facts span { display: grid; gap: 3px; min-width: 0; padding: 8px; background: #f4f2e8; border-radius: 10px; }
+.harvest-facts small { font-size: var(--text-caption); }
+.harvest-facts strong { font-size: var(--text-small); }
+.harvest-facts > span > b { color: var(--muted); font-size: var(--text-caption); font-weight: 600; }
+.harvest-price-input { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 6px; }
+.harvest-price-input input { width: 100%; min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 16px; }
+.harvest-price-input b { color: var(--muted); font-size: var(--text-caption); font-weight: 700; white-space: nowrap; }
 .care-page { position: relative; }
 .care-page .fire-analysis-tabs { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .care-page .fire-analysis-tabs button.active { background: #315a44; box-shadow: 0 5px 14px rgba(22,52,39,.2); }
@@ -1791,4 +1798,5 @@ button { color: inherit; }
   .care-facts { grid-template-columns: 1fr; }
   .care-day { min-height: 52px; padding: 4px; }
   .harvest-totals { grid-template-columns: 1fr; }
+  .harvest-facts { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
