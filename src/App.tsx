@@ -367,10 +367,29 @@ const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
   comments: true,
 };
 
-function SharedProjectPage({ token }: { token: string }) {
+function sharedProjectFromOwner(project: ProjectState): SharedProjectState {
+  const { analysis: _analysis, collaboration, ...rest } = project;
+  const { tokenVersion: _tokenVersion, ...share } = collaboration.share;
+  return {
+    ...rest,
+    collaboration: {
+      comments: collaboration.comments,
+      review: collaboration.review,
+      share,
+    },
+  };
+}
+
+function SharedProjectPage({ token, initialProject, initialConfig, owner = false, onBack }: {
+  token?: string;
+  initialProject?: SharedProjectState;
+  initialConfig?: AppConfig | null;
+  owner?: boolean;
+  onBack?: () => void;
+}) {
   const { t, locale } = useI18n();
-  const [project, setProject] = useState<SharedProjectState | null>(null);
-  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [project, setProject] = useState<SharedProjectState | null>(initialProject ?? null);
+  const [config, setConfig] = useState<AppConfig | null>(initialConfig ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reviewerName, setReviewerName] = useState('');
@@ -393,13 +412,19 @@ function SharedProjectPage({ token }: { token: string }) {
   const gibsFireOverlayRef = useRef<any>(null);
 
   useEffect(() => {
+    if (initialProject && initialConfig) {
+      setProject(initialProject);
+      setConfig(initialConfig);
+      return;
+    }
+    if (!token) return;
     Promise.all([api<AppConfig>('/api/config'), api<SharedProjectState>(`/api/shared/projects/${token}`)])
       .then(([appConfig, sharedProject]) => {
         setConfig(appConfig);
         setProject(sharedProject);
       })
       .catch((loadError) => setError(messageOf(loadError)));
-  }, [token]);
+  }, [initialConfig, initialProject, token]);
 
   const variant = useMemo(
     () => project?.variants.find((item) => item.id === project.selectedVariantId) ?? project?.variants[0] ?? null,
@@ -438,7 +463,7 @@ function SharedProjectPage({ token }: { token: string }) {
         gestureHandling: 'greedy',
       });
       map.fitBounds(sitePreviewBounds(project.site.polygon), 56);
-      if (project.collaboration.share.mode === 'review') {
+      if (!owner && project.collaboration.share.mode === 'review') {
         map.addListener('click', (event: any) => event.latLng && setCommentCoordinate(coordinateFromLatLng(event.latLng)));
       }
       mapRef.current = map;
@@ -450,7 +475,7 @@ function SharedProjectPage({ token }: { token: string }) {
       overlaysRef.current = [];
       mapRef.current = null;
     };
-  }, [config, project?.id]);
+  }, [config, owner, project?.id]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -779,8 +804,8 @@ function SharedProjectPage({ token }: { token: string }) {
 
   if (error && !project) return <main className="shared-error"><Sprout size={28} /><h1>{t('shared.unavailable')}</h1><p>{error}</p></main>;
   if (!project) return <main className="shared-loading"><LoaderCircle className="spin" size={26} /><span>{t('busy.loading')}</span></main>;
-  const canReview = project.collaboration.share.mode === 'review';
-  const availableSections = SHARED_STEPS.filter((step) => step.id !== 'costs' || project.collaboration.share.includeCosts);
+  const canReview = !owner && project.collaboration.share.mode === 'review';
+  const availableSections = SHARED_STEPS.filter((step) => step.id !== 'costs' || owner || project.collaboration.share.includeCosts);
   const layerDefinitions: Array<{ id: SharedLayerId; icon: typeof MapIcon }> = [
     { id: 'boundary', icon: ScanLine },
     { id: 'constraints', icon: Ban },
@@ -808,8 +833,9 @@ function SharedProjectPage({ token }: { token: string }) {
   ];
   return <main className="shared-project" data-testid="shared-project">
     <header>
+      {onBack && <button className="shared-back" type="button" aria-label={t('projects.back')} onClick={onBack}><ChevronLeft size={18} /></button>}
       <span className="brand-mark"><Sprout size={21} /></span>
-      <span><small>{t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
+      <span><small>{owner ? t('shared.ownerEyebrow') : t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
       <i>r{project.revision ?? 0}</i>
     </header>
     <section className="shared-map">
@@ -1259,6 +1285,7 @@ function WorkspaceApp() {
   const compactViewport = useMediaQuery(COMPACT_VIEWPORT_QUERY);
   const phoneViewport = useMediaQuery(PHONE_VIEWPORT_QUERY);
   const [sessionResolved, setSessionResolved] = useState(false);
+  const [phoneViewing, setPhoneViewing] = useState<SharedProjectState | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [catalogueStats, setCatalogueStats] = useState<CatalogueStats | null>(null);
   const [site, setSite] = useState<SiteBoundary | null>(null);
@@ -3673,7 +3700,18 @@ function WorkspaceApp() {
     setAuthUser(null);
     setProjects([]);
     setRevisions([]);
+    setPhoneViewing(null);
     setNotice(t('auth.signedOut'));
+  }
+
+  async function openPhoneProject(id: string) {
+    if (!id) return;
+    await runBusy(t('auth.opening'), async () => {
+      const project = await api<ProjectState>(`/api/projects/${id}`);
+      setPhoneViewing(sharedProjectFromOwner(project));
+      setProjectId(id);
+      setProjectName(project.name);
+    });
   }
 
   async function searchCatalogue(filters: CatalogueFilters = {
@@ -4070,6 +4108,97 @@ function WorkspaceApp() {
           onCredential={authenticateGoogle}
           onClose={() => setAuthOpen(false)}
         />}
+      </>
+    );
+  }
+
+  if (phoneViewport && authUser) {
+    return (
+      <>
+        {phoneViewing && config
+          ? <SharedProjectPage
+              key={phoneViewing.id}
+              initialProject={phoneViewing}
+              initialConfig={config}
+              owner
+              onBack={() => setPhoneViewing(null)}
+            />
+          : <div className="phone-library" data-testid="phone-library">
+              <header className="topbar">
+                <span className="brand">
+                  <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
+                  <span><strong>growup</strong><small>{t('brand.tagline')}</small></span>
+                </span>
+                <div className="top-actions">
+                  <div className="info-landing-locales" role="group" aria-label={t('language.label')}>
+                    {SUPPORTED_LOCALES.map((item) => (
+                      <button
+                        key={item.code}
+                        type="button"
+                        aria-label={item.label}
+                        aria-pressed={locale === item.code}
+                        className={locale === item.code ? 'active' : ''}
+                        onClick={() => setLocale(item.code)}
+                      >
+                        <b aria-hidden="true">{item.flag}</b><small>{item.shortLabel}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="mobile-top-action mobile-menu-trigger"
+                    aria-label={t('info.open')}
+                    title={t('info.open')}
+                    onClick={() => setInfoOpen(true)}
+                  >
+                    <Info size={17} />
+                  </button>
+                  <button
+                    className="mobile-top-action account-trigger signed-in"
+                    data-testid="topbar-account"
+                    aria-label={t('auth.signedInAs', { name: authUser.name })}
+                    title={t('auth.signedInAs', { name: authUser.name })}
+                    aria-expanded={mobileMenuOpen}
+                    onClick={() => setMobileMenuOpen((value) => !value)}
+                  >
+                    {authUser.pictureUrl
+                      ? <img src={authUser.pictureUrl} alt="" referrerPolicy="no-referrer" />
+                      : <span>{authUser.name.slice(0, 1).toUpperCase()}</span>}
+                  </button>
+                </div>
+              </header>
+              {mobileMenuOpen && <div className="mobile-menu-layer">
+                <button className="mobile-menu-backdrop" aria-label={t('mobile.closeMenu')} onClick={() => setMobileMenuOpen(false)} />
+                <aside className="mobile-product-menu" role="dialog" aria-modal="true" aria-label={t('mobile.menu')}>
+                  <button className="mobile-account-action sign-out-action" data-testid="menu-sign-out" onClick={() => { setMobileMenuOpen(false); void logout(); }}>
+                    <span><LogOut size={16} /></span><strong>{t('auth.signOut')}</strong><small>{authUser.name}</small><ChevronRight size={17} />
+                  </button>
+                </aside>
+              </div>}
+              <div className="phone-planning-note">
+                <PencilRuler size={18} />
+                <span><strong>{t('projects.phonePlanningTitle')}</strong><small>{t('projects.phonePlanningBody')}</small></span>
+              </div>
+              <ProjectsPage
+                projects={projects}
+                activeProjectId={projectId}
+                archiveBusyId={projectArchiveBusyId}
+                inspectOnly
+                onOpen={(id) => void openPhoneProject(id)}
+                onArchive={(id, archived) => void toggleProjectArchive(id, archived)}
+                onShare={(id, name) => void openProjectReadOnlyShare(id, name)}
+              />
+            </div>}
+        {infoOpen && <InfoPanel layout="page" onClose={() => setInfoOpen(false)} />}
+        {projectShareTarget && config && <ProjectReadOnlyShareDialog
+          projectName={projectShareTarget.name}
+          configured={config.sharing.configured}
+          response={projectShareTarget.response}
+          busy={projectShareBusy}
+          onCreate={createProjectReadOnlyShare}
+          onDisable={disableProjectReadOnlyShare}
+          onClose={() => setProjectShareTarget(null)}
+        />}
+        {activeWorkspaceTask && <WorkspaceLoader label={activeWorkspaceTask} />}
       </>
     );
   }
@@ -5381,15 +5510,16 @@ function ProjectAnalysisPanel({ configured, context, report, busy, agentSelected
   </div>;
 }
 
-function ProjectsPage({ projects, activeProjectId, archiveBusyId, onNew, onOpen, onArchive, onShare, onClose }: {
+function ProjectsPage({ projects, activeProjectId, archiveBusyId, inspectOnly = false, onNew, onOpen, onArchive, onShare, onClose }: {
   projects: ProjectSummary[];
   activeProjectId: string;
   archiveBusyId: string | null;
-  onNew: () => void;
+  inspectOnly?: boolean;
+  onNew?: () => void;
   onOpen: (id: string) => void;
   onArchive: (id: string, archived: boolean) => void;
   onShare: (id: string, name: string) => void;
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const { t, locale } = useI18n();
   const [query, setQuery] = useState('');
@@ -5401,14 +5531,14 @@ function ProjectsPage({ projects, activeProjectId, archiveBusyId, onNew, onOpen,
     Boolean(project.archivedAt) === (view === 'archived')
     && (!normalizedQuery || project.name.toLocaleLowerCase(locale).includes(normalizedQuery))
   ));
-  return <div className="projects-page-backdrop">
+  return <div className={`projects-page-backdrop${inspectOnly ? ' embedded' : ''}`}>
     <main className="projects-page" aria-labelledby="projects-page-title" data-testid="projects-page">
       <header>
         <span className="projects-page-mark"><FolderOpen size={22} /></span>
-        <span><small>{t('projects.eyebrow')}</small><h2 id="projects-page-title">{t('projects.title')}</h2><p>{t('projects.body')}</p></span>
+        <span><small>{t('projects.eyebrow')}</small><h2 id="projects-page-title">{t('projects.title')}</h2><p>{t(inspectOnly ? 'projects.phoneBody' : 'projects.body')}</p></span>
         <div className="projects-page-actions">
-          <button className="projects-new-action" onClick={onNew}><Plus size={17} /><span>{t('projects.new')}</span></button>
-          <button className="projects-close-action" aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>
+          {onNew && <button className="projects-new-action" onClick={onNew}><Plus size={17} /><span>{t('projects.new')}</span></button>}
+          {onClose && <button className="projects-close-action" aria-label={t('projects.close')} onClick={onClose}><X size={19} /></button>}
         </div>
       </header>
       <section className="projects-toolbar">
@@ -5439,7 +5569,7 @@ function ProjectsPage({ projects, activeProjectId, archiveBusyId, onNew, onOpen,
             </div>
           </article>;
         })}
-      </div> : <div className="projects-empty">{view === 'archived' ? <Archive size={28} /> : <FolderOpen size={28} />}<strong>{t(query ? 'projects.noSearchTitle' : view === 'archived' ? 'projects.noArchivedTitle' : 'projects.emptyTitle')}</strong><p>{t(query ? 'projects.noSearchBody' : view === 'archived' ? 'projects.noArchivedBody' : 'projects.emptyBody')}</p></div>}
+      </div> : <div className="projects-empty">{view === 'archived' ? <Archive size={28} /> : <FolderOpen size={28} />}<strong>{t(query ? 'projects.noSearchTitle' : view === 'archived' ? 'projects.noArchivedTitle' : 'projects.emptyTitle')}</strong><p>{t(query ? 'projects.noSearchBody' : view === 'archived' ? 'projects.noArchivedBody' : inspectOnly ? 'projects.phoneEmptyBody' : 'projects.emptyBody')}</p></div>}
     </main>
   </div>;
 }
@@ -7038,8 +7168,13 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
           </div>
         </>}
       </div>}
-      {tab === 'sources' && <div className="care-sources" data-testid="care-sources">
-        {plan.sources.map((source) => <article key={`${source.label}-${source.version}`}><strong>{source.label}</strong><small>{source.version}</small><p>{source.supports.join(' · ')}</p><a href={source.url} target="_blank" rel="noreferrer">{t('soil.openSource')}</a></article>)}
+      {tab === 'sources' && <div className="fire-sources-view" data-testid="care-sources">
+        {plan.sources.map((source) => <article className="fire-evidence-card" key={`${source.label}-${source.version}`}>
+          <span><Database size={16} /><i><strong>{source.label}</strong><small>{source.version}</small></i></span>
+          <b>{t('care.sourceKind')}</b>
+          <p>{source.supports.join(' · ')}</p>
+          <a href={source.url} target="_blank" rel="noreferrer">{t('evidence.openSource')} <ChevronRight size={13} /></a>
+        </article>)}
       </div>}
     </div>
     <div className="panel-action-bar">

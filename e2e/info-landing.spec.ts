@@ -62,10 +62,10 @@ test.describe('unsigned phone information page', () => {
   });
 });
 
-test.describe('signed-in phone workspace', () => {
+test.describe('signed-in phone library', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test('keeps the planning workspace after authentication', async ({ page }) => {
+  test('shows the project library instead of the planning editor', async ({ page }, testInfo) => {
     await page.route('**/api/config', (route) => route.fulfill({ json: {
       googleMapsApiKey: '',
       initialMapViewport: { center: { lat: 0, lng: 0 }, zoom: 2 },
@@ -93,10 +93,18 @@ test.describe('signed-in phone workspace', () => {
         preferences: {},
       },
     } }));
-    await page.route('**/api/projects', (route) => route.fulfill({ json: [] }));
+    await page.route('**/api/projects', (route) => route.fulfill({ json: [
+      { id: 'lanterna', name: 'Lanterna', updatedAt: '2026-07-27T09:00:00.000Z', archivedAt: null },
+    ] }));
     await page.goto('/');
+    await expect(page.getByTestId('phone-library')).toBeVisible();
     await expect(page.getByTestId('info-landing')).toHaveCount(0);
-    await expect(page.getByTestId('step-site')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Draw', exact: true })).toBeVisible();
+    await expect(page.locator('.map-stage')).toHaveCount(0);
+    await expect(page.getByTestId('step-site')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Draw', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'New project' })).toHaveCount(0);
+    await expect(page.locator('.phone-planning-note')).toContainText('Planning stays on a computer.');
+    await expect(page.getByRole('button', { name: 'Open Lanterna' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('growup-phone-library.png'), fullPage: false });
   });
 });

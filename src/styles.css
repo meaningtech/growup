@@ -1344,7 +1344,7 @@ a.text-button { text-decoration: none; }
 .care-planting-date { display: grid; gap: 4px; margin: 0 0 12px; color: var(--muted); font-size: var(--text-caption); text-transform: uppercase; }
 .care-planting-date input { width: 100%; min-height: 40px; padding: 0 10px; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: var(--text-small); text-transform: none; }
 .care-planting-date small { text-transform: none; }
-.care-handbook, .care-sources { display: grid; gap: 12px; }
+.care-handbook { display: grid; gap: 12px; }
 .care-warning { margin: 0; color: #7a4a1c; font-size: var(--text-small); }
 .care-species-card { display: grid; gap: 10px; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
 .care-species-card > header { display: grid; grid-template-columns: auto minmax(0,1fr) 36px; gap: 10px; align-items: center; }
@@ -1430,7 +1430,6 @@ a.text-button { text-decoration: none; }
 .schedule-year-plan { display: grid; gap: 12px; }
 .schedule-year-plan article { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .schedule-year-plan p { margin: 6px 0 0; }
-.care-sources article { display: grid; gap: 4px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .schedule-handbook, .schedule-calendar { display: grid; gap: 8px; }
 .schedule-handbook article { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .schedule-calendar { grid-template-columns: repeat(4,minmax(0,1fr)); }
@@ -1669,6 +1668,17 @@ a.text-button { text-decoration: none; }
 .shared-error p { max-width: 520px; color: rgba(255,255,255,.65); }
 .shared-project { display: grid; grid-template: 64px minmax(0,1fr) / minmax(520px,1.35fr) minmax(420px,.85fr); width: 100%; height: 100dvh; color: var(--ink); background: #f4f3ec; }
 .shared-project > header { grid-column: 1/-1; z-index: 40; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: white; background: var(--forest); box-shadow: 0 1px 0 rgba(255,255,255,.08); }
+.shared-back { display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 auto; color: #eff6e8; background: rgba(255,255,255,.065); border: 1px solid rgba(255,255,255,.13); border-radius: 10px; cursor: pointer; }
+.phone-library { display: grid; grid-template-rows: 60px auto minmax(0,1fr); width: 100%; height: var(--growup-viewport-height, 100dvh); background: radial-gradient(circle at 88% 4%,rgba(199,227,111,.22),transparent 28%),linear-gradient(145deg,#fbfaf3,#edf1dd); }
+.phone-library > .topbar { grid-template-columns: minmax(0, 1fr) auto; }
+.phone-library .brand { cursor: default; }
+.phone-planning-note { display: grid; grid-template-columns: 34px minmax(0,1fr); align-items: start; gap: 10px; margin: 10px 14px 0; padding: 12px; color: var(--forest); background: #e9efda; border: 1px solid rgba(113,140,44,.28); border-radius: 12px 12px 12px 4px; }
+.phone-planning-note svg { margin-top: 1px; color: #52712a; }
+.phone-planning-note span { display: grid; gap: 3px; min-width: 0; }
+.phone-planning-note strong { font-size: var(--text-small); }
+.phone-planning-note small { color: #5f7167; font-size: var(--text-caption); line-height: 1.5; }
+.projects-page-backdrop.embedded { position: relative; inset: auto; min-height: 0; overflow: auto; background: transparent; z-index: 1; }
+.projects-page-backdrop.embedded .projects-page { height: auto; min-height: 100%; padding: 18px 14px calc(24px + env(safe-area-inset-bottom)); }
 .shared-project > header > span:nth-child(2) { display: grid; min-width: 0; }
 .shared-project > header small { color: rgba(255,255,255,.5); font-size: var(--text-caption); letter-spacing: .04em; text-transform: uppercase; }
 .shared-project > header strong { overflow: hidden; font: 500 21px 'Newsreader',serif; text-overflow: ellipsis; white-space: nowrap; }

@@ -136,6 +136,13 @@ test('keeps harvest products on one row and does not resize irrigation when the 
   await page.getByRole('tab', { name: 'Sources' }).click();
   await expect(page.getByTestId('harvest-sources').locator('.fire-evidence-card').first()).toBeVisible();
   await expect(page.getByTestId('harvest-sources').locator('.fire-evidence-card').first()).toContainText('Open source');
+  await page.getByTestId('step-care').click();
+  await page.getByRole('tab', { name: 'Sources' }).click();
+  const careSource = page.getByTestId('care-sources').locator('.fire-evidence-card').first();
+  await expect(careSource).toBeVisible();
+  await expect(careSource).toContainText('Open source');
+  await expect(careSource.locator('a')).toHaveCSS('color', 'rgb(125, 71, 42)');
+  await page.getByTestId('step-harvest').click();
   const before = costCalls;
   await page.locator('.harvest-year input').fill('18');
   await page.getByTestId('succession-timeline').locator('input[type="range"]').fill('12');
