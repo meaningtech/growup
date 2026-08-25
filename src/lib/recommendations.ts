@@ -2,6 +2,8 @@ import type { DesignObjectives, DesignSpecies, SiteProfile, SpeciesRecommendatio
 import { siteNativeness } from './biogeography';
 import { DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives } from './objectives';
 
+export { recommendedPalette } from './systemPalette';
+
 type SuitabilityKey = 'climate' | 'soil' | 'water' | 'native' | 'purpose' | 'syntropic' | 'maintenance' | 'evidence';
 
 export function rankSpecies(
@@ -13,36 +15,6 @@ export function rankSpecies(
   return species
     .map((item) => recommendSpecies(item, site, normalized))
     .sort((a, b) => b.score - a.score || a.species.scientificName.localeCompare(b.species.scientificName));
-}
-
-export function recommendedPalette(recommendations: SpeciesRecommendation[], size = 9): SpeciesRecommendation[] {
-  const eligible = recommendations.filter((item) => (
-    (item.status === 'recommended' || item.status === 'conditional')
-    && !item.components.some((component) => (
-      (component.key === 'climate' || component.key === 'water')
-      && component.status === 'poor'
-    ))
-  ));
-  const selected: SpeciesRecommendation[] = [];
-  const strata = ['emergent', 'high', 'medium', 'low', 'ground', 'climber'] as const;
-  const phases = ['placenta', 'secondary', 'climax'] as const;
-
-  for (const stratum of strata) {
-    const candidate = eligible.find((item) => item.species.stratum === stratum && !selected.includes(item));
-    if (candidate) selected.push(candidate);
-  }
-
-  for (const phase of phases) {
-    const candidate = eligible.find((item) => item.species.succession === phase && !selected.includes(item));
-    if (candidate) selected.push(candidate);
-  }
-
-  for (const candidate of eligible) {
-    if (selected.length >= size) break;
-    if (!selected.includes(candidate)) selected.push(candidate);
-  }
-
-  return selected.slice(0, size);
 }
 
 export function suitabilityWeights(objectives: DesignObjectives): Record<SuitabilityKey, number> {

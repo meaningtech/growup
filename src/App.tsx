@@ -1476,6 +1476,7 @@ function WorkspaceApp() {
   const siteUndoRef = useRef<Array<SiteBoundary | null>>([]);
   const siteRedoRef = useRef<Array<SiteBoundary | null>>([]);
   const recommendationObjectiveRef = useRef(JSON.stringify(DEFAULT_DESIGN_CONFIGURATION.objectives));
+  const paletteRequestRef = useRef(0);
   const projectNameEditedRef = useRef(Boolean(readOnboardingPreference(window.localStorage)?.projectName));
 
   const selectedVariant = useMemo(
@@ -1669,7 +1670,7 @@ function WorkspaceApp() {
     if (!siteProfile || objectiveKey === recommendationObjectiveRef.current) return;
     recommendationObjectiveRef.current = objectiveKey;
     const timeout = window.setTimeout(() => {
-      api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile, objectives: designConfiguration.objectives }))
+      api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile, objectives: designConfiguration.objectives, system: designConfiguration.system }))
         .then((result) => setRecommendations(result.recommendations))
         .catch((rankingError) => setError(messageOf(rankingError)));
     }, 250);
@@ -2777,7 +2778,7 @@ function WorkspaceApp() {
     await runBusy(t('busy.readingEvidence'), async () => {
       const profile = await api<SiteProfile>('/api/site/profile', post(site));
       const [result, economics] = await Promise.all([
-        api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives })),
+        api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system })),
         api<EconomicConfiguration>('/api/economics/profile', post({ siteProfile: profile })),
       ]);
       recommendationObjectiveRef.current = JSON.stringify(designConfiguration.objectives);
@@ -2788,6 +2789,7 @@ function WorkspaceApp() {
       setDesignConfiguration((configuration) => normalizeDesignConfiguration({
         ...configuration,
         speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, palette, configuration.speciesMix),
+        monocultureSpeciesId: configuration.system === 'monoculture' ? palette[0] ?? null : configuration.monocultureSpeciesId,
       }));
       setSelectedSpeciesIds(palette);
       setTreeSpeciesId(palette[0] ?? '');
@@ -2808,7 +2810,7 @@ function WorkspaceApp() {
     if (!siteProfile) return;
     await runBusy(t('busy.applyingOverride'), async () => {
       const profile = await api<SiteProfile>('/api/site/profile/override', post({ siteProfile, override: input }));
-      const result = await api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives }));
+      const result = await api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system }));
       setSiteProfile(profile);
       setRecommendations(result.recommendations);
       setVariants([]);
@@ -3601,7 +3603,7 @@ function WorkspaceApp() {
     setSection(preferredSection ?? fallbackSection);
     setSaveStatus(status);
     if (project.siteProfile) {
-      void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives }))
+      void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives, system: project.designConfiguration.system }))
         .then((result) => setRecommendations(result.recommendations))
         .catch((recommendationError) => setError(messageOf(recommendationError)));
     } else {
@@ -3853,6 +3855,57 @@ function WorkspaceApp() {
     setSelectedVariantId(null);
     setIrrigation(null);
     setCosts(null);
+  }
+
+  function replacePalette(nextSpeciesIds: string[], patch: Partial<DesignConfiguration> = {}) {
+    setSelectedSpeciesIds(nextSpeciesIds);
+    setTreeSpeciesId(nextSpeciesIds[0] ?? '');
+    setDesignConfiguration((configuration) => normalizeDesignConfiguration({
+      ...configuration,
+      ...patch,
+      speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, configuration.speciesMix),
+    }));
+    setVariants([]);
+    setSelectedVariantId(null);
+    setIrrigation(null);
+    setCosts(null);
+  }
+
+  async function changeDesignSystem(system: DesignConfiguration['system']) {
+    if (system === designConfiguration.system) return;
+    const next = normalizeDesignConfiguration({
+      ...designConfiguration,
+      system,
+      extent: system === 'windbreak' ? 'selected-edges' : system === 'boundary-buffer' ? 'perimeter-band' : designConfiguration.extent,
+      monocultureSpeciesId: system === 'monoculture' ? designConfiguration.monocultureSpeciesId : null,
+    });
+    setDesignConfiguration(next);
+    setVariants([]);
+    setSelectedVariantId(null);
+    setIrrigation(null);
+    setCosts(null);
+    if (!siteProfile) return;
+    const requestId = ++paletteRequestRef.current;
+    await runBusy(t('busy.proposingPalette'), async () => {
+      const result = await api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({
+        siteProfile,
+        objectives: next.objectives,
+        system: next.system,
+      }));
+      if (requestId !== paletteRequestRef.current) return;
+      const palette = result.palette.map((species) => species.id);
+      setRecommendations(result.recommendations);
+      replacePalette(palette, {
+        system: next.system,
+        extent: next.extent,
+        monocultureSpeciesId: next.system === 'monoculture' ? palette[0] ?? null : null,
+      });
+      setNotice(t('notices.systemPalette', { system: t(systemTranslationKey(next.system)) }));
+    });
+  }
+
+  function pickMonocultureSpecies(id: string) {
+    replacePalette([id], { system: 'monoculture', monocultureSpeciesId: id });
   }
 
   function updateDesignConfiguration(value: DesignConfiguration) {
@@ -4512,7 +4565,7 @@ function WorkspaceApp() {
             busy={Boolean(busy)}
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} worldviewUrl={site ? worldviewPermalink(site, gibsDate) : null} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowGibsImagery={() => { setShowGibsImagery(true); setShowLayerPanel(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
-          {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
+          {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} onSystemChange={changeDesignSystem} onPickMonoculture={pickMonocultureSpecies} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
           {section === 'water' && <WaterPanel
             site={site}
@@ -6165,11 +6218,13 @@ function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
   </div>;
 }
 
-function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void }) {
+function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign, onSystemChange, onPickMonoculture }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void; onSystemChange: (system: DesignConfiguration['system']) => void; onPickMonoculture: (id: string) => void }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [planningTab, setPlanningTab] = useState<'species' | 'firebreak' | 'machinery'>('species');
   const [speciesTab, setSpeciesTab] = useState<'system' | 'palette' | 'mix'>('system');
+  const [cropPickerOpen, setCropPickerOpen] = useState(false);
+  const [cropQuery, setCropQuery] = useState('');
   const [filters, setFilters] = useState<CatalogueFilters>({
     treeOnly: true,
     globUntOnly: false,
@@ -6193,8 +6248,22 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
   const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? null;
   const minimumSpecies = design.system === 'syntropic' ? 3 : design.system === 'monoculture' ? 1 : 2;
-  const selectedOptions = recommendations.map((item) => item.species).filter((item) => selectedIds.includes(item.id) && item.treeLike && item.productiveFromYear !== null);
   const selectedSpecies = selectedIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item));
+  const monocultureCrop = (design.monocultureSpeciesId ? DESIGN_SPECIES_BY_ID.get(design.monocultureSpeciesId) : null) ?? selectedSpecies[0] ?? null;
+  const cropQueryNormalized = cropQuery.trim().toLowerCase();
+  const matchesCropQuery = (species: DesignSpecies) => !cropQueryNormalized
+    || species.scientificName.toLowerCase().includes(cropQueryNormalized)
+    || speciesDisplayName(species, t).toLowerCase().includes(cropQueryNormalized);
+  const preferredCrops = recommendations.filter((item) => (
+    (item.status === 'recommended' || item.status === 'conditional')
+    && item.species.invasiveStatus !== 'blocked'
+    && item.species.treeLike
+    && item.species.productiveFromYear !== null
+    && !item.components.some((component) => (component.key === 'climate' || component.key === 'water') && component.status === 'poor')
+    && matchesCropQuery(item.species)
+  )).map((item) => item.species);
+  const preferredCropIds = new Set(preferredCrops.map((item) => item.id));
+  const allCrops = DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && matchesCropQuery(species) && !preferredCropIds.has(species.id));
   const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
   const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
@@ -6220,7 +6289,9 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   ] as const;
   const designSystems: Array<DesignConfiguration['system']> = ['syntropic', 'alley-cropping', 'mixed-orchard', 'monoculture', 'windbreak', 'boundary-buffer'];
   const setSystem = (system: DesignConfiguration['system']) => {
-    update({ system, extent: system === 'windbreak' ? 'selected-edges' : system === 'boundary-buffer' ? 'perimeter-band' : design.extent });
+    if (system === design.system) return;
+    onSystemChange(system);
+    setSpeciesTab(system === 'monoculture' ? 'system' : 'palette');
   };
   return (
     <div className="panel-body persistent-action-panel">
@@ -6276,7 +6347,11 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         {design.extent !== 'full-field' && <label className="range-control"><span><b>{t('design.boundaryBand')}</b><output>{design.perimeterBandM} m</output></span><input aria-label={t('design.boundaryBand')} type="range" min="3" max="20" step="1" value={design.perimeterBandM} onChange={(event) => update({ perimeterBandM: Number(event.target.value) })} /></label>}
         {design.system === 'alley-cropping' && <label className="range-control"><span><b>{t('design.cropAlley')}</b><output>{design.cropAlleyWidthM} m</output></span><input aria-label={t('design.cropAlley')} type="range" min="6" max="30" step="1" value={design.cropAlleyWidthM} onChange={(event) => update({ cropAlleyWidthM: Number(event.target.value) })} /></label>}
         {design.system === 'windbreak' && <label className="range-control"><span><b>{t('design.windbreakRows')}</b><output>{design.windbreakRows}</output></span><input aria-label={t('design.windbreakRows')} type="range" min="1" max="5" step="1" value={design.windbreakRows} onChange={(event) => update({ windbreakRows: Number(event.target.value) })} /></label>}
-        {design.system === 'monoculture' && <label className="select-label"><span>{t('design.singleCrop')}</span><select aria-label={t('design.singleCrop')} value={design.monocultureSpeciesId ?? ''} onChange={(event) => update({ monocultureSpeciesId: event.target.value || null })}><option value="">{t('design.bestProductive')}</option>{selectedOptions.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)}</option>)}</select></label>}
+        {design.system === 'monoculture' && <button type="button" className="crop-picker-trigger" data-testid="monoculture-picker-trigger" onClick={() => { setCropQuery(''); setCropPickerOpen(true); }}>
+          <span>{t('design.singleCrop')}</span>
+          <strong>{monocultureCrop ? speciesDisplayName(monocultureCrop, t) : t('design.bestProductive')}</strong>
+          <small>{monocultureCrop ? monocultureCrop.scientificName : t('design.chooseCrop')}</small>
+        </button>}
         <label className="select-label"><span>{t('design.orientation')}</span><select aria-label={t('design.orientation')} value={design.orientationObjective} onChange={(event) => update({ orientationObjective: event.target.value as DesignConfiguration['orientationObjective'] })}>
           <option value="solar-crop">{t('orientation.solar')}</option>
           <option value="contour">{t('orientation.contour')}</option>
@@ -6455,6 +6530,46 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
       <div className="panel-action-bar">
       <button className="button primary wide sticky-action generate-design-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
       </div>
+      {cropPickerOpen && <div className="care-modal-layer" data-testid="monoculture-picker">
+        <button type="button" className="care-modal-backdrop" aria-label={t('actions.close')} onClick={() => setCropPickerOpen(false)} />
+        <section className="care-modal species-picker-modal" role="dialog" aria-modal="true" aria-labelledby="monoculture-picker-title">
+          <header>
+            <span className="care-modal-mark"><Search size={18} /></span>
+            <span>
+              <small>{t('design.singleCrop')}</small>
+              <h2 id="monoculture-picker-title">{t('design.chooseCrop')}</h2>
+            </span>
+            <button type="button" aria-label={t('actions.close')} onClick={() => setCropPickerOpen(false)}><X size={16} /></button>
+          </header>
+          <div className="care-modal-body">
+            <label className="species-picker-search">
+              <Search size={16} />
+              <input value={cropQuery} onChange={(event) => setCropQuery(event.target.value)} placeholder={t('design.searchCrop')} aria-label={t('design.searchCrop')} autoFocus />
+            </label>
+            {preferredCrops.length > 0 && <div className="species-picker-group">
+              <small>{t('design.preferredCrops')}</small>
+              {preferredCrops.map((species) => {
+                const selected = monocultureCrop?.id === species.id;
+                return <button key={species.id} type="button" className={selected ? 'active' : ''} onClick={() => { onPickMonoculture(species.id); setCropPickerOpen(false); }}>
+                  <i style={{ background: species.color }} />
+                  <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
+                </button>;
+              })}
+            </div>}
+            <div className="species-picker-group">
+              <small>{t('design.allCrops')}</small>
+              {allCrops.map((species) => {
+                const selected = monocultureCrop?.id === species.id;
+                return <button key={species.id} type="button" className={selected ? 'active' : ''} onClick={() => { onPickMonoculture(species.id); setCropPickerOpen(false); }}>
+                  <i style={{ background: species.color }} />
+                  <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
+                </button>;
+              })}
+              {preferredCrops.length === 0 && allCrops.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
+            </div>
+          </div>
+        </section>
+      </div>}
     </div>
   );
 }

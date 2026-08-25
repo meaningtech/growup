@@ -998,6 +998,23 @@ describe('Growup API integration', () => {
     }));
   });
 
+  it('rebuilds the automatic palette for each planting system', async () => {
+    const app = createApp({ skipDatabaseMigration: true, now: () => new Date(observedAt) });
+    const profile = siteProfile();
+    const syntropic = await request(app).post('/api/recommendations').send({ siteProfile: profile }).expect(200);
+    const orchard = await request(app).post('/api/recommendations').send({ siteProfile: profile, system: 'mixed-orchard' }).expect(200);
+    const monoculture = await request(app).post('/api/recommendations').send({ siteProfile: profile, system: 'monoculture' }).expect(200);
+    const syntropicIds = syntropic.body.palette.map((species: { id: string }) => species.id);
+    const orchardIds = orchard.body.palette.map((species: { id: string }) => species.id);
+    const monocultureIds = monoculture.body.palette.map((species: { id: string }) => species.id);
+    expect(syntropicIds).toHaveLength(9);
+    expect(orchardIds).toHaveLength(5);
+    expect(orchardIds).not.toEqual(syntropicIds);
+    expect(orchard.body.palette.every((species: { treeLike: boolean; productiveFromYear: number | null }) => species.treeLike && species.productiveFromYear !== null)).toBe(true);
+    expect(monocultureIds).toHaveLength(1);
+    expect(monoculture.body.palette[0].treeLike).toBe(true);
+  });
+
   it('rejects invalid palettes and mismatched project IDs', async () => {
     const app = createApp({
       skipDatabaseMigration: true,

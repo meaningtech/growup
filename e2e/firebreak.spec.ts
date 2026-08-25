@@ -52,12 +52,12 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
     json: profile,
   }));
   await page.route('**/api/recommendations', async (route) => {
-    const objectives = (route.request().postDataJSON() as { objectives: DesignConfiguration['objectives'] }).objectives;
-    const recommendations = rankSpecies(DESIGN_SPECIES, profile, objectives);
+    const body = route.request().postDataJSON() as { objectives: DesignConfiguration['objectives']; system?: DesignConfiguration['system'] };
+    const recommendations = rankSpecies(DESIGN_SPECIES, profile, body.objectives);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      json: { recommendations, palette: recommendedPalette(recommendations).map((item) => item.species) },
+      json: { recommendations, palette: recommendedPalette(recommendations, body.system ?? 'syntropic').map((item) => item.species) },
     });
   });
   await page.route('**/api/economics/profile', async (route) => route.fulfill({

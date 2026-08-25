@@ -1853,6 +1853,21 @@ a.text-button { text-decoration: none; }
 .shared-review-form > div button.approve { color: #27461e; background: #c9df8d; }
 .shared-review-form button:disabled { opacity: .4; cursor: default; }
 .shared-pin { display: flex; align-items: center; gap: 4px; color: #5d782d; font-size: var(--text-caption); }
+.crop-picker-trigger { display: grid; gap: 2px; width: 100%; padding: 10px 12px; color: inherit; background: #fff; border: 1px solid var(--line); border-radius: 11px; text-align: left; cursor: pointer; }
+.crop-picker-trigger > span { color: var(--muted); font-size: var(--text-caption); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.crop-picker-trigger strong { font-size: var(--text-small); }
+.crop-picker-trigger small { color: var(--muted); font-size: var(--text-caption); font-style: italic; }
+.species-picker-modal { width: min(480px,100%); }
+.species-picker-search { display: grid; grid-template-columns: 16px minmax(0,1fr); align-items: center; gap: 8px; padding: 0 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+.species-picker-search input { width: 100%; min-height: 40px; padding: 0; border: 0; background: transparent; font-size: var(--text-body); }
+.species-picker-group { display: grid; gap: 6px; }
+.species-picker-group > small { color: var(--muted); font-size: var(--text-caption); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.species-picker-group > button { display: grid; grid-template-columns: 12px minmax(0,1fr); align-items: center; gap: 10px; min-height: 48px; padding: 8px 10px; color: inherit; background: #fff; border: 1px solid var(--line); border-radius: 10px; text-align: left; cursor: pointer; }
+.species-picker-group > button i { width: 12px; height: 12px; border-radius: 50%; }
+.species-picker-group > button span { display: grid; min-width: 0; }
+.species-picker-group > button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
+.species-picker-group > button small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-caption); font-style: italic; }
+.species-picker-group > button.active { background: #eef3df; border-color: rgba(113,140,44,.35); }
 
 .shared-pane-switch { display: none; }
 

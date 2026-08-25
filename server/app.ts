@@ -8,6 +8,7 @@ import { generateLayoutVariants, normalizeDesignConfiguration, regenerateLayoutV
 import { calculateIrrigation } from '../src/lib/irrigation.js';
 import { normalizeDesignObjectives } from '../src/lib/objectives.js';
 import { rankSpecies, recommendedPalette } from '../src/lib/recommendations.js';
+import { normalizeDesignSystem } from '../src/lib/systemPalette.js';
 import { applySiteProfileOverride } from '../src/lib/siteOverrides.js';
 import { localSiteValidation, normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
 import { createProjectComment, MAX_PROJECT_COMMENTS, requireProjectReview, rotateShareVersion } from '../src/lib/collaboration.js';
@@ -219,8 +220,9 @@ export function createApp(config: GrowupAppConfig = {}) {
   app.post('/api/recommendations', computeLimiter, async (req: Request, res: Response) => {
     await handle(res, async () => {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
+      const system = normalizeDesignSystem(req.body?.system);
       const recommendations = rankSpecies(DESIGN_SPECIES, siteProfile, normalizeDesignObjectives(req.body?.objectives));
-      return { recommendations, palette: recommendedPalette(recommendations, 9).map((item) => item.species) };
+      return { recommendations, palette: recommendedPalette(recommendations, system).map((item) => item.species) };
     });
   });
 

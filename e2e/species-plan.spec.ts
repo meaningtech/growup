@@ -55,3 +55,39 @@ test('stores exact species targets and manual succession in the generated plan',
   await speciesToggle.click();
   await expect(speciesToggle).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('rebuilds the palette when the planting system changes and searches the monoculture crop', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
+  const chips = page.getByTestId('species-selected-strip').locator('.species-chip');
+  await expect(chips).toHaveCount(9);
+  const syntropic = await chips.allTextContents();
+
+  const orchardRequest = page.waitForRequest((request) => request.url().endsWith('/api/recommendations') && request.method() === 'POST');
+  await page.getByTestId('species-tab-system').click();
+  await page.getByRole('radio', { name: 'Mixed orchard' }).click();
+  expect((await orchardRequest).postDataJSON()).toEqual(expect.objectContaining({ system: 'mixed-orchard' }));
+  await expect(page.getByTestId('species-tab-palette')).toHaveAttribute('aria-selected', 'true');
+  await expect(chips).toHaveCount(5);
+  expect(await chips.allTextContents()).not.toEqual(syntropic);
+
+  await page.getByTestId('species-tab-system').click();
+  await page.getByRole('radio', { name: 'Monoculture orchard' }).click();
+  await expect(page.getByTestId('monoculture-picker-trigger')).toBeVisible();
+  await page.getByTestId('monoculture-picker-trigger').click();
+  const picker = page.getByTestId('monoculture-picker');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByText('Preferred for this site')).toBeVisible();
+  await picker.getByLabel('Search by common or scientific name').fill('Olea');
+  await picker.getByRole('button', { name: /Olea europaea/ }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByTestId('monoculture-picker-trigger')).toContainText('Olive');
+  await expect(page.getByTestId('monoculture-picker-trigger')).toContainText('Olea europaea');
+  await page.getByTestId('species-tab-palette').click();
+  await expect(chips).toHaveCount(1);
+  await expect(chips.first()).toContainText('Olive');
+});

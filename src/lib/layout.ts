@@ -7,6 +7,7 @@ import { compositionTargets, DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjective
 import { distanceToSiteBoundaryM, distanceToSitePathM, estimatedPlantableAreaM2, siteContainsCoordinate, sitePolygons } from './siteGeometry';
 import { assessSolarOrientation, orientationScore } from './solar';
 import { effectiveSpacingM, effectiveSuccession, normalizeSpeciesMix, resolvedSpeciesMix } from './speciesPlan';
+import { eligibleSpeciesForSystem } from './systemPalette';
 import {
   bounds,
   createLocalProjection,
@@ -654,22 +655,11 @@ function canopyCoverage(trees: TreeInstance[], species: DesignSpecies[], year: n
 }
 
 function systemSpecies(species: DesignSpecies[], design: DesignConfiguration) {
+  const eligible = eligibleSpeciesForSystem(species, design.system);
+  if (design.system !== 'monoculture') return eligible;
   const permitted = species.filter((item) => item.invasiveStatus !== 'blocked');
-  if (design.system === 'monoculture') {
-    const requested = permitted.find((item) => item.id === design.monocultureSpeciesId);
-    const productive = permitted.find((item) => item.treeLike && item.productiveFromYear !== null);
-    return [requested ?? productive ?? permitted[0]].filter((item): item is DesignSpecies => Boolean(item));
-  }
-  if (design.system === 'mixed-orchard') {
-    const productive = permitted.filter((item) => item.treeLike && item.productiveFromYear !== null);
-    return productive.length >= 2 ? productive : permitted.filter((item) => item.treeLike);
-  }
-  if (design.system === 'windbreak') {
-    const wind = permitted.filter((item) => item.treeLike && item.roles.some((role) => ['wind protection', 'evergreen shelter', 'shelter', 'hedge'].includes(role)));
-    return wind.length >= 2 ? wind : permitted.filter((item) => item.treeLike);
-  }
-  if (design.system === 'alley-cropping') return permitted.filter((item) => item.treeLike || item.stratum === 'low');
-  return permitted;
+  const requested = permitted.find((item) => item.id === design.monocultureSpeciesId);
+  return [requested ?? eligible[0] ?? permitted[0]].filter((item): item is DesignSpecies => Boolean(item));
 }
 
 function systemGeometry(species: DesignSpecies[], design: DesignConfiguration) {
