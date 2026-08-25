@@ -1695,7 +1695,7 @@ a.text-button { text-decoration: none; }
 .phone-planning-note small { color: #5f7167; font-size: var(--text-caption); line-height: 1.5; }
 .projects-page-backdrop.embedded { position: relative; inset: auto; min-height: 0; overflow: auto; background: transparent; z-index: 1; }
 .projects-page-backdrop.embedded .projects-page { height: auto; min-height: 100%; padding: 18px 14px calc(24px + env(safe-area-inset-bottom)); }
-.shared-project > header > span:nth-child(2) { display: grid; min-width: 0; }
+.shared-project-title { display: grid; min-width: 0; flex: 1; }
 .shared-project > header small { color: rgba(255,255,255,.5); font-size: var(--text-caption); letter-spacing: .04em; text-transform: uppercase; }
 .shared-project > header strong { overflow: hidden; font: 500 21px 'Newsreader',serif; text-overflow: ellipsis; white-space: nowrap; }
 .shared-project > header > i { margin-left: auto; padding: 7px 9px; color: var(--lime); background: rgba(255,255,255,.07); border-radius: 8px; font: var(--text-label) 'DM Mono',monospace; font-style: normal; }
@@ -1859,6 +1859,7 @@ a.text-button { text-decoration: none; }
 @media (max-width: 980px) {
   .shared-project { grid-template: 60px auto minmax(0,1fr) / 1fr; height: 100dvh; min-height: 100dvh; overflow: hidden; overscroll-behavior: none; }
   .shared-project > header { position: relative; top: auto; z-index: 40; }
+  .shared-project-title small { display: none; }
   .shared-pane-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 0 10px 8px; background: var(--forest); }
   .shared-pane-switch button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; color: rgba(255,255,255,.74); background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.13); border-radius: 9px; font-size: var(--text-label); font-weight: 800; cursor: pointer; }
   .shared-pane-switch button.active { color: var(--forest); background: var(--lime); border-color: transparent; }

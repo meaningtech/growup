@@ -874,7 +874,7 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     <header>
       {onBack && <button className="shared-back" type="button" aria-label={t('projects.back')} onClick={onBack}><ChevronLeft size={18} /></button>}
       <span className="brand-mark"><Sprout size={21} /></span>
-      <span><small>{owner ? t('shared.ownerEyebrow') : t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
+      <span className="shared-project-title">{!owner && <small>{t('shared.eyebrow')}</small>}<strong>{project.name}</strong></span>
       <i>r{project.revision ?? 0}</i>
     </header>
     {compactShared && <div className="shared-pane-switch" role="tablist" aria-label={t('shared.paneSwitch')} data-testid="shared-pane-switch">
