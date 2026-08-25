@@ -84,7 +84,7 @@ function evidenceRecords(project: ProjectState): Evidence[] {
   };
   const firebreakEvidence = (project.variants.find((item) => item.id === project.selectedVariantId) ?? project.variants[0])?.firebreak?.evidence ?? [];
   const speciesEvidence = project.selectedSpeciesIds.flatMap((id) => (
-    DESIGN_SPECIES_BY_ID.get(id)?.sources.map((source): Evidence => ({
+    (DESIGN_SPECIES_BY_ID.get(id) ?? project.userSpecies?.find((item) => item.id === id))?.sources.map((source): Evidence => ({
       source: source.label,
       sourceUrl: source.url,
       version: source.version,

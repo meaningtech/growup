@@ -69,6 +69,8 @@ test('inspects a usable species by default and keeps blocked taxa as an exclusio
   await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.locator('.drawing-status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Draw a new field' })).toHaveCount(0);
+  await expect(page.getByTestId('species-inspector')).toHaveCount(0);
+  await page.locator('.species-match-toggle').first().click();
   await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
   await expect(page.getByTestId('species-inspector')).toContainText('Linked evidence');
   await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
@@ -80,8 +82,7 @@ test('inspects a usable species by default and keeps blocked taxa as an exclusio
   await expect(page.getByTestId('species-inspector')).not.toContainText('Evidence readiness');
 
   await page.getByTestId('species-inspector').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
-  await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
+  await expect(page.getByTestId('species-inspector')).toHaveCount(0);
 });
 
 test('cuts a hole after the outer field perimeter is already finished', async ({ page }) => {
@@ -160,8 +161,7 @@ test('adds a catalogue species and stores an editable planting row', async ({ pa
   await page.getByTestId('step-species').click();
   await page.getByTestId('species-tab-palette').click();
 
-  await expect(page.getByTestId('species-add')).toBeVisible();
-  await page.getByTestId('species-add').getByRole('button', { name: 'Add' }).first().click();
+  await page.locator('.species-row:not(.selected) .species-toggle').first().click();
   await page.getByTestId('species-tab-mix').click();
   await expect(page.getByTestId('species-mix-config').getByLabel(/Planting distance/)).not.toHaveCount(0);
 

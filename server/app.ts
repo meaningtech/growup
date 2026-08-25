@@ -9,6 +9,7 @@ import { calculateIrrigation } from '../src/lib/irrigation.js';
 import { normalizeDesignObjectives } from '../src/lib/objectives.js';
 import { rankSpecies, recommendedPalette } from '../src/lib/recommendations.js';
 import { normalizeDesignSystem } from '../src/lib/systemPalette.js';
+import { normalizeUserSpecies } from '../src/lib/userCatalogue.js';
 import { applySiteProfileOverride } from '../src/lib/siteOverrides.js';
 import { localSiteValidation, normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
 import { createProjectComment, MAX_PROJECT_COMMENTS, requireProjectReview, rotateShareVersion } from '../src/lib/collaboration.js';
@@ -221,8 +222,13 @@ export function createApp(config: GrowupAppConfig = {}) {
     await handle(res, async () => {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       const system = normalizeDesignSystem(req.body?.system);
-      const recommendations = rankSpecies(DESIGN_SPECIES, siteProfile, normalizeDesignObjectives(req.body?.objectives));
-      return { recommendations, palette: recommendedPalette(recommendations, system).map((item) => item.species) };
+      const extras = normalizeUserSpecies(req.body?.userSpecies).filter((item) => !DESIGN_SPECIES_BY_ID.has(item.id));
+      const catalogue = rankSpecies(DESIGN_SPECIES, siteProfile, normalizeDesignObjectives(req.body?.objectives));
+      const extraRecommendations = extras.length ? rankSpecies(extras, siteProfile, normalizeDesignObjectives(req.body?.objectives)) : [];
+      return {
+        recommendations: [...extraRecommendations, ...catalogue],
+        palette: recommendedPalette(catalogue, system).map((item) => item.species),
+      };
     });
   });
 
@@ -230,11 +236,11 @@ export function createApp(config: GrowupAppConfig = {}) {
     await handle(res, async () => {
       const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
-      if (siteProfile.satellite.existingVegetation.suitability === 'reject') {
+      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds, req.body?.userSpecies);
+      const designConfiguration = normalizeDesignConfiguration(req.body?.designConfiguration);
+      if (siteProfile.satellite.existingVegetation.suitability === 'reject' && designConfiguration.plantingLines.length === 0) {
         throw httpError(422, 'SITE_WOODY_COVER_TOO_HIGH', siteProfile.satellite.existingVegetation.conclusion);
       }
-      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
-      const designConfiguration = normalizeDesignConfiguration(req.body?.designConfiguration);
       return { variants: generateLayoutVariants(site, siteProfile, selectedSpecies, designConfiguration) };
     });
   });
@@ -243,7 +249,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     await handle(res, async () => {
       const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
-      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
+      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds, req.body?.userSpecies);
       const previousVariant = requireVariant(req.body?.previousVariant);
       const designConfiguration = normalizeDesignConfiguration(req.body?.designConfiguration ?? previousVariant.design);
       return { variant: regenerateLayoutVariant(site, siteProfile, selectedSpecies, previousVariant, designConfiguration) };
@@ -255,7 +261,7 @@ export function createApp(config: GrowupAppConfig = {}) {
       const variant = requireVariant(req.body?.variant);
       const site = requireBoundary(req.body?.site);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
-      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
+      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds, req.body?.userSpecies);
       return calculateIrrigation(variant, selectedSpecies, site, siteProfile, Number(req.body?.designYear ?? 5), req.body?.irrigationConfiguration, req.body?.economicConfiguration);
     });
   });
@@ -264,7 +270,7 @@ export function createApp(config: GrowupAppConfig = {}) {
     await handle(res, async () => {
       const variant = requireVariant(req.body?.variant);
       const site = requireBoundary(req.body?.site);
-      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds);
+      const selectedSpecies = requireSpecies(req.body?.selectedSpeciesIds, req.body?.userSpecies);
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       const designYear = Number(req.body?.designYear ?? 5);
       const irrigation = calculateIrrigation(variant, selectedSpecies, site, siteProfile, designYear, req.body?.irrigationConfiguration, req.body?.economicConfiguration);
@@ -619,9 +625,10 @@ function requireVariant(value: unknown): LayoutVariant {
   return value as LayoutVariant;
 }
 
-function requireSpecies(value: unknown) {
-  if (!Array.isArray(value) || value.length < 3) throw httpError(400, 'INVALID_PALETTE', 'At least three species are required');
-  const species = value.map((id) => DESIGN_SPECIES_BY_ID.get(String(id))).filter((item) => item !== undefined);
+function requireSpecies(value: unknown, extras?: unknown) {
+  if (!Array.isArray(value) || value.length < 1) throw httpError(400, 'INVALID_PALETTE', 'At least one species is required');
+  const extraById = new Map(normalizeUserSpecies(extras).map((item) => [item.id, item]));
+  const species = value.map((id) => DESIGN_SPECIES_BY_ID.get(String(id)) ?? extraById.get(String(id))).filter((item): item is NonNullable<typeof item> => item !== undefined);
   if (species.length !== value.length) throw httpError(400, 'UNKNOWN_SPECIES', 'The palette contains an unknown species ID');
   return species;
 }

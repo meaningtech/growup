@@ -155,8 +155,8 @@ function assertLayoutInputs(site: SiteBoundary, siteProfile: SiteProfile, select
   if (design.system === 'syntropic' && selectedSpecies.length < 3) throw new Error('Select at least three species to generate a syntropic layout');
   if (design.system !== 'monoculture' && design.system !== 'syntropic' && selectedSpecies.length < 2) throw new Error('Select at least two species for this design system');
   if (selectedSpecies.every((species) => species.invasiveStatus === 'blocked')) throw new Error('The selected palette contains no permitted species');
-  if (siteProfile.satellite.existingVegetation.suitability === 'reject') {
-    throw new Error('This parcel has too much existing woody vegetation for a blank-slate layout. Refine or replace the boundary first.');
+  if (siteProfile.satellite.existingVegetation.suitability === 'reject' && design.plantingLines.length === 0) {
+    throw new Error('This parcel has too much existing woody vegetation for a blank-slate layout. Draw planting rows in the open ground, or refine the boundary.');
   }
 }
 
@@ -272,6 +272,9 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   if (site.existingTrees.length) warnings.push(`${site.existingTrees.length} field-observed existing ${site.existingTrees.length === 1 ? 'tree is' : 'trees are'} protected from new planting.`);
   if (site.paths.length) warnings.push(`${site.paths.length} management ${site.paths.length === 1 ? 'path is' : 'paths are'} reserved before placement.`);
   if (design.plantingLines.length) warnings.push(`${design.plantingLines.length} user-drawn planting ${design.plantingLines.length === 1 ? 'row was' : 'rows were'} used instead of automatic field rows.`);
+  if (siteProfile.satellite.existingVegetation.suitability === 'reject' && design.plantingLines.length) {
+    warnings.push(`Existing woody cover is ${siteProfile.satellite.existingVegetation.detectedCoverPercent}%; plants follow the drawn rows and skip protected crowns.`);
+  }
   if (firebreak.enabled) warnings.push(`${firebreak.plannedWidthM.toFixed(1)} m perimeter firebreak reserve excludes ${firebreak.reservedAreaM2} m² from planting and requires local AIB review.`);
   if (firebreak.enabled && !firebreak.planningWidthSatisfied) warnings.push(`The firebreak width is below the ${firebreak.minimumPlanningWidthM.toFixed(1)} m flame-length planning basis.`);
   const dimensions = averageCanopy(permitted, design.analysisYear);

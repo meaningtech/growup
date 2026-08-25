@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -89,7 +89,9 @@ import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } fr
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculateLayoutMetrics } from './lib/layout';
-import { rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './lib/speciesPlan';
+import { rankSpecies } from './lib/recommendations';
+import { rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
+import { normalizeUserSpecies, planningSpeciesFromCatalogue, speciesLibrary, suggestedCatalogueSpacingM } from './lib/userCatalogue';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
 import { buildHarvestPlan, HARVEST_HORIZON_YEARS, normalizeHarvestPriceOverrides } from './lib/harvest';
@@ -182,6 +184,7 @@ type AssistantConversationTurn = {
 
 type ProjectMutationSnapshot = {
   selectedSpeciesIds: string[];
+  userSpecies: DesignSpecies[];
   designConfiguration: DesignConfiguration;
   irrigationConfiguration: IrrigationConfiguration;
   variants: LayoutVariant[];
@@ -432,9 +435,10 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     () => project?.variants.find((item) => item.id === project.selectedVariantId) ?? project?.variants[0] ?? null,
     [project],
   );
+  const sharedSpeciesById = useMemo(() => speciesLibrary(project?.userSpecies), [project?.userSpecies]);
   const species = useMemo(
-    () => (variant?.trees ?? []).map((tree) => DESIGN_SPECIES_BY_ID.get(tree.speciesId)).filter((item, index, items): item is DesignSpecies => Boolean(item) && items.findIndex((candidate) => candidate?.id === item?.id) === index),
-    [variant],
+    () => (variant?.trees ?? []).map((tree) => sharedSpeciesById.get(tree.speciesId)).filter((item, index, items): item is DesignSpecies => Boolean(item) && items.findIndex((candidate) => candidate?.id === item?.id) === index),
+    [sharedSpeciesById, variant],
   );
   const dailySolarExposure = useMemo(
     () => project?.siteProfile && variant
@@ -447,7 +451,7 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     [dailySolarExposure, solarHour],
   );
   const selectedTree = variant?.trees.find((tree) => tree.id === selectedTreeId) ?? null;
-  const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) ?? null : null;
+  const selectedTreeSpecies = selectedTree ? sharedSpeciesById.get(selectedTree.speciesId) ?? null : null;
 
   useEffect(() => {
     if (!config || !project || !mapElementRef.current || mapRef.current) return;
@@ -708,7 +712,7 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     }
     if (layers.plants && variant) {
       variant.trees.forEach((tree) => {
-        const item = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+        const item = sharedSpeciesById.get(tree.speciesId);
         if (!item) return;
         const state = growthState(item, tree, project.timelineYear);
         if (!state.active) return;
@@ -754,7 +758,7 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
       overlaysRef.current.forEach((overlay) => overlay.setMap(null));
       overlaysRef.current = [];
     };
-  }, [layers, locale, mapReady, project, selectedSolarHour, selectedTreeId, t, variant]);
+  }, [layers, locale, mapReady, project, selectedSolarHour, selectedTreeId, sharedSpeciesById, t, variant]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -950,6 +954,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
 }) {
   const { t, locale } = useI18n();
   const profile = project.siteProfile;
+  const library = speciesLibrary(project.userSpecies);
   const speciesCounts = variant ? [...variant.trees.reduce((counts, tree) => counts.set(tree.speciesId, (counts.get(tree.speciesId) ?? 0) + 1), new Map<string, number>())] : [];
   if (section === 'site') return <SharedSectionFrame eyebrow={t('shared.section.siteEyebrow')} title={project.site.name} body={profile?.location.displayName ?? t('shared.locationUnavailable')}>
     <div className="shared-metric-grid">
@@ -1011,7 +1016,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
       <SharedMetric label={t('shared.nitrogenFixers')} value={variant ? `${formatNumber(variant.composition.nitrogenFixerPercent, 0)}%` : '—'} />
     </div>
     <div className="shared-species-list">{speciesCounts.map(([speciesId, count]) => {
-      const item = DESIGN_SPECIES_BY_ID.get(speciesId);
+      const item = library.get(speciesId);
       const percent = variant?.trees.length ? count / variant.trees.length * 100 : 0;
       return <article key={speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : speciesId}</strong><small>{item?.scientificName ?? speciesId}</small></span><b>{count}</b><i>{formatNumber(percent, 1)}%</i></article>;
     })}</div>
@@ -1111,7 +1116,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
         <SharedRow label={t('costs.irrigation')} value={currency(project.costs.irrigationInstallationCost, project.economicConfiguration)} />
       </SharedDataCard>
       <div className="shared-species-list">{project.costs.bySpecies.map((entry) => {
-        const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+        const item = library.get(entry.speciesId);
         return <article key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : entry.speciesId}</strong><small>{entry.count} × {currency(entry.unitPlantCost, project.economicConfiguration!)}</small></span><b>{currency(entry.subtotalCost, project.economicConfiguration!)}</b></article>;
       })}</div>
     </> : <p className="inline-empty">{t('shared.noCosts')}</p>}
@@ -1126,7 +1131,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
           <SharedMetric label={t('care.plantingDate')} value={plan.plantingDate ?? t('care.unknown')} />
         </div>
         <div className="shared-species-list">{plan.species.map((entry) => {
-          const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+          const item = library.get(entry.speciesId);
           return <article key={entry.speciesId}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : entry.scientificName}</strong><small>{entry.scientificName} · {t('care.count', { count: entry.count })}</small></span><b>{t(`care.match.${entry.profile.matchLevel}`)}</b></article>;
         })}</div>
       </> : <p className="inline-empty">{t('care.emptyBody')}</p>}
@@ -1143,7 +1148,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
           <SharedMetric label={t('harvest.unknownSpecies')} value={String(plan.current.unknownSpecies)} />
         </div>
         <div className="shared-species-list">{plan.current.rows.filter((row) => !row.derived).map((row) => {
-          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          const item = library.get(row.speciesId);
           return <article key={`${row.speciesId}-${row.productId}`}><span className="tree-dot" style={{ background: item?.color ?? '#789' }} /><span><strong>{item ? speciesDisplayName(item, t) : row.scientificName}</strong><small>{t(`harvest.product.${row.productId}`)} · {formatNumber(row.kgBase, 0)} kg</small></span><b>{row.count}</b></article>;
         })}</div>
       </> : <p className="inline-empty">{t('harvest.emptyBody')}</p>}
@@ -1340,6 +1345,7 @@ function WorkspaceApp() {
   const [siteProfile, setSiteProfile] = useState<SiteProfile | null>(null);
   const [recommendations, setRecommendations] = useState<SpeciesRecommendation[]>([]);
   const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([]);
+  const [userSpecies, setUserSpecies] = useState<DesignSpecies[]>([]);
   const [designConfiguration, setDesignConfiguration] = useState<DesignConfiguration>(DEFAULT_DESIGN_CONFIGURATION);
   const [variants, setVariants] = useState<LayoutVariant[]>([]);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
@@ -1483,9 +1489,10 @@ function WorkspaceApp() {
     () => variants.find((variant) => variant.id === selectedVariantId) ?? variants[0] ?? null,
     [selectedVariantId, variants],
   );
+  const speciesById = useMemo(() => speciesLibrary(userSpecies), [userSpecies]);
   const selectedSpecies = useMemo(
-    () => selectedSpeciesIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item)),
-    [selectedSpeciesIds],
+    () => selectedSpeciesIds.map((id) => speciesById.get(id)).filter((item): item is DesignSpecies => Boolean(item)),
+    [selectedSpeciesIds, speciesById],
   );
   const dailySolarExposure = useMemo(
     () => siteProfile && selectedVariant
@@ -1499,7 +1506,7 @@ function WorkspaceApp() {
   );
   const selectedTree = selectedVariant?.trees.find((tree) => tree.id === selectedTreeId) ?? null;
   const mapTooltipTree = selectedVariant?.trees.find((tree) => tree.id === hoveredTreeId) ?? selectedTree;
-  const mapTooltipSpecies = mapTooltipTree ? DESIGN_SPECIES_BY_ID.get(mapTooltipTree.speciesId) ?? null : null;
+  const mapTooltipSpecies = mapTooltipTree ? speciesById.get(mapTooltipTree.speciesId) ?? null : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -1586,7 +1593,7 @@ function WorkspaceApp() {
       if (authUser) queueProjectSave(snapshot, serial);
     }, 1_200);
     return () => window.clearTimeout(timer);
-  }, [projectName, site, siteProfile, selectedSpeciesIds, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, harvestPriceOverrides, projectAnalysis, collaboration, authUser]);
+  }, [projectName, site, siteProfile, selectedSpeciesIds, userSpecies, designConfiguration, irrigationConfiguration, economicConfiguration, variants, selectedVariantId, timelineYear, irrigation, costs, fireOperations, operationsPlantingDate, harvestPriceOverrides, projectAnalysis, collaboration, authUser]);
 
   useEffect(() => {
     if (!site) return;
@@ -1670,8 +1677,21 @@ function WorkspaceApp() {
     if (!siteProfile || objectiveKey === recommendationObjectiveRef.current) return;
     recommendationObjectiveRef.current = objectiveKey;
     const timeout = window.setTimeout(() => {
-      api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile, objectives: designConfiguration.objectives, system: designConfiguration.system }))
-        .then((result) => setRecommendations(result.recommendations))
+      const requestId = ++paletteRequestRef.current;
+      api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({
+        siteProfile,
+        objectives: designConfiguration.objectives,
+        system: designConfiguration.system,
+        userSpecies,
+      }))
+        .then((result) => {
+          if (requestId !== paletteRequestRef.current) return;
+          setRecommendations(result.recommendations);
+          const palette = result.palette.map((species) => species.id);
+          replacePalette(palette, {
+            monocultureSpeciesId: designConfiguration.system === 'monoculture' ? palette[0] ?? null : designConfiguration.monocultureSpeciesId,
+          });
+        })
         .catch((rankingError) => setError(messageOf(rankingError)));
     }, 250);
     return () => window.clearTimeout(timeout);
@@ -2277,7 +2297,7 @@ function WorkspaceApp() {
     const visibleSpeciesIds = new Set(selectedVariant.trees.map((tree) => tree.speciesId).filter((speciesId) => !hiddenPlannedSpeciesIds.includes(speciesId)));
     const focusedSpeciesId = visibleSpeciesIds.size === 1 ? [...visibleSpeciesIds][0] : null;
     for (const tree of selectedVariant.trees) {
-      const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+      const species = speciesById.get(tree.speciesId);
       if (!species || hiddenPlannedSpeciesIds.includes(tree.speciesId)) continue;
       const state = growthState(species, tree, timelineYear);
       if (!state.active) continue;
@@ -2339,7 +2359,7 @@ function WorkspaceApp() {
       treeOverlaysRef.current.push(crown, point);
     }
     return () => treeOverlaysRef.current.forEach((overlay) => overlay.setMap(null));
-  }, [hiddenPlannedSpeciesIds, locale, selectedVariant, timelineYear, selectedTreeId, selectedTreeIds, showPlannedTrees, t]);
+  }, [hiddenPlannedSpeciesIds, locale, selectedVariant, speciesById, timelineYear, selectedTreeId, selectedTreeIds, showPlannedTrees, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2553,7 +2573,7 @@ function WorkspaceApp() {
         setDrawMode('idle');
         return;
       }
-      const species = DESIGN_SPECIES_BY_ID.get(treeSpeciesId);
+      const species = speciesById.get(treeSpeciesId);
       if (!species) return;
       const next: TreeInstance = {
         id: `manual-${crypto.randomUUID()}`,
@@ -2705,6 +2725,8 @@ function WorkspaceApp() {
     if (freshConfiguration) {
       siteUndoRef.current = [];
       siteRedoRef.current = [];
+      recommendationObjectiveRef.current = JSON.stringify(DEFAULT_DESIGN_CONFIGURATION.objectives);
+      paletteRequestRef.current += 1;
       setDesignConfiguration(DEFAULT_DESIGN_CONFIGURATION);
       setIrrigationConfiguration(DEFAULT_IRRIGATION_CONFIGURATION);
       setTimelineYear(5);
@@ -2778,7 +2800,7 @@ function WorkspaceApp() {
     await runBusy(t('busy.readingEvidence'), async () => {
       const profile = await api<SiteProfile>('/api/site/profile', post(site));
       const [result, economics] = await Promise.all([
-        api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system })),
+        api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system, userSpecies })),
         api<EconomicConfiguration>('/api/economics/profile', post({ siteProfile: profile })),
       ]);
       recommendationObjectiveRef.current = JSON.stringify(designConfiguration.objectives);
@@ -2786,9 +2808,10 @@ function WorkspaceApp() {
       setEconomicConfiguration(economics);
       setRecommendations(result.recommendations);
       const palette = result.palette.map((species) => species.id);
+      const proposed = palette.map((id) => speciesById.get(id) ?? DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item));
       setDesignConfiguration((configuration) => normalizeDesignConfiguration({
         ...configuration,
-        speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, palette, configuration.speciesMix),
+        speciesMix: speciesMixFromObjectives(proposed, configuration.objectives),
         monocultureSpeciesId: configuration.system === 'monoculture' ? palette[0] ?? null : configuration.monocultureSpeciesId,
       }));
       setSelectedSpeciesIds(palette);
@@ -2810,7 +2833,7 @@ function WorkspaceApp() {
     if (!siteProfile) return;
     await runBusy(t('busy.applyingOverride'), async () => {
       const profile = await api<SiteProfile>('/api/site/profile/override', post({ siteProfile, override: input }));
-      const result = await api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system }));
+      const result = await api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: profile, objectives: designConfiguration.objectives, system: designConfiguration.system, userSpecies }));
       setSiteProfile(profile);
       setRecommendations(result.recommendations);
       setVariants([]);
@@ -2826,7 +2849,7 @@ function WorkspaceApp() {
     const minimumSpecies = designConfiguration.system === 'syntropic' ? 3 : designConfiguration.system === 'monoculture' ? 1 : 2;
     if (selectedSpeciesIds.length < minimumSpecies) return setError(t('errors.minimumSpecies', { count: minimumSpecies }));
     await runBusy(t('busy.generatingDesigns'), async () => {
-      const result = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds, designConfiguration }));
+      const result = await api<{ variants: LayoutVariant[] }>('/api/layout/generate', post({ site, siteProfile, selectedSpeciesIds, userSpecies, designConfiguration }));
       setVariants(result.variants);
       setHiddenPlannedSpeciesIds([]);
       setSelectedVariantId(result.variants[0]?.id ?? null);
@@ -2851,6 +2874,7 @@ function WorkspaceApp() {
         site,
         siteProfile,
         selectedSpeciesIds,
+        userSpecies,
         previousVariant: selectedVariant,
         designConfiguration,
       }));
@@ -2873,6 +2897,7 @@ function WorkspaceApp() {
       site: activeSite,
       siteProfile,
       selectedSpeciesIds,
+      userSpecies,
       designYear,
       irrigationConfiguration: activeConfiguration,
       economicConfiguration,
@@ -2966,6 +2991,7 @@ function WorkspaceApp() {
   function currentProjectMutationSnapshot(): ProjectMutationSnapshot {
     return {
       selectedSpeciesIds,
+      userSpecies,
       designConfiguration,
       irrigationConfiguration,
       variants,
@@ -2982,6 +3008,7 @@ function WorkspaceApp() {
       site,
       siteProfile,
       selectedSpeciesIds: snapshot.selectedSpeciesIds,
+      userSpecies: snapshot.userSpecies,
       designConfiguration: snapshot.designConfiguration,
       irrigationConfiguration: snapshot.irrigationConfiguration,
       economicConfiguration,
@@ -3005,11 +3032,11 @@ function WorkspaceApp() {
       fireOperations,
       operations: (() => {
         const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
-        return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant), snapshot.irrigation, siteProfile.generatedAt, operationsPlantingDate) : null;
+        return siteProfile && variant ? buildOperationsPlan(siteProfile, variant, speciesForVariant(variant, snapshot.userSpecies), snapshot.irrigation, siteProfile.generatedAt, operationsPlantingDate) : null;
       })(),
       harvest: (() => {
         const variant = snapshot.variants.find((item) => item.id === snapshot.selectedVariantId) ?? snapshot.variants[0];
-        return variant ? buildHarvestPlan(variant, speciesForVariant(variant), economicConfiguration, snapshot.irrigation, snapshot.timelineYear, harvestPriceOverrides) : null;
+        return variant ? buildHarvestPlan(variant, speciesForVariant(variant, snapshot.userSpecies), economicConfiguration, snapshot.irrigation, snapshot.timelineYear, harvestPriceOverrides) : null;
       })(),
       section: snapshot.section,
     };
@@ -3326,6 +3353,7 @@ function WorkspaceApp() {
         site,
         siteProfile,
         selectedSpeciesIds: nextSpeciesIds,
+        userSpecies: snapshot.userSpecies,
         designConfiguration: nextDesignConfiguration,
       }));
       nextVariants = layoutResult.variants;
@@ -3343,6 +3371,7 @@ function WorkspaceApp() {
         site,
         siteProfile,
         selectedSpeciesIds: nextSpeciesIds,
+        userSpecies: snapshot.userSpecies,
         designYear: nextTimelineYear,
         irrigationConfiguration: nextIrrigationConfiguration,
         economicConfiguration,
@@ -3352,6 +3381,7 @@ function WorkspaceApp() {
     }
     return {
       selectedSpeciesIds: nextSpeciesIds,
+      userSpecies: snapshot.userSpecies,
       designConfiguration: nextDesignConfiguration,
       irrigationConfiguration: nextIrrigationConfiguration,
       variants: nextVariants,
@@ -3365,6 +3395,7 @@ function WorkspaceApp() {
 
   function commitProjectMutationSnapshot(snapshot: ProjectMutationSnapshot) {
     setSelectedSpeciesIds(snapshot.selectedSpeciesIds);
+    setUserSpecies(snapshot.userSpecies);
     setDesignConfiguration(snapshot.designConfiguration);
     setIrrigationConfiguration(snapshot.irrigationConfiguration);
     setTreeSpeciesId(snapshot.selectedSpeciesIds[0] ?? '');
@@ -3466,6 +3497,7 @@ function WorkspaceApp() {
       site,
       siteProfile,
       selectedSpeciesIds,
+      userSpecies,
       designConfiguration,
       irrigationConfiguration,
       economicConfiguration,
@@ -3476,10 +3508,10 @@ function WorkspaceApp() {
       costs,
       fireOperations,
       operations: selectedVariant && siteProfile
-        ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant), irrigation, siteProfile.generatedAt, operationsPlantingDate)
+        ? buildOperationsPlan(siteProfile, selectedVariant, speciesForVariant(selectedVariant, userSpecies), irrigation, siteProfile.generatedAt, operationsPlantingDate)
         : null,
       harvest: selectedVariant
-        ? buildHarvestPlan(selectedVariant, speciesForVariant(selectedVariant), economicConfiguration, irrigation, timelineYear, harvestPriceOverrides)
+        ? buildHarvestPlan(selectedVariant, speciesForVariant(selectedVariant, userSpecies), economicConfiguration, irrigation, timelineYear, harvestPriceOverrides)
         : null,
       harvestPriceOverrides,
       analysis: projectAnalysis,
@@ -3541,9 +3573,13 @@ function WorkspaceApp() {
     suppressDirtyRef.current = true;
     const revision = project.revision ?? 0;
     const normalizedDesign = normalizeDesignConfiguration(project.designConfiguration);
+    recommendationObjectiveRef.current = JSON.stringify(normalizedDesign.objectives);
+    paletteRequestRef.current += 1;
     const normalizedSite = normalizeSiteBoundary(project.site);
+    const extras = normalizeUserSpecies(project.userSpecies);
+    const library = speciesLibrary(extras);
     const projectSpecies = project.selectedSpeciesIds
-      .map((id) => DESIGN_SPECIES_BY_ID.get(id))
+      .map((id) => library.get(id))
       .filter((item): item is DesignSpecies => Boolean(item));
     const normalizedVariants = project.variants.map((variant) => {
       const variantDesign = normalizeDesignConfiguration(variant.design);
@@ -3564,6 +3600,7 @@ function WorkspaceApp() {
     createdAtRef.current = project.createdAt;
     setSite(normalizedSite);
     setSiteProfile(project.siteProfile);
+    setUserSpecies(extras);
     setSelectedSpeciesIds(project.selectedSpeciesIds);
     setTreeSpeciesId(project.selectedSpeciesIds[0] ?? '');
     setDesignConfiguration(normalizedDesign);
@@ -3603,7 +3640,7 @@ function WorkspaceApp() {
     setSection(preferredSection ?? fallbackSection);
     setSaveStatus(status);
     if (project.siteProfile) {
-      void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives, system: project.designConfiguration.system }))
+      void api<{ recommendations: SpeciesRecommendation[] }>('/api/recommendations', post({ siteProfile: project.siteProfile, objectives: project.designConfiguration.objectives, system: project.designConfiguration.system, userSpecies: extras }))
         .then((result) => setRecommendations(result.recommendations))
         .catch((recommendationError) => setError(messageOf(recommendationError)));
     } else {
@@ -3788,6 +3825,12 @@ function WorkspaceApp() {
     });
   }
 
+  const searchCatalogueByQuery = useCallback(async (query: string) => {
+    const parameters = new URLSearchParams({ q: query, limit: '40' });
+    const result = await api<{ results: CatalogueSpecies[] }>(`/api/catalog/search?${parameters.toString()}`);
+    return result.results;
+  }, []);
+
   async function searchLocation() {
     const query = locationQuery.trim();
     if (query.length < 2) return setError(t('errors.searchLength'));
@@ -3847,6 +3890,7 @@ function WorkspaceApp() {
   function toggleSpecies(id: string) {
     const nextSpeciesIds = selectedSpeciesIds.includes(id) ? selectedSpeciesIds.filter((item) => item !== id) : [...selectedSpeciesIds, id];
     setSelectedSpeciesIds(nextSpeciesIds);
+    setUserSpecies((current) => current.filter((item) => nextSpeciesIds.includes(item.id)));
     setDesignConfiguration((configuration) => normalizeDesignConfiguration({
       ...configuration,
       speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, configuration.speciesMix),
@@ -3857,18 +3901,67 @@ function WorkspaceApp() {
     setCosts(null);
   }
 
-  function replacePalette(nextSpeciesIds: string[], patch: Partial<DesignConfiguration> = {}) {
-    setSelectedSpeciesIds(nextSpeciesIds);
-    setTreeSpeciesId(nextSpeciesIds[0] ?? '');
+  function replacePalette(nextSpeciesIds: string[], patch: Partial<DesignConfiguration> = {}, extraSpecies: DesignSpecies[] = userSpecies) {
+    const replacingWithUserSelection = extraSpecies.some((item) => nextSpeciesIds.includes(item.id) && !DESIGN_SPECIES_BY_ID.has(item.id));
+    const keepUser = extraSpecies.filter((item) => {
+      if (nextSpeciesIds.includes(item.id)) return true;
+      if (patch.system === 'monoculture' || replacingWithUserSelection) return false;
+      return selectedSpeciesIds.includes(item.id);
+    });
+    const library = speciesLibrary(keepUser);
+    const mergedIds = Array.from(new Set([
+      ...keepUser.map((item) => item.id).filter((id) => !nextSpeciesIds.includes(id)),
+      ...nextSpeciesIds,
+    ]));
+    const species = mergedIds.map((id) => library.get(id)).filter((item): item is DesignSpecies => Boolean(item));
+    setUserSpecies(keepUser);
+    setSelectedSpeciesIds(mergedIds);
+    setTreeSpeciesId(mergedIds[0] ?? '');
     setDesignConfiguration((configuration) => normalizeDesignConfiguration({
       ...configuration,
       ...patch,
-      speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, configuration.speciesMix),
+      speciesMix: speciesMixFromObjectives(species, patch.objectives ?? configuration.objectives),
     }));
     setVariants([]);
     setSelectedVariantId(null);
     setIrrigation(null);
     setCosts(null);
+  }
+
+  function addCatalogueSpecies(item: CatalogueSpecies, spacingM: number) {
+    const matched = matchDesignSpecies(item);
+    if (matched) {
+      if (matched.invasiveStatus === 'blocked') return;
+      if (designConfiguration.system === 'monoculture') {
+        replacePalette([matched.id], { system: 'monoculture', monocultureSpeciesId: matched.id });
+        return;
+      }
+      if (!selectedSpeciesIds.includes(matched.id)) toggleSpecies(matched.id);
+      return;
+    }
+    const planned = planningSpeciesFromCatalogue(item, spacingM);
+    const extras = [...userSpecies.filter((species) => species.id !== planned.id), planned];
+    setUserSpecies(extras);
+    if (siteProfile) {
+      const extra = rankSpecies([planned], siteProfile, designConfiguration.objectives);
+      setRecommendations((current) => [...extra, ...current.filter((recommendation) => recommendation.species.id !== planned.id)]);
+    }
+    if (designConfiguration.system === 'monoculture') {
+      replacePalette([planned.id], { system: 'monoculture', monocultureSpeciesId: planned.id }, extras);
+      return;
+    }
+    if (!selectedSpeciesIds.includes(planned.id)) {
+      const nextSpeciesIds = [...selectedSpeciesIds, planned.id];
+      setSelectedSpeciesIds(nextSpeciesIds);
+      setDesignConfiguration((configuration) => normalizeDesignConfiguration({
+        ...configuration,
+        speciesMix: synchronizeSpeciesMix(selectedSpeciesIds, nextSpeciesIds, configuration.speciesMix),
+      }));
+      setVariants([]);
+      setSelectedVariantId(null);
+      setIrrigation(null);
+      setCosts(null);
+    }
   }
 
   async function changeDesignSystem(system: DesignConfiguration['system']) {
@@ -3891,6 +3984,7 @@ function WorkspaceApp() {
         siteProfile,
         objectives: next.objectives,
         system: next.system,
+        userSpecies,
       }));
       if (requestId !== paletteRequestRef.current) return;
       const palette = result.palette.map((species) => species.id);
@@ -3986,7 +4080,7 @@ function WorkspaceApp() {
   }
 
   function replaceSelectedTrees(speciesId: string) {
-    if (!selectedVariant || !selectedTreeIds.length || !DESIGN_SPECIES_BY_ID.has(speciesId)) return;
+    if (!selectedVariant || !selectedTreeIds.length || !speciesById.has(speciesId)) return;
     const ids = new Set(selectedTreeIds);
     commitTrees(selectedVariant.trees.map((tree) => ids.has(tree.id) ? { ...tree, speciesId } : tree));
     setTreeSpeciesId(speciesId);
@@ -4565,7 +4659,7 @@ function WorkspaceApp() {
             busy={Boolean(busy)}
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} worldviewUrl={site ? worldviewPermalink(site, gibsDate) : null} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowGibsImagery={() => { setShowGibsImagery(true); setShowLayerPanel(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
-          {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} onSystemChange={changeDesignSystem} onPickMonoculture={pickMonocultureSpecies} />}
+          {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} userSpecies={userSpecies} onToggle={toggleSpecies} onAddCatalogue={addCatalogueSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} onSystemChange={changeDesignSystem} onPickMonoculture={pickMonocultureSpecies} onSearchCatalogue={searchCatalogueByQuery} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
           {section === 'water' && <WaterPanel
             site={site}
@@ -4628,6 +4722,7 @@ function WorkspaceApp() {
           {section === 'care' && <CarePanel
             profile={siteProfile}
             variant={selectedVariant}
+            userSpecies={userSpecies}
             irrigation={irrigation}
             plantingDate={operationsPlantingDate}
             onPlantingDate={setOperationsPlantingDate}
@@ -4636,6 +4731,7 @@ function WorkspaceApp() {
           />}
           {section === 'harvest' && <HarvestPanel
             variant={selectedVariant}
+            userSpecies={userSpecies}
             economics={economicConfiguration}
             irrigation={irrigation}
             year={timelineYear}
@@ -6218,13 +6314,17 @@ function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
   </div>;
 }
 
-function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign, onSystemChange, onPickMonoculture }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; onToggle: (id: string) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void; onSystemChange: (system: DesignConfiguration['system']) => void; onPickMonoculture: (id: string) => void }) {
+function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, onToggle, onAddCatalogue, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign, onSystemChange, onPickMonoculture, onSearchCatalogue }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; userSpecies: DesignSpecies[]; onToggle: (id: string) => void; onAddCatalogue: (item: CatalogueSpecies, spacingM: number) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void; onSystemChange: (system: DesignConfiguration['system']) => void; onPickMonoculture: (id: string) => void; onSearchCatalogue: (query: string) => Promise<CatalogueSpecies[]> }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [planningTab, setPlanningTab] = useState<'species' | 'firebreak' | 'machinery'>('species');
   const [speciesTab, setSpeciesTab] = useState<'system' | 'palette' | 'mix'>('system');
   const [cropPickerOpen, setCropPickerOpen] = useState(false);
   const [cropQuery, setCropQuery] = useState('');
+  const [cropResults, setCropResults] = useState<CatalogueSpecies[]>([]);
+  const [cropSearching, setCropSearching] = useState(false);
+  const [pendingCatalogue, setPendingCatalogue] = useState<CatalogueSpecies | null>(null);
+  const [pendingSpacingM, setPendingSpacingM] = useState(6);
   const [filters, setFilters] = useState<CatalogueFilters>({
     treeOnly: true,
     globUntOnly: false,
@@ -6237,19 +6337,90 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
     droughtMinimum: 0,
     evidenceMinimum: 0,
   });
+  useEffect(() => {
+    if (!cropPickerOpen) return;
+    const nextQuery = cropQuery.trim();
+    if (nextQuery.length < 2) {
+      setCropResults([]);
+      setCropSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setCropSearching(true);
+    const timer = window.setTimeout(() => {
+      onSearchCatalogue(nextQuery)
+        .then((results) => { if (!cancelled) setCropResults(results); })
+        .catch(() => { if (!cancelled) setCropResults([]); })
+        .finally(() => { if (!cancelled) setCropSearching(false); });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [cropPickerOpen, cropQuery, onSearchCatalogue]);
   const visible = recommendations.filter((item) => item.status !== 'blocked');
   const addQuery = query.trim().toLowerCase();
-  const addableSpecies = DESIGN_SPECIES.filter((species) => {
-    if (species.invasiveStatus === 'blocked' || selectedIds.includes(species.id)) return false;
-    if (!addQuery) return true;
-    return species.scientificName.toLowerCase().includes(addQuery) || speciesDisplayName(species, t).toLowerCase().includes(addQuery);
-  }).slice(0, addQuery ? 24 : 12);
+  const namedDesignHits = addQuery.length >= 2
+    ? DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && (
+      species.scientificName.toLowerCase().includes(addQuery) || speciesDisplayName(species, t).toLowerCase().includes(addQuery)
+    )).slice(0, 8)
+    : [];
   const blocked = recommendations.filter((item) => item.status === 'blocked');
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
-  const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? visible[0] ?? null;
+  const inspected = recommendations.find((item) => item.species.id === inspectedId) ?? null;
+  const matchCard = inspected ? <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
+    <header>
+      <span className="species-swatch" style={{ background: inspected.species.color }} />
+      <span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>
+      <span className="species-inspector-actions">
+        {inspected.status === 'blocked' && <CircleOff size={20} />}
+        <button type="button" aria-label={t('actions.close')} onClick={() => setInspectedId(null)}><X size={16} /></button>
+      </span>
+    </header>
+    {inspected.status === 'blocked' ? (
+      <div className="mitigation-list"><strong>{t('species.excludedFromLayouts')}</strong>{inspected.mitigations.map((note) => <p key={note}>{localizedMitigation(note, inspected, siteProfile, t)}</p>)}</div>
+    ) : (
+      <>
+        <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
+        {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((note) => <p key={note}>• {localizedMitigation(note, inspected, siteProfile, t)}</p>)}</div>}
+      </>
+    )}
+    <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
+  </div> : null;
   const minimumSpecies = design.system === 'syntropic' ? 3 : design.system === 'monoculture' ? 1 : 2;
-  const selectedSpecies = selectedIds.map((id) => DESIGN_SPECIES_BY_ID.get(id)).filter((item): item is DesignSpecies => Boolean(item));
-  const monocultureCrop = (design.monocultureSpeciesId ? DESIGN_SPECIES_BY_ID.get(design.monocultureSpeciesId) : null) ?? selectedSpecies[0] ?? null;
+  const library = speciesLibrary(userSpecies);
+  const selectedSpecies = selectedIds.map((id) => library.get(id)).filter((item): item is DesignSpecies => Boolean(item));
+  const monocultureCrop = (design.monocultureSpeciesId ? library.get(design.monocultureSpeciesId) : null) ?? selectedSpecies[0] ?? null;
+  const confirmCatalogue = (item: CatalogueSpecies, spacingM: number) => {
+    onAddCatalogue(item, spacingM);
+    setPendingCatalogue(null);
+  };
+  const requestCatalogue = (item: CatalogueSpecies, monoculture = false) => {
+    const matched = matchDesignSpecies(item);
+    if (matched && matched.invasiveStatus !== 'blocked') {
+      if (monoculture) {
+        onPickMonoculture(matched.id);
+        setCropPickerOpen(false);
+        return;
+      }
+      onToggle(matched.id);
+      return;
+    }
+    if (matched?.invasiveStatus === 'blocked') return;
+    const existing = library.get(item.id);
+    if (existing) {
+      if (monoculture) {
+        onPickMonoculture(existing.id);
+        setCropPickerOpen(false);
+        return;
+      }
+      onToggle(existing.id);
+      return;
+    }
+    setPendingCatalogue(item);
+    setPendingSpacingM(suggestedCatalogueSpacingM(item));
+    if (monoculture) setCropPickerOpen(false);
+  };
   const cropQueryNormalized = cropQuery.trim().toLowerCase();
   const matchesCropQuery = (species: DesignSpecies) => !cropQueryNormalized
     || species.scientificName.toLowerCase().includes(cropQueryNormalized)
@@ -6263,7 +6434,10 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
     && matchesCropQuery(item.species)
   )).map((item) => item.species);
   const preferredCropIds = new Set(preferredCrops.map((item) => item.id));
-  const allCrops = DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && matchesCropQuery(species) && !preferredCropIds.has(species.id));
+  const catalogueCrops = cropResults.filter((item) => {
+    const designSpecies = matchDesignSpecies(item);
+    return !designSpecies || !preferredCropIds.has(designSpecies.id);
+  });
   const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
   const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
@@ -6291,7 +6465,6 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const setSystem = (system: DesignConfiguration['system']) => {
     if (system === design.system) return;
     onSystemChange(system);
-    setSpeciesTab(system === 'monoculture' ? 'system' : 'palette');
   };
   return (
     <div className="panel-body persistent-action-panel">
@@ -6399,56 +6572,53 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         <label><span>{t('species.filterEvidence')}</span><select aria-label={t('species.filterEvidence')} value={filters.evidenceMinimum} onChange={(event) => setFilters({ ...filters, evidenceMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[2, 3, 4].map((value) => <option key={value} value={value}>{value}+</option>)}</select></label>
       </div>
       <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
-      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => {
-        const designSpecies = DESIGN_SPECIES_BY_ID.get(item.id);
-        const selected = Boolean(designSpecies && selectedIds.includes(designSpecies.id));
-        const blocked = designSpecies?.invasiveStatus === 'blocked';
-        return <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}{designSpecies && !blocked && <button type="button" onClick={() => onToggle(designSpecies.id)}>{selected ? t('species.removeShort') : t('species.addShort')}</button>}</span></span>;
+      {(catalogueResults.length > 0 || namedDesignHits.length > 0) && <div className="catalogue-results">{[
+        ...namedDesignHits.map((species) => ({ key: species.id, scientificName: species.scientificName, designReady: true, globUnt: false, stratum: species.stratum, succession: species.succession, designSpecies: species })),
+        ...catalogueResults.flatMap((item) => {
+          const designSpecies = matchDesignSpecies(item);
+          if (designSpecies && namedDesignHits.some((hit) => hit.id === designSpecies.id)) return [];
+          return [{ key: item.id, scientificName: item.scientificName, designReady: item.designReady || Boolean(designSpecies), globUnt: item.globUnt, stratum: item.stratum, succession: item.succession, designSpecies }];
+        }),
+      ].map((item) => {
+        const catalogueItem = catalogueResults.find((result) => result.id === item.key) ?? (item.designSpecies ? {
+          id: item.designSpecies.id,
+          scientificName: item.designSpecies.scientificName,
+          sourceCount: item.designSpecies.sources.length,
+          treeLike: item.designSpecies.treeLike,
+          wfoId: null,
+          wcvpId: null,
+          globUnt: item.globUnt,
+          designReady: item.designReady,
+          stratum: item.stratum,
+          succession: item.succession,
+          roles: item.designSpecies.roles,
+          evergreen: item.designSpecies.evergreen,
+          nitrogenFixer: item.designSpecies.nitrogenFixer,
+          droughtTolerance: item.designSpecies.droughtTolerance,
+          evidenceCount: item.designSpecies.sources.length,
+        } : null);
+        const resolved = item.designSpecies ?? library.get(item.key) ?? null;
+        const blocked = resolved?.invasiveStatus === 'blocked';
+        const selected = Boolean(resolved && selectedIds.includes(resolved.id));
+        return <span key={item.key}><i>{resolved ? speciesDisplayName(resolved, t) : item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{!item.designReady && !blocked && <small>{t('species.unknownEnvelope')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}{blocked ? <small>{t('design.notPlantable')}</small> : <button type="button" onClick={() => catalogueItem && requestCatalogue(catalogueItem)}>{selected ? t('species.removeShort') : t('species.addShort')}</button>}</span><b>{item.scientificName}</b></span>;
       })}</div>}
       {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
         const selected = selectedIds.includes(item.species.id);
-        return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>
-          <button className="species-open" onClick={() => setInspectedId(item.species.id)} aria-label={t('species.inspect', { name: speciesDisplayName(item.species, t) })}>
-            <span className="species-swatch" style={{ background: item.species.color }} />
-            <span className="species-name"><strong>{speciesDisplayName(item.species, t)}</strong><i>{item.species.scientificName}</i><small>{localizedEnum(item.species.stratum, t)} · {localizedEnum(item.species.succession, t)} · {item.species.roles.slice(0, 2).map((role) => localizedEnum(role, t)).join(' / ')}</small></span>
-            <span className="species-score"><strong>{item.score}</strong><small>/100</small></span>
-          </button>
-          <button className={`species-toggle ${selected ? 'on' : ''}`} onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={t(selected ? 'species.remove' : 'species.add', { name: speciesDisplayName(item.species, t) })}>{selected ? t('species.removeShort') : t('species.addShort')}</button>
+        const matchOpen = inspected?.species.id === item.species.id;
+        return <div key={item.species.id} className={`species-item${matchOpen ? ' open' : ''}`}>
+          <div className={`species-row ${selected ? 'selected' : ''} ${matchOpen ? 'inspected' : ''}`}>
+            <span className="species-open">
+              <span className="species-swatch" style={{ background: item.species.color }} />
+              <span className="species-name"><strong>{speciesDisplayName(item.species, t)}</strong><i>{item.species.scientificName}</i><small>{localizedEnum(item.species.stratum, t)} · {localizedEnum(item.species.succession, t)} · {item.species.roles.slice(0, 2).map((role) => localizedEnum(role, t)).join(' / ')}</small></span>
+              <span className="species-score"><strong>{item.score}</strong><small>/100</small></span>
+            </span>
+            <button type="button" className={`species-match-toggle${matchOpen ? ' on' : ''}`} aria-pressed={matchOpen} aria-label={t('species.inspect', { name: speciesDisplayName(item.species, t) })} onClick={() => setInspectedId(matchOpen ? null : item.species.id)}><Eye size={15} /></button>
+            <button className={`species-toggle ${selected ? 'on' : ''}`} onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={t(selected ? 'species.remove' : 'species.add', { name: speciesDisplayName(item.species, t) })}>{selected ? t('species.removeShort') : t('species.addShort')}</button>
+          </div>
+          {matchOpen && matchCard}
         </div>;
       })}</div>}
-      {inspected && <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
-        <header>
-          <span className="species-swatch" style={{ background: inspected.species.color }} />
-          <span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>
-          <span className="species-inspector-actions">
-            {inspected.status === 'blocked' && <CircleOff size={20} />}
-            {inspected.status !== 'blocked' && <button type="button" className={`species-toggle ${selectedIds.includes(inspected.species.id) ? 'on' : ''}`} onClick={() => onToggle(inspected.species.id)}>{selectedIds.includes(inspected.species.id) ? t('species.removeShort') : t('species.addShort')}</button>}
-            {inspectedId && <button type="button" aria-label={t('actions.close')} onClick={() => setInspectedId(null)}><X size={16} /></button>}
-          </span>
-        </header>
-        {inspected.status === 'blocked' ? (
-          <div className="mitigation-list"><strong>{t('species.excludedFromLayouts')}</strong>{inspected.mitigations.map((item) => <p key={item}>{localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>
-        ) : (
-          <>
-            <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
-            {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
-          </>
-        )}
-        <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
-      </div>}
-      <div className="species-add" data-testid="species-add">
-        <div className="card-heading"><div><Plus size={17} /><span><small>{t('species.addEyebrow')}</small><strong>{t('species.addTitle')}</strong></span></div></div>
-        <p>{t('species.addBody')}</p>
-        {addableSpecies.map((species) => {
-          const displayName = speciesDisplayName(species, t);
-          return <div key={species.id} className="species-add-row">
-            <span className="species-swatch" style={{ background: species.color }} />
-            <span><strong>{displayName}</strong><i>{species.scientificName}</i><small>{localizedEnum(species.succession, t)} · {species.spacingM} m</small></span>
-            <button type="button" onClick={() => onToggle(species.id)}>{t('species.addShort')}</button>
-          </div>;
-        })}
-        {addableSpecies.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
-      </div>
+      {inspected?.status === 'blocked' && matchCard}
       </>}
       {speciesTab === 'mix' && <div className="species-mix-config" data-testid="species-mix-config">
         <p className="species-step-lead">{t('planning.mixLead')}</p>
@@ -6546,6 +6716,10 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
               <Search size={16} />
               <input value={cropQuery} onChange={(event) => setCropQuery(event.target.value)} placeholder={t('design.searchCrop')} aria-label={t('design.searchCrop')} autoFocus />
             </label>
+            <p className="species-picker-hint">{t('design.catalogueSearchHint', {
+              count: stats ? formatNumber(stats.total, 0) : '107,269',
+              ready: stats ? formatNumber(stats.designReady, 0) : String(DESIGN_SPECIES.length),
+            })}</p>
             {preferredCrops.length > 0 && <div className="species-picker-group">
               <small>{t('design.preferredCrops')}</small>
               {preferredCrops.map((species) => {
@@ -6557,16 +6731,51 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
               })}
             </div>}
             <div className="species-picker-group">
-              <small>{t('design.allCrops')}</small>
-              {allCrops.map((species) => {
-                const selected = monocultureCrop?.id === species.id;
-                return <button key={species.id} type="button" className={selected ? 'active' : ''} onClick={() => { onPickMonoculture(species.id); setCropPickerOpen(false); }}>
-                  <i style={{ background: species.color }} />
-                  <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
+              <small>{t('design.catalogueSearch')}</small>
+              {cropSearching && <p className="inline-empty">{t('busy.searchingCatalogue')}</p>}
+              {!cropSearching && cropQuery.trim().length < 2 && <p className="inline-empty">{t('design.searchCropHint')}</p>}
+              {!cropSearching && catalogueCrops.map((item) => {
+                const designSpecies = matchDesignSpecies(item) ?? library.get(item.id) ?? null;
+                const blocked = designSpecies?.invasiveStatus === 'blocked';
+                const selected = Boolean(designSpecies && monocultureCrop?.id === designSpecies.id);
+                return <button
+                  key={item.id}
+                  type="button"
+                  className={selected ? 'active' : ''}
+                  disabled={blocked}
+                  onClick={() => { if (!blocked) requestCatalogue(item, true); }}
+                >
+                  <i style={{ background: designSpecies?.color ?? '#9aa394' }} />
+                  <span>
+                    <strong>{designSpecies ? speciesDisplayName(designSpecies, t) : item.scientificName}</strong>
+                    <small>{item.scientificName}{blocked ? ` · ${t('design.notPlantable')}` : designSpecies?.envelopeConfidence === 'unknown' || !designSpecies ? ` · ${t('species.unknownEnvelope')}` : ''}</small>
+                  </span>
                 </button>;
               })}
-              {preferredCrops.length === 0 && allCrops.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
+              {!cropSearching && cropQuery.trim().length >= 2 && catalogueCrops.length === 0 && preferredCrops.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
             </div>
+          </div>
+        </section>
+      </div>}
+      {pendingCatalogue && <div className="care-modal-layer" data-testid="catalogue-spacing-dialog">
+        <button type="button" className="care-modal-backdrop" aria-label={t('actions.close')} onClick={() => setPendingCatalogue(null)} />
+        <section className="care-modal species-picker-modal" role="dialog" aria-modal="true" aria-labelledby="catalogue-spacing-title">
+          <header>
+            <span className="care-modal-mark"><Sprout size={18} /></span>
+            <span>
+              <small>{t('species.unknownEnvelope')}</small>
+              <h2 id="catalogue-spacing-title">{t('species.catalogueSpacingTitle')}</h2>
+            </span>
+            <button type="button" aria-label={t('actions.close')} onClick={() => setPendingCatalogue(null)}><X size={16} /></button>
+          </header>
+          <div className="care-modal-body">
+            <p className="species-picker-hint">{t('species.catalogueSpacingBody')}</p>
+            <p><strong>{pendingCatalogue.scientificName}</strong></p>
+            <label className="species-mix-number catalogue-spacing-field">
+              <span>{t('species.catalogueSpacingLabel')}</span>
+              <span><input aria-label={t('species.catalogueSpacingLabel')} type="number" min="1.6" max="30" step="0.1" value={pendingSpacingM} onChange={(event) => setPendingSpacingM(Number(event.target.value))} /><b>m</b></span>
+            </label>
+            <button type="button" className="button primary wide" onClick={() => confirmCatalogue(pendingCatalogue, pendingSpacingM)}>{t('species.catalogueSpacingConfirm')}</button>
           </div>
         </section>
       </div>}
@@ -6619,7 +6828,7 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
     if (selectedTree) setLayoutTab('edit');
   }, [selectedTree?.id]);
   if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
-  const selectedTreeSpecies = selectedTree ? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) : null;
+  const selectedTreeSpecies = selectedTree ? selectedSpecies.find((item) => item.id === selectedTree.speciesId) ?? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) ?? null : null;
   const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
   const selectedTreeCode = selectedTree ? plantPositionCode(selectedTree) : null;
   const selectedDailySolarHour = dailySolarExposure?.hours.find((hour) => hour.localSolarHour === solarHour) ?? null;
@@ -6775,7 +6984,7 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       <div className="edit-toolbar"><button onClick={onUndo} disabled={!canUndo}><Undo2 size={15} /> {t('actions.undo')}</button><button onClick={onRedo} disabled={!canRedo}><Redo2 size={15} /> {t('actions.redo')}</button><button className={drawMode === 'add-tree' ? 'active' : ''} onClick={() => onMode(drawMode === 'add-tree' ? 'idle' : 'add-tree')}><Plus size={15} /> {t('actions.add')}</button><button onClick={onRegenerate} disabled={!selectedVariant.trees.some((tree) => tree.locked)}><Sparkles size={15} /> {t('actions.regenerateUnlocked')}</button></div>
       <label className="select-label"><span>{t('layout.manualSpecies')}</span><select value={treeSpeciesId} onChange={(event) => onTreeSpecies(event.target.value)}>{selectedSpecies.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)} — {localizedEnum(species.stratum, t)}</option>)}</select></label>
       <label className="select-label"><span>{t('layout.selectTree')}</span><select aria-label={t('layout.selectTree')} value={selectedTree?.id ?? ''} onChange={(event) => onTreeSelect(event.target.value || null)}><option value="">{t('layout.selectTreePlaceholder')}</option>{[...selectedVariant.trees].sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id)).map((tree) => {
-        const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+        const species = selectedSpecies.find((item) => item.id === tree.speciesId) ?? DESIGN_SPECIES_BY_ID.get(tree.speciesId);
         return <option key={tree.id} value={tree.id}>{plantPositionCode(tree)} · {species ? speciesDisplayName(species, t) : tree.speciesId}</option>;
       })}</select></label>
       <div className={`bulk-editor ${selectedTreeIds.length ? 'active' : ''}`} data-testid="bulk-editor">
@@ -7219,9 +7428,10 @@ function SoilPropertyGroup({ title, body, properties }: { title: string; body: s
   </section>;
 }
 function StatusPill({ status }: { status: string }) { const { t } = useI18n(); return <span className={`status-pill ${status}`}>{translatedStatus(status, t)}</span>; }
-function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate, onPrepare, onSchedule }: {
+function CarePanel({ profile, variant, userSpecies = [], irrigation, plantingDate, onPlantingDate, onPrepare, onSchedule }: {
   profile: SiteProfile | null;
   variant: LayoutVariant | null;
+  userSpecies?: DesignSpecies[];
   irrigation: IrrigationEstimate | null;
   plantingDate: string | null;
   onPlantingDate: (value: string | null) => void;
@@ -7251,7 +7461,8 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
     setSelectedDay(plantingDate);
   }, [plantingDate]);
   if (!profile || !variant) return <div className="panel-body" data-testid="care-panel"><EmptyState icon={BookOpen} title={t('care.emptyTitle')} body={t('care.emptyBody')} action={t('care.openDesign')} onAction={onPrepare} /></div>;
-  const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant), irrigation, profile.generatedAt, plantingDate);
+  const library = speciesLibrary(userSpecies);
+  const plan = buildOperationsPlan(profile, variant, speciesForVariant(variant, userSpecies), irrigation, profile.generatedAt, plantingDate);
   const years = groupOperationsByYear(plan.calendar, plan.species);
   const grid = plantingDate ? buildOperationsMonthGrid(visibleYear, visibleMonth, plan.calendar) : [];
   const tasks = plantingDate ? monthTasks(plan.calendar, plan.species, visibleYear, visibleMonth) : [];
@@ -7290,7 +7501,7 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
       </div>
       {tab === 'handbook' && <div className="care-handbook" data-testid="care-handbook">
         {plan.species.map((entry) => {
-          const item = DESIGN_SPECIES_BY_ID.get(entry.speciesId);
+          const item = library.get(entry.speciesId);
           const plantingMonths = entry.resolvedPlantingWindow ? t('care.window', { start: monthLabel(entry.resolvedPlantingWindow.startMonth), end: monthLabel(entry.resolvedPlantingWindow.endMonth) }) : t('care.unknown');
           const pruningMonths = entry.resolvedPruningWindow ? t('care.window', { start: monthLabel(entry.resolvedPruningWindow.startMonth), end: monthLabel(entry.resolvedPruningWindow.endMonth) }) : t('care.unknown');
           return <article key={entry.speciesId} className="care-species-card">
@@ -7352,7 +7563,7 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
               : visibleTasks.map((task) => (
                 <button key={task.event} type="button" className="care-month-task" data-event={task.event} data-testid={`care-task-${task.event}`} onClick={() => setOpenEvent(task.event)}>
                   <strong>{t(`care.event.${task.event}`)}</strong>
-                  <span>{task.species.map((entry) => DESIGN_SPECIES_BY_ID.get(entry.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(entry.speciesId)!, t) : entry.scientificName).join(', ')}</span>
+                  <span>{task.species.map((entry) => library.get(entry.speciesId) ? speciesDisplayName(library.get(entry.speciesId)!, t) : entry.scientificName).join(', ')}</span>
                 </button>
               ))}
           </div>
@@ -7372,8 +7583,8 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
     </div>
     {speciesDetail && <CareDetailModal
       eyebrow={speciesDetail.scientificName}
-      title={DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId) ? speciesDisplayName(DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)!, t) : speciesDetail.scientificName}
-      mark={<span className="tree-dot care-modal-dot" style={{ background: DESIGN_SPECIES_BY_ID.get(speciesDetail.speciesId)?.color ?? '#789' }} />}
+      title={library.get(speciesDetail.speciesId) ? speciesDisplayName(library.get(speciesDetail.speciesId)!, t) : speciesDetail.scientificName}
+      mark={<span className="tree-dot care-modal-dot" style={{ background: library.get(speciesDetail.speciesId)?.color ?? '#789' }} />}
       onClose={() => setSpeciesDetailId(null)}
     >
       <p>{t(`care.match.${speciesDetail.profile.matchLevel}`)}{speciesDetail.profile.climateGroup ? ` · ${t(`care.group.${speciesDetail.profile.climateGroup}`)}` : ''}</p>
@@ -7407,7 +7618,7 @@ function CarePanel({ profile, variant, irrigation, plantingDate, onPlantingDate,
         <small>{t('care.taskPlants')}</small>
         {(openTask?.species ?? []).map((row) => {
           const entry = plan.species.find((item) => item.speciesId === row.speciesId);
-          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          const item = library.get(row.speciesId);
           const steps = entry ? stepsForCalendarEvent(entry, openEvent) : [];
           return <article key={row.speciesId}>
             <span className="tree-dot" style={{ background: item?.color ?? '#789' }} />
@@ -7485,8 +7696,9 @@ function CareDetailModal({ eyebrow, title, mark, onClose, children }: {
   </div>;
 }
 
-function HarvestPanel({ variant, economics, irrigation, year, onYear, overrides, onOverrides, includeMoney, onPrepare }: {
+function HarvestPanel({ variant, userSpecies = [], economics, irrigation, year, onYear, overrides, onOverrides, includeMoney, onPrepare }: {
   variant: LayoutVariant | null;
+  userSpecies?: DesignSpecies[];
   economics: EconomicConfiguration;
   irrigation: IrrigationEstimate | null;
   year: number;
@@ -7499,7 +7711,8 @@ function HarvestPanel({ variant, economics, irrigation, year, onYear, overrides,
   const { t } = useI18n();
   const [tab, setTab] = useState<'summary' | 'species' | 'sources'>('summary');
   if (!variant) return <div className="panel-body" data-testid="harvest-panel"><EmptyState icon={Grape} title={t('harvest.emptyTitle')} body={t('harvest.emptyBody')} action={t('harvest.openDesign')} onAction={onPrepare} /></div>;
-  const plan = buildHarvestPlan(variant, speciesForVariant(variant), economics, irrigation, year, overrides);
+  const library = speciesLibrary(userSpecies);
+  const plan = buildHarvestPlan(variant, speciesForVariant(variant, userSpecies), economics, irrigation, year, overrides);
   const width = 640;
   const height = 168;
   const padding = { top: 12, right: 12, bottom: 24, left: 36 };
@@ -7549,7 +7762,7 @@ function HarvestPanel({ variant, economics, irrigation, year, onYear, overrides,
       {tab === 'species' && <div className="harvest-species" data-testid="harvest-species">
         {primaries.length === 0 && <p>{t('harvest.noYieldingSpecies')}</p>}
         {primaries.map((row) => {
-          const item = DESIGN_SPECIES_BY_ID.get(row.speciesId);
+          const item = library.get(row.speciesId);
           const derived = derivatives.filter((entry) => entry.speciesId === row.speciesId);
           return <article key={`${row.speciesId}-${row.productId}`} className="care-species-card">
             <header>
@@ -7766,8 +7979,9 @@ function cloneSite(site: SiteBoundary): SiteBoundary {
     existingTrees: site.existingTrees.map((tree) => ({ ...tree, coordinate: { ...tree.coordinate } })),
   };
 }
-function speciesForVariant(variant: LayoutVariant): DesignSpecies[] {
-  return [...new Map(variant.trees.map((tree) => [tree.speciesId, DESIGN_SPECIES_BY_ID.get(tree.speciesId)])).values()]
+function speciesForVariant(variant: LayoutVariant, extras: DesignSpecies[] = []): DesignSpecies[] {
+  const library = speciesLibrary(extras);
+  return [...new Map(variant.trees.map((tree) => [tree.speciesId, library.get(tree.speciesId)])).values()]
     .filter((item): item is DesignSpecies => Boolean(item));
 }
 
@@ -7866,6 +8080,10 @@ function localizedDomainMessage(value: string, t: (key: string, values?: Record<
   if (match) return t('layout.warning.perimeter', { value: match[1] });
   match = value.match(/^(\d+) existing woody (?:patch is|patches are) protected from new planting\.$/);
   if (match) return t('layout.warning.woody', { count: match[1] });
+  match = value.match(/^Existing woody cover is ([\d.]+)%; plants follow the drawn rows and skip protected crowns\.$/);
+  if (match) return t('layout.warning.woodyRows', { value: match[1] });
+  match = value.match(/^This parcel has too much existing woody vegetation for a blank-slate layout\. Draw planting rows in the open ground, or refine the boundary\.$/);
+  if (match) return t('errors.woodyBlankSlate');
   match = value.match(/^(\d+) field-observed existing (?:tree is|trees are) protected from new planting\.$/);
   if (match) return t('layout.warning.trees', { count: match[1] });
   match = value.match(/^(\d+) management (?:path is|paths are) reserved before placement\.$/);
@@ -7933,6 +8151,13 @@ function designSystemDescriptionKey(system: DesignConfiguration['system']) {
     'boundary-buffer': 'design.description.boundary',
   }[system];
 }
+function matchDesignSpecies(item: CatalogueSpecies): DesignSpecies | null {
+  const byId = DESIGN_SPECIES_BY_ID.get(item.id);
+  if (byId) return byId;
+  const name = item.scientificName.trim().toLocaleLowerCase('en');
+  return DESIGN_SPECIES.find((species) => species.scientificName.trim().toLocaleLowerCase('en') === name) ?? null;
+}
+
 function speciesDisplayName(species: DesignSpecies, t: (key: string, values?: Record<string, string | number>) => string) {
   const key = `species.name.${species.id}`;
   const translated = t(key);
@@ -7940,6 +8165,13 @@ function speciesDisplayName(species: DesignSpecies, t: (key: string, values?: Re
 }
 function localizedSuitabilityExplanation(component: SuitabilityComponent, species: DesignSpecies, profile: SiteProfile | null, t: (key: string, values?: Record<string, string | number>) => string) {
   if (component.key === 'safety') return localizedDomainMessage(component.explanation, t);
+  if (species.envelopeConfidence === 'unknown') {
+    if (component.key === 'climate') return t('species.explanation.climateUnknown');
+    if (component.key === 'soil') return t('species.explanation.soilEnvelopeUnknown');
+    if (component.key === 'water') return t('species.explanation.waterUnknown');
+    if (component.key === 'maintenance') return t('species.explanation.maintenanceUnknown');
+    if (component.key === 'evidence') return t('species.explanation.evidenceUnknown');
+  }
   if (!profile) return localizedDomainMessage(component.explanation, t);
   if (component.key === 'climate') return t('species.explanation.climate', { observedMin: profile.climate.absoluteMinTemperatureC, observedMax: profile.climate.absoluteMaxTemperatureC, supportedMin: species.minTemperatureC, supportedMax: species.maxTemperatureC });
   if (component.key === 'soil') return profile.soil.ph === null

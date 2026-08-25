@@ -502,6 +502,7 @@ export type DesignSpecies = {
   plantingLaborHours: number;
   color: string;
   sources: SpeciesSource[];
+  envelopeConfidence?: 'sourced' | 'unknown';
 };
 
 export type CatalogueSpecies = {
@@ -1277,6 +1278,7 @@ export type ProjectState = {
   site: SiteBoundary;
   siteProfile: SiteProfile | null;
   selectedSpeciesIds: string[];
+  userSpecies?: DesignSpecies[];
   designConfiguration: DesignConfiguration;
   irrigationConfiguration: IrrigationConfiguration;
   economicConfiguration: EconomicConfiguration;
@@ -1425,6 +1427,7 @@ export type AssistantProjectContext = {
   site: SiteBoundary | null;
   siteProfile: SiteProfile | null;
   selectedSpeciesIds: string[];
+  userSpecies?: DesignSpecies[];
   designConfiguration: DesignConfiguration;
   irrigationConfiguration: IrrigationConfiguration;
   economicConfiguration: EconomicConfiguration;

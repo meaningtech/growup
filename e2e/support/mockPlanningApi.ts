@@ -5,8 +5,11 @@ import { calculateEstablishmentCost } from '../../src/lib/costs';
 import { calculateIrrigation } from '../../src/lib/irrigation';
 import { generateLayoutVariants } from '../../src/lib/layout';
 import { rankSpecies, recommendedPalette } from '../../src/lib/recommendations';
+import { normalizeUserSpecies } from '../../src/lib/userCatalogue';
 import type {
+  CatalogueSpecies,
   DesignConfiguration,
+  DesignSpecies,
   EconomicConfiguration,
   IrrigationConfiguration,
   LayoutVariant,
@@ -56,13 +59,62 @@ export async function mockPlanningApi(page: Page, site: SiteBoundary) {
     contentType: 'application/json',
     json: profile,
   }));
-  await page.route('**/api/recommendations', async (route) => {
-    const body = route.request().postDataJSON() as { objectives: DesignConfiguration['objectives']; system?: DesignConfiguration['system'] };
-    const recommendations = rankSpecies(DESIGN_SPECIES, profile, body.objectives);
+  await page.route('**/api/catalog/search**', async (route) => {
+    const url = new URL(route.request().url());
+    const query = (url.searchParams.get('q') ?? '').trim().toLocaleLowerCase('en');
+    const cacao: CatalogueSpecies = {
+      id: 'switchboard-theobroma-cacao',
+      scientificName: 'Theobroma cacao',
+      sourceCount: 4,
+      treeLike: true,
+      wfoId: null,
+      wcvpId: null,
+      globUnt: false,
+      designReady: false,
+      stratum: 'medium',
+      succession: 'secondary',
+      roles: ['food'],
+      evergreen: false,
+      nitrogenFixer: false,
+      droughtTolerance: null,
+      evidenceCount: 1,
+    };
+    const curated = DESIGN_SPECIES.filter((species) => (
+      species.scientificName.toLocaleLowerCase('en').includes(query)
+      || species.commonName.toLocaleLowerCase('en').includes(query)
+    )).map((species): CatalogueSpecies => ({
+      id: species.id,
+      scientificName: species.scientificName,
+      sourceCount: species.sources.length,
+      treeLike: species.treeLike,
+      wfoId: null,
+      wcvpId: null,
+      globUnt: false,
+      designReady: true,
+      stratum: species.stratum,
+      succession: species.succession,
+      roles: species.roles,
+      evergreen: species.evergreen,
+      nitrogenFixer: species.nitrogenFixer,
+      droughtTolerance: species.droughtTolerance,
+      evidenceCount: species.sources.length,
+    }));
+    const extra = 'theobroma cacao'.includes(query) || query.includes('cacao') ? [cacao] : [];
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      json: { recommendations, palette: recommendedPalette(recommendations, body.system ?? 'syntropic').map((item) => item.species) },
+      json: { results: [...extra, ...curated].slice(0, 18) },
+    });
+  });
+  await page.route('**/api/recommendations', async (route) => {
+    const body = route.request().postDataJSON() as { objectives: DesignConfiguration['objectives']; system?: DesignConfiguration['system']; userSpecies?: DesignSpecies[] };
+    const extras = normalizeUserSpecies(body.userSpecies);
+    const catalogue = rankSpecies(DESIGN_SPECIES, profile, body.objectives);
+    const extraRecommendations = extras.length ? rankSpecies(extras, profile, body.objectives) : [];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: { recommendations: [...extraRecommendations, ...catalogue], palette: recommendedPalette(catalogue, body.system ?? 'syntropic').map((item) => item.species) },
     });
   });
   await page.route('**/api/economics/profile', async (route) => route.fulfill({
@@ -74,9 +126,13 @@ export async function mockPlanningApi(page: Page, site: SiteBoundary) {
     const input = route.request().postDataJSON() as {
       site: SiteBoundary;
       selectedSpeciesIds: string[];
+      userSpecies?: DesignSpecies[];
       designConfiguration: DesignConfiguration;
     };
-    const species = DESIGN_SPECIES.filter((item) => input.selectedSpeciesIds.includes(item.id));
+    const extras = normalizeUserSpecies(input.userSpecies);
+    const species = input.selectedSpeciesIds
+      .map((id) => DESIGN_SPECIES.find((item) => item.id === id) ?? extras.find((item) => item.id === id))
+      .filter((item): item is DesignSpecies => Boolean(item));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -88,11 +144,15 @@ export async function mockPlanningApi(page: Page, site: SiteBoundary) {
       variant: LayoutVariant;
       site: SiteBoundary;
       selectedSpeciesIds: string[];
+      userSpecies?: DesignSpecies[];
       designYear: number;
       irrigationConfiguration: IrrigationConfiguration;
       economicConfiguration: EconomicConfiguration;
     };
-    const species = DESIGN_SPECIES.filter((item) => input.selectedSpeciesIds.includes(item.id));
+    const extras = normalizeUserSpecies(input.userSpecies);
+    const species = input.selectedSpeciesIds
+      .map((id) => DESIGN_SPECIES.find((item) => item.id === id) ?? extras.find((item) => item.id === id))
+      .filter((item): item is DesignSpecies => Boolean(item));
     const irrigation = calculateIrrigation(
       input.variant,
       species,

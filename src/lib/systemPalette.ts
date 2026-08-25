@@ -20,7 +20,7 @@ export function normalizeDesignSystem(value: unknown): DesignSystemId {
 export function eligibleSpeciesForSystem(species: DesignSpecies[], system: DesignSystemId): DesignSpecies[] {
   const permitted = species.filter((item) => item.invasiveStatus !== 'blocked');
   if (system === 'monoculture' || system === 'mixed-orchard') {
-    const productive = permitted.filter((item) => item.treeLike && item.productiveFromYear !== null);
+    const productive = permitted.filter((item) => item.treeLike && (item.productiveFromYear !== null || item.envelopeConfidence === 'unknown'));
     if (system === 'monoculture') return productive.length ? productive : permitted.filter((item) => item.treeLike);
     return productive.length >= 2 ? productive : permitted.filter((item) => item.treeLike);
   }
@@ -40,6 +40,7 @@ export function recommendedPalette(
   const limit = size ?? PALETTE_SIZE[system];
   const climateReady = recommendations.filter((item) => (
     (item.status === 'recommended' || item.status === 'conditional')
+    && item.species.envelopeConfidence !== 'unknown'
     && !item.components.some((component) => (
       (component.key === 'climate' || component.key === 'water')
       && component.status === 'poor'

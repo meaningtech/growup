@@ -1,4 +1,5 @@
-import type { DesignSpecies, SpeciesMixEntry, SuccessionPhase } from '../types';
+import type { DesignObjectives, DesignSpecies, SpeciesMixEntry, SuccessionPhase } from '../types';
+import { speciesObjectiveScore } from './objectives';
 
 const SUCCESSION_PHASES: SuccessionPhase[] = ['placenta', 'secondary', 'climax'];
 
@@ -41,6 +42,21 @@ export function resolvedSpeciesMix(
     targetPercent: rounded[index],
     successionOverride: item.successionOverride,
     spacingOverrideM: item.spacingOverrideM,
+  }]));
+}
+
+export function speciesMixFromObjectives(
+  species: DesignSpecies[],
+  objectives: DesignObjectives,
+): Record<string, SpeciesMixEntry> {
+  if (!species.length) return {};
+  const scores = species.map((item) => Math.max(0.5, speciesObjectiveScore(item, objectives)));
+  const total = scores.reduce((sum, score) => sum + score, 0);
+  const percents = roundPercentages(scores.map((score) => score / total * 100));
+  return Object.fromEntries(species.map((item, index) => [item.id, {
+    targetPercent: percents[index],
+    successionOverride: null,
+    spacingOverrideM: null,
   }]));
 }
 

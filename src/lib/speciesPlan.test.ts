@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DESIGN_SPECIES_BY_ID } from '../data/designSpecies';
-import { normalizeSpeciesMix, rebalanceSpeciesMix, resolvedSpeciesMix, synchronizeSpeciesMix } from './speciesPlan';
+import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
+import { normalizeSpeciesMix, rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './speciesPlan';
 
 const species = ['olea-europaea', 'prunus-dulcis', 'spartium-junceum'].map((id) => DESIGN_SPECIES_BY_ID.get(id)!);
 
@@ -39,6 +40,15 @@ describe('species planning configuration', () => {
       'prunus-dulcis': { targetPercent: 0, successionOverride: null, spacingOverrideM: null },
     });
     expect(total(resolvedSpeciesMix(species, normalized))).toBe(100);
+  });
+
+  it('raises productive shares when production is the declared priority', () => {
+    const production = speciesMixFromObjectives(species, { production: 100, biodiversity: 10, nativeHabitat: 0, waterResilience: 20, lowMaintenance: 10 });
+    const habitat = speciesMixFromObjectives(species, { production: 10, biodiversity: 100, nativeHabitat: 100, waterResilience: 20, lowMaintenance: 10 });
+    expect(total(production)).toBe(100);
+    expect(total(habitat)).toBe(100);
+    expect(production['olea-europaea'].targetPercent).toBeGreaterThan(habitat['olea-europaea'].targetPercent);
+    expect(production).not.toEqual(speciesMixFromObjectives(species, DEFAULT_DESIGN_OBJECTIVES));
   });
 
   it('keeps a manual planting distance when rebalancing shares', () => {

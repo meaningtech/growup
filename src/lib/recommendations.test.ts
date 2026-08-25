@@ -3,6 +3,7 @@ import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from '../data/designSpecies';
 import type { DesignObjectives, SiteProfile } from '../types';
 import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
 import { rankSpecies, recommendedPalette, suitabilityWeights } from './recommendations';
+import { planningSpeciesFromCatalogue } from './userCatalogue';
 
 function fieldProfile(ph: number | null = 7.2): SiteProfile {
   return {
@@ -85,4 +86,34 @@ describe('objective-driven species suitability', () => {
     expect(recommendation.status).toBe('poor');
     expect(recommendedPalette([recommendation])).toEqual([]);
   });
+
+  it('never recommends a catalogue taxon without a sourced climate envelope', () => {
+    const cacao = planningSpeciesFromCatalogue({
+      id: 'switchboard-theobroma-cacao',
+      scientificName: 'Theobroma cacao',
+      sourceCount: 4,
+      treeLike: true,
+      wfoId: null,
+      wcvpId: null,
+      globUnt: false,
+      designReady: false,
+      stratum: 'medium',
+      succession: 'secondary',
+      roles: ['food'],
+      evergreen: false,
+      nitrogenFixer: false,
+      droughtTolerance: null,
+      evidenceCount: 1,
+    }, 5);
+    const [recommendation] = rankSpecies([cacao], fieldProfile(), DEFAULT_DESIGN_OBJECTIVES);
+
+    expect(recommendation.status).not.toBe('recommended');
+    expect(recommendation.components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'climate', status: 'unknown' }),
+      expect.objectContaining({ key: 'water', status: 'unknown' }),
+    ]));
+    expect(recommendation.mitigations.join(' ')).toMatch(/unknown/i);
+    expect(recommendedPalette([recommendation], 'mixed-orchard')).toEqual([]);
+  });
 });
+

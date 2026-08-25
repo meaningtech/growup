@@ -9,6 +9,7 @@ import { normalizeOperationsPlan } from '../src/lib/operations.js';
 import { normalizeIrrigationConfiguration } from '../src/lib/irrigation.js';
 import { normalizeDesignConfiguration } from '../src/lib/layout.js';
 import { normalizeSiteBoundary } from '../src/lib/siteGeometry.js';
+import { normalizeUserSpecies } from '../src/lib/userCatalogue.js';
 import { buildRevisionArtifacts, projectContentHash } from './revisions.js';
 
 const EXISTING_MONGO_HOST = 'b062e978-4d93-4760-9d00-907071c84bbe.europe-west1.firestore.goog';
@@ -391,6 +392,7 @@ function normalizeProject(project: ProjectState): ProjectState {
   return {
     ...project,
     site: normalizeSiteBoundary(project.site),
+    userSpecies: normalizeUserSpecies(project.userSpecies),
     designConfiguration,
     variants: project.variants.map((variant) => {
       const design = normalizeDesignConfiguration(variant.design);

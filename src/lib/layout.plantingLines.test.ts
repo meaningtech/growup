@@ -42,4 +42,23 @@ describe('user-drawn planting rows', () => {
     });
     expect(Math.max(...distances)).toBeLessThan(8);
   });
+
+  it('still generates along drawn rows when existing woody cover would reject a blank-slate fill', () => {
+    const profile = openFieldProfile(TEMPERATE_OPEN_FIELD_FIXTURE);
+    profile.satellite.existingVegetation.suitability = 'reject';
+    profile.satellite.existingVegetation.detectedCoverPercent = 51.5;
+    const line = [
+      { lat: 36.92112, lng: 14.75318 },
+      { lat: 36.92095, lng: 14.75338 },
+    ];
+    expect(() => generateLayoutVariants(TEMPERATE_OPEN_FIELD_FIXTURE, profile, species, DEFAULT_DESIGN_CONFIGURATION)).toThrow(/blank-slate/);
+    const variants = generateLayoutVariants(
+      TEMPERATE_OPEN_FIELD_FIXTURE,
+      profile,
+      species,
+      { ...DEFAULT_DESIGN_CONFIGURATION, plantingLines: [{ id: 'row-1', points: line }] },
+    );
+    expect(variants[0].trees.length).toBeGreaterThan(0);
+    expect(variants[0].warnings.some((warning) => warning.includes('drawn rows'))).toBe(true);
+  });
 });

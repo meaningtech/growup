@@ -63,6 +63,11 @@ test('rebuilds the palette when the planting system changes and searches the mon
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
   await page.getByTestId('species-tab-palette').click();
+  await page.getByLabel('Search scientific catalogue').fill('grape');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('.catalogue-results')).toContainText('Grapevine');
+  await expect(page.locator('.catalogue-results')).toContainText('Vitis vinifera');
+  await expect(page.locator('.catalogue-results').getByRole('button', { name: /Add|Remove/ }).first()).toBeVisible();
   const chips = page.getByTestId('species-selected-strip').locator('.species-chip');
   await expect(chips).toHaveCount(9);
   const syntropic = await chips.allTextContents();
@@ -71,7 +76,8 @@ test('rebuilds the palette when the planting system changes and searches the mon
   await page.getByTestId('species-tab-system').click();
   await page.getByRole('radio', { name: 'Mixed orchard' }).click();
   expect((await orchardRequest).postDataJSON()).toEqual(expect.objectContaining({ system: 'mixed-orchard' }));
-  await expect(page.getByTestId('species-tab-palette')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('species-tab-system')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('species-tab-palette').click();
   await expect(chips).toHaveCount(5);
   expect(await chips.allTextContents()).not.toEqual(syntropic);
 
@@ -90,4 +96,60 @@ test('rebuilds the palette when the planting system changes and searches the mon
   await page.getByTestId('species-tab-palette').click();
   await expect(chips).toHaveCount(1);
   await expect(chips.first()).toContainText('Olive');
+});
+
+test('adds a Switchboard taxon that is not in the 51-species design catalogue', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
+  await page.getByLabel('Search scientific catalogue').fill('cacao');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('.catalogue-results')).toContainText('Theobroma cacao');
+  await expect(page.locator('.catalogue-results')).toContainText('Climate, growth and price unknown');
+  await page.locator('.catalogue-results').getByRole('button', { name: 'Add' }).first().click();
+  const spacing = page.getByTestId('catalogue-spacing-dialog');
+  await expect(spacing).toBeVisible();
+  await spacing.getByRole('spinbutton', { name: 'Planting distance' }).fill('5');
+  const generate = page.waitForRequest((request) => request.url().endsWith('/api/layout/generate') && request.method() === 'POST');
+  await spacing.getByRole('button', { name: 'Add to palette' }).click();
+  await expect(page.getByTestId('species-selected-strip')).toContainText('Theobroma cacao');
+  await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  const payload = (await generate).postDataJSON() as { selectedSpeciesIds: string[]; userSpecies: Array<{ id: string; spacingM: number; envelopeConfidence: string }> };
+  expect(payload.selectedSpeciesIds).toContain('switchboard-theobroma-cacao');
+  expect(payload.userSpecies).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'switchboard-theobroma-cacao', spacingM: 5, envelopeConfidence: 'unknown' }),
+  ]));
+});
+
+test('rebuilds plants and shares when design objectives change', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-mix').click();
+  const mix = page.getByTestId('species-mix-config');
+  const beforeShares = await mix.getByRole('spinbutton', { name: /Target share/ }).evaluateAll((inputs) => (
+    inputs.map((input) => Number((input as HTMLInputElement).value))
+  ));
+  const beforeNames = await mix.locator('.species-mix-rows article strong').allTextContents();
+
+  const objectiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/recommendations') && request.method() === 'POST');
+  await page.getByTestId('species-tab-system').click();
+  await page.getByRole('slider', { name: 'Food & production' }).fill('100');
+  await page.getByRole('slider', { name: 'Biodiversity' }).fill('5');
+  expect((await objectiveRequest).postDataJSON()).toEqual(expect.objectContaining({
+    objectives: expect.objectContaining({ production: 100 }),
+  }));
+  await expect(page.getByTestId('species-tab-system')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('species-tab-mix').click();
+  const afterShares = await mix.getByRole('spinbutton', { name: /Target share/ }).evaluateAll((inputs) => (
+    inputs.map((input) => Number((input as HTMLInputElement).value))
+  ));
+  const afterNames = await mix.locator('.species-mix-rows article strong').allTextContents();
+  expect(afterShares.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 5);
+  expect(afterShares.join() === beforeShares.join() && afterNames.join() === beforeNames.join()).toBe(false);
 });

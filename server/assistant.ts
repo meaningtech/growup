@@ -464,8 +464,10 @@ function availableSpecies(context: AssistantProjectContext) {
 }
 
 function selectedSpeciesForReview(context: AssistantProjectContext) {
-  const ranking = context.siteProfile ? new Map(rankSpecies(DESIGN_SPECIES, context.siteProfile, context.designConfiguration.objectives).map((item) => [item.species.id, item])) : new Map();
-  return context.selectedSpeciesIds.map((id) => DESIGN_SPECIES.find((species) => species.id === id)).filter((species): species is DesignSpecies => Boolean(species)).map((species) => {
+  const extras = (context.userSpecies ?? []).filter((item) => !DESIGN_SPECIES.some((species) => species.id === item.id));
+  const library = [...DESIGN_SPECIES, ...extras];
+  const ranking = context.siteProfile ? new Map(rankSpecies(library, context.siteProfile, context.designConfiguration.objectives).map((item) => [item.species.id, item])) : new Map();
+  return context.selectedSpeciesIds.map((id) => library.find((species) => species.id === id)).filter((species): species is DesignSpecies => Boolean(species)).map((species) => {
     const recommendation = ranking.get(species.id);
     return {
       id: species.id,

@@ -16,6 +16,8 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.locator('.drawing-status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Draw a new field' })).toHaveCount(0);
+  await expect(page.getByTestId('species-inspector')).toHaveCount(0);
+  await page.locator('.species-match-toggle').first().click();
   await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
   await expect(page.getByTestId('species-inspector')).toContainText('Linked evidence');
   await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
@@ -25,8 +27,7 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await expect(page.getByTestId('species-inspector')).not.toContainText('Checks before use');
   await expect(page.getByTestId('species-inspector')).not.toContainText('Evidence readiness');
   await page.getByTestId('species-inspector').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);
-  await expect(page.getByTestId('species-inspector')).toContainText('Evidence readiness');
+  await expect(page.getByTestId('species-inspector')).toHaveCount(0);
 
   const rerankResponse = page.waitForResponse((response) => response.url().endsWith('/api/recommendations') && response.request().method() === 'POST');
   await page.getByRole('slider', { name: 'Native habitat' }).fill('100');

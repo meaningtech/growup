@@ -1,7 +1,7 @@
-import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies.js';
 import { growthState } from '../src/lib/growth.js';
 import { plantPositionCode } from '../src/lib/plantIdentity.js';
-import type { Coordinate, LayoutVariant, ProjectState } from '../src/types.js';
+import { resolvePlanningSpecies } from '../src/lib/userCatalogue.js';
+import type { Coordinate, DesignSpecies, LayoutVariant, ProjectState } from '../src/types.js';
 
 type GeoJsonGeometry =
   | { type: 'Point'; coordinates: number[] }
@@ -57,7 +57,7 @@ export function exportProjectGeoJson(project: ProjectState) {
     protectedAreaM2: patch.protectedAreaM2,
   })));
 
-  if (variant) appendVariantFeatures(features, variant, year);
+  if (variant) appendVariantFeatures(features, variant, year, project.userSpecies);
   if (project.irrigation) {
     features.push(pointFeature(project.irrigation.network.source.coordinate, {
       kind: 'irrigation_source',
@@ -133,7 +133,7 @@ export function exportProjectCsv(project: ProjectState): string {
   const rows = [...variant.trees]
     .sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id))
     .map((tree) => {
-      const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+      const species = resolvePlanningSpecies(tree.speciesId, project.userSpecies);
       const growth = species ? growthState(species, tree, year) : null;
       const cost = speciesCosts.get(tree.speciesId);
       const unitPurchaseCost = cost?.unitPlantCost ?? (species ? species.referencePurchasePrice * economics.plantReferenceMultiplier * economics.exchangeRateToLocal : 0);
@@ -195,11 +195,11 @@ export function exportProjectCsv(project: ProjectState): string {
   return `${headers.join(',')}\n${rows.join('\n')}\n`;
 }
 
-function appendVariantFeatures(features: GeoJsonFeature[], variant: LayoutVariant, year: number) {
+function appendVariantFeatures(features: GeoJsonFeature[], variant: LayoutVariant, year: number, extras: DesignSpecies[] = []) {
   [...variant.trees]
     .sort((a, b) => a.rowIndex - b.rowIndex || a.positionIndex - b.positionIndex || a.id.localeCompare(b.id))
     .forEach((tree) => {
-      const species = DESIGN_SPECIES_BY_ID.get(tree.speciesId);
+      const species = resolvePlanningSpecies(tree.speciesId, extras);
       const growth = species ? growthState(species, tree, year) : null;
       features.push(pointFeature(tree.coordinate, {
         kind: 'tree',

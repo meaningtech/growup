@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { writeArrayBuffer } from 'geotiff';
 import { TEMPERATE_OPEN_FIELD_FIXTURE, EQUATORIAL_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites.js';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
+import { planningSpeciesFromCatalogue } from '../src/lib/userCatalogue.js';
 import { defaultEconomicConfiguration } from '../src/data/economicProfiles.js';
 import { createLocalProjection, pointInPolygon, polygonCentroid } from '../src/lib/geometry.js';
 import { defaultProjectCollaboration } from '../src/lib/collaboration.js';
@@ -1037,12 +1038,18 @@ describe('Growup API integration', () => {
     });
     const login = await request(app).post('/api/auth/google').send({ credential: 'signed-google-token' }).expect(200);
     const sessionCookie = String(login.headers['set-cookie'][0]).split(';')[0];
-    const invalidPalette = await request(app).post('/api/layout/generate').send({
+    const emptyPalette = await request(app).post('/api/layout/generate').send({
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds: [],
+    }).expect(400);
+    expect(emptyPalette.body.error.status).toBe('INVALID_PALETTE');
+    const unknownSpecies = await request(app).post('/api/layout/generate').send({
       site: TEMPERATE_OPEN_FIELD_FIXTURE,
       siteProfile: siteProfile(),
       selectedSpeciesIds: ['unknown'],
     }).expect(400);
-    expect(invalidPalette.body.error.status).toBe('INVALID_PALETTE');
+    expect(unknownSpecies.body.error.status).toBe('UNKNOWN_SPECIES');
 
     const mismatch = await request(app).put('/api/projects/wrong-id').set('Cookie', sessionCookie).send({ id: 'right-id', site: TEMPERATE_OPEN_FIELD_FIXTURE }).expect(400);
     expect(mismatch.body.error.status).toBe('PROJECT_ID_MISMATCH');
@@ -1056,6 +1063,59 @@ describe('Growup API integration', () => {
       selectedSpeciesIds: DESIGN_SPECIES.slice(0, 3).map((species) => species.id),
     }).expect(422);
     expect(woodyReject.body.error.status).toBe('SITE_WOODY_COVER_TOO_HIGH');
+    const woodyRows = await request(app).post('/api/layout/generate').send({
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: rejectedProfile,
+      selectedSpeciesIds: DESIGN_SPECIES.slice(0, 3).map((species) => species.id),
+      designConfiguration: {
+        plantingLines: [{
+          id: 'row-1',
+          points: [
+            { lat: 36.92112, lng: 14.75318 },
+            { lat: 36.92095, lng: 14.75338 },
+          ],
+        }],
+      },
+    }).expect(200);
+    expect(woodyRows.body.variants[0].trees.length).toBeGreaterThan(0);
+  });
+
+  it('plants a user-selected Switchboard taxon without a sourced climate envelope', async () => {
+    const app = createApp({ skipDatabaseMigration: true });
+    const cacao = planningSpeciesFromCatalogue({
+      id: 'switchboard-theobroma-cacao',
+      scientificName: 'Theobroma cacao',
+      sourceCount: 4,
+      treeLike: true,
+      wfoId: null,
+      wcvpId: null,
+      globUnt: false,
+      designReady: false,
+      stratum: 'medium',
+      succession: 'secondary',
+      roles: ['food'],
+      evergreen: false,
+      nitrogenFixer: false,
+      droughtTolerance: null,
+      evidenceCount: 1,
+    }, 5);
+    const generated = await request(app).post('/api/layout/generate').send({
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds: [cacao.id],
+      userSpecies: [cacao],
+      designConfiguration: { system: 'monoculture', monocultureSpeciesId: cacao.id },
+    }).expect(200);
+    expect(generated.body.variants[0].trees.length).toBeGreaterThan(0);
+    expect(generated.body.variants[0].trees.every((tree: { speciesId: string }) => tree.speciesId === cacao.id)).toBe(true);
+    const ranked = await request(app).post('/api/recommendations').send({
+      siteProfile: siteProfile(),
+      system: 'monoculture',
+      userSpecies: [cacao],
+    }).expect(200);
+    const cacaoRank = ranked.body.recommendations.find((item: { species: { id: string } }) => item.species.id === cacao.id);
+    expect(cacaoRank.status).not.toBe('recommended');
+    expect(ranked.body.palette.every((item: { id: string }) => item.id !== cacao.id)).toBe(true);
   });
 
   it('keeps the AI-provider credential server-side and validates proposed project actions', async () => {

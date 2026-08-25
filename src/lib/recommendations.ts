@@ -47,45 +47,46 @@ function recommendSpecies(species: DesignSpecies, site: SiteProfile, objectives:
   }
 
   const weights = suitabilityWeights(objectives);
-  const climateScore = intervalScore(
+  const sourcedEnvelope = species.envelopeConfidence !== 'unknown';
+  const climateScore = sourcedEnvelope ? intervalScore(
     [site.climate.absoluteMinTemperatureC, site.climate.absoluteMaxTemperatureC],
     [species.minTemperatureC, species.maxTemperatureC],
-  );
-  const rainScore = rangeScore(site.climate.annualPrecipitationMm, species.annualRainMinMm, species.annualRainMaxMm);
-  const soilScore = site.soil.ph === null ? null : rangeScore(site.soil.ph, species.phMin, species.phMax);
+  ) : null;
+  const rainScore = sourcedEnvelope ? rangeScore(site.climate.annualPrecipitationMm, species.annualRainMinMm, species.annualRainMaxMm) : null;
+  const soilScore = !sourcedEnvelope || site.soil.ph === null ? null : rangeScore(site.soil.ph, species.phMin, species.phMax);
   const aridityDemand = site.climate.annualEt0Mm > 0 ? site.climate.annualPrecipitationMm / site.climate.annualEt0Mm : null;
   const droughtScore = species.droughtTolerance * 20;
-  const rawWaterScore = Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
-  const rainBelowEnvelope = site.climate.annualPrecipitationMm < species.annualRainMinMm;
-  const severeRainDeficit = site.climate.annualPrecipitationMm < species.annualRainMinMm * 0.75;
-  const waterScore = rainBelowEnvelope ? Math.min(rawWaterScore, severeRainDeficit ? 33 : 51) : rawWaterScore;
+  const rawWaterScore = rainScore === null ? null : Math.round(rainScore * 0.48 + droughtScore * 0.42 + (aridityDemand === null ? 50 : aridityDemand < 0.55 ? droughtScore : 85) * 0.1);
+  const rainBelowEnvelope = sourcedEnvelope && site.climate.annualPrecipitationMm < species.annualRainMinMm;
+  const severeRainDeficit = sourcedEnvelope && site.climate.annualPrecipitationMm < species.annualRainMinMm * 0.75;
+  const waterScore = rawWaterScore === null ? null : rainBelowEnvelope ? Math.min(rawWaterScore, severeRainDeficit ? 33 : 51) : rawWaterScore;
   const nativeness = siteNativeness(species, site);
   const productive = species.productiveFromYear !== null || species.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role));
   const productionScore = productive ? Math.max(68, 100 - Math.max(0, (species.productiveFromYear ?? 5) - 1) * 5) : species.roles.includes('timber') ? 62 : 30;
   const biodiversityScore = Math.min(100, 42 + species.roles.length * 8 + (species.nitrogenFixer ? 15 : 0) + (nativeness.verified && nativeness.score === 100 ? 10 : 0));
   const purposeScore = Math.round((productionScore * objectives.production + biodiversityScore * objectives.biodiversity) / Math.max(1, objectives.production + objectives.biodiversity));
   const syntropicScore = Math.min(100, 48 + (species.nitrogenFixer ? 24 : 0) + (species.roles.includes('biomass') ? 16 : 0) + (species.succession === 'placenta' ? 10 : 0));
-  const maintenanceScore = Math.round(clamp(86 + droughtScore * 0.16 - species.growthRate * 65 - (species.roles.includes('biomass') ? 8 : 0), 15, 100));
-  const evidenceScore = species.sources.length >= 3 ? 92 : species.sources.length === 2 ? 76 : 58;
+  const maintenanceScore = sourcedEnvelope ? Math.round(clamp(86 + droughtScore * 0.16 - species.growthRate * 65 - (species.roles.includes('biomass') ? 8 : 0), 15, 100)) : null;
+  const evidenceScore = sourcedEnvelope ? (species.sources.length >= 3 ? 92 : species.sources.length === 2 ? 76 : 58) : 44;
 
   const components: SuitabilityComponent[] = [
-    component('climate', 'Climate fit', climateScore, weights.climate, `Observed ${site.climate.absoluteMinTemperatureC}–${site.climate.absoluteMaxTemperatureC} °C; supported envelope ${species.minTemperatureC}–${species.maxTemperatureC} °C.`),
-    component('soil', 'Soil reaction', soilScore, weights.soil, site.soil.ph === null ? 'Soil pH is unavailable; a representative field test is required before recommendation.' : `SoilGrids pH ${site.soil.ph}; supported range ${species.phMin}–${species.phMax}.`),
-    component('water', 'Water resilience', waterScore, weights.water, `${site.climate.annualPrecipitationMm} mm annual rain versus supported ${species.annualRainMinMm}–${species.annualRainMaxMm} mm; ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.`),
+    component('climate', 'Climate fit', climateScore, weights.climate, sourcedEnvelope ? `Observed ${site.climate.absoluteMinTemperatureC}–${site.climate.absoluteMaxTemperatureC} °C; supported envelope ${species.minTemperatureC}–${species.maxTemperatureC} °C.` : 'Climate envelope is unknown for this catalogue taxon; field verification is required.'),
+    component('soil', 'Soil reaction', soilScore, weights.soil, !sourcedEnvelope ? 'Soil envelope is unknown for this catalogue taxon; a field test is required.' : site.soil.ph === null ? 'Soil pH is unavailable; a representative field test is required before recommendation.' : `SoilGrids pH ${site.soil.ph}; supported range ${species.phMin}–${species.phMax}.`),
+    component('water', 'Water resilience', waterScore, weights.water, sourcedEnvelope ? `${site.climate.annualPrecipitationMm} mm annual rain versus supported ${species.annualRainMinMm}–${species.annualRainMaxMm} mm; ${site.climate.annualEt0Mm} mm ET₀; drought tolerance ${species.droughtTolerance}/5.` : 'Water envelope is unknown for this catalogue taxon; do not infer drought tolerance.'),
     component('native', 'Native habitat value', nativeness.score, weights.native, nativeness.explanation),
     component('purpose', 'Objective value', purposeScore, weights.purpose, `${productive ? 'Productive' : 'Support'} species; functions: ${species.roles.join(', ')}.`),
     component('syntropic', 'Successional function', syntropicScore, weights.syntropic, `${species.stratum} stratum, ${species.succession} succession${species.nitrogenFixer ? ', nitrogen fixer' : ''}.`),
-    component('maintenance', 'Maintenance demand', maintenanceScore, weights.maintenance, `Growth coefficient ${species.growthRate.toFixed(2)}, drought tolerance ${species.droughtTolerance}/5${species.roles.includes('biomass') ? ', planned biomass management' : ''}.`),
-    component('evidence', 'Evidence readiness', evidenceScore, weights.evidence, `${species.sources.length} linked evidence groups cover taxonomy, ecology and establishment economics.`),
+    component('maintenance', 'Maintenance demand', maintenanceScore, weights.maintenance, sourcedEnvelope ? `Growth coefficient ${species.growthRate.toFixed(2)}, drought tolerance ${species.droughtTolerance}/5${species.roles.includes('biomass') ? ', planned biomass management' : ''}.` : 'Growth and maintenance envelopes are unknown for this catalogue taxon.'),
+    component('evidence', 'Evidence readiness', evidenceScore, weights.evidence, sourcedEnvelope ? `${species.sources.length} linked evidence groups cover taxonomy, ecology and establishment economics.` : 'Switchboard provides taxonomy only; climate, growth and economics remain unknown.'),
   ];
   const weighted = components.reduce((sum, item) => sum + item.score * item.weight, 0);
   const monitorPenalty = species.invasiveStatus === 'monitor' ? 14 : 0;
   const score = Math.max(0, Math.round(weighted - monitorPenalty));
   const criticalUnknown = components.some((item) => item.key === 'soil' && item.status === 'unknown');
-  const criticalMismatch = climateScore < 38 || waterScore < 34;
+  const criticalMismatch = sourcedEnvelope && ((climateScore ?? 0) < 38 || (waterScore ?? 0) < 34);
   let status: SpeciesRecommendation['status'] = score >= 75 ? 'recommended' : score >= 58 ? 'conditional' : 'poor';
   if (criticalMismatch) status = 'poor';
-  if ((criticalUnknown || species.invasiveStatus === 'monitor') && status === 'recommended') status = 'conditional';
+  if ((criticalUnknown || species.invasiveStatus === 'monitor' || !sourcedEnvelope) && status === 'recommended') status = 'conditional';
   const reasons = components.filter((item) => item.status === 'good').sort((a, b) => b.weight - a.weight).map((item) => item.explanation).slice(0, 3);
   const mitigations = components.filter((item) => item.status === 'poor' || item.status === 'unknown').map((item) => item.explanation);
   if (species.invasiveStatus === 'monitor') {
