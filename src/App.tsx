@@ -397,8 +397,10 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
   const [reviewNote, setReviewNote] = useState('');
   const [commentCoordinate, setCommentCoordinate] = useState<Coordinate | null>(null);
   const [section, setSection] = useState<SharedSection>('site');
+  const compactShared = useMediaQuery('(max-width: 980px)');
+  const [mobilePane, setMobilePane] = useState<'map' | 'data'>('map');
   const [layers, setLayers] = useState(DEFAULT_SHARED_LAYERS);
-  const [layersOpen, setLayersOpen] = useState(true);
+  const [layersOpen, setLayersOpen] = useState(() => !window.matchMedia('(max-width: 980px)').matches);
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
   const [solarMonth, setSolarMonth] = useState(6);
   const [solarHour, setSolarHour] = useState(12);
@@ -452,11 +454,18 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     let cancelled = false;
     loadGoogleMaps(config.googleMapsApiKey).then((maps) => {
       if (cancelled || !mapElementRef.current) return;
+      const compactMap = window.matchMedia('(max-width: 980px)').matches;
       const map = new maps.Map(mapElementRef.current, {
         mapTypeId: 'satellite',
         mapTypeControl: true,
+        ...(compactMap && maps.MapTypeControlStyle ? {
+          mapTypeControlOptions: {
+            style: maps.MapTypeControlStyle.DROPDOWN_MENU,
+            position: maps.ControlPosition.TOP_RIGHT,
+          },
+        } : {}),
         streetViewControl: false,
-        fullscreenControl: true,
+        fullscreenControl: !compactMap,
         scaleControl: true,
         zoomControl: true,
         clickableIcons: false,
@@ -476,6 +485,25 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
       mapRef.current = null;
     };
   }, [config, owner, project?.id]);
+
+  useEffect(() => {
+    if (!compactShared || mobilePane !== 'map' || !project) return;
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        maps.event?.trigger?.(map, 'resize');
+        map.fitBounds(sitePreviewBounds(project.site.polygon), 56);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [compactShared, mobilePane, project?.id]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -788,8 +816,19 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     }
   }
 
+  useEffect(() => {
+    if (!compactShared) return;
+    const content = sharedAsideRef.current?.querySelector('.shared-section-content');
+    if (content instanceof HTMLElement) content.scrollTop = 0;
+    sharedAsideRef.current?.scrollTo({ top: 0 });
+  }, [compactShared, section]);
+
   function selectSharedSection(nextSection: SharedSection) {
     setSection(nextSection);
+    if (compactShared) {
+      setMobilePane('data');
+      return;
+    }
     if (!window.matchMedia('(max-width: 980px)').matches) return;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -831,13 +870,17 @@ function SharedProjectPage({ token, initialProject, initialConfig, owner = false
     { id: 'solar', icon: CloudSun },
     { id: 'comments', icon: ClipboardCheck },
   ];
-  return <main className="shared-project" data-testid="shared-project">
+  return <main className={`shared-project${compactShared ? ` phone-pane-${mobilePane}` : ''}`} data-testid="shared-project">
     <header>
       {onBack && <button className="shared-back" type="button" aria-label={t('projects.back')} onClick={onBack}><ChevronLeft size={18} /></button>}
       <span className="brand-mark"><Sprout size={21} /></span>
       <span><small>{owner ? t('shared.ownerEyebrow') : t('shared.eyebrow')}</small><strong>{project.name}</strong></span>
       <i>r{project.revision ?? 0}</i>
     </header>
+    {compactShared && <div className="shared-pane-switch" role="tablist" aria-label={t('shared.paneSwitch')} data-testid="shared-pane-switch">
+      <button type="button" role="tab" aria-selected={mobilePane === 'map'} className={mobilePane === 'map' ? 'active' : ''} onClick={() => setMobilePane('map')}><MapIcon size={15} />{t('shared.pane.map')}</button>
+      <button type="button" role="tab" aria-selected={mobilePane === 'data'} className={mobilePane === 'data' ? 'active' : ''} onClick={() => setMobilePane('data')}><Database size={15} />{t('shared.pane.data')}</button>
+    </div>}
     <section className="shared-map">
       <div ref={mapElementRef} data-testid="shared-map" />
       <button className="shared-layer-trigger" aria-expanded={layersOpen} aria-label={t('shared.layers')} onClick={() => setLayersOpen((open) => !open)}><Layers3 size={17} /><span>{t('shared.layers')}</span></button>

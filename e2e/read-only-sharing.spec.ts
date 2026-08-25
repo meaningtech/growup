@@ -171,7 +171,35 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(page.locator('.shared-map-hint')).toHaveCount(0);
   await expect(page.getByTestId('shared-map')).toHaveAttribute('data-fake-google-map', 'true');
   expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+  const paneSwitch = page.getByTestId('shared-pane-switch');
+  await expect(paneSwitch).toBeVisible();
+  await expect(paneSwitch.getByRole('tab', { name: 'Map' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('shared-layer-panel')).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Shared project sections' })).toHaveCount(0);
+  const mapOnlyBox = await page.locator('.shared-map').boundingBox();
+  expect(mapOnlyBox).not.toBeNull();
+  expect(mapOnlyBox!.height).toBeGreaterThan(500);
+  await page.screenshot({ path: testInfo.outputPath('shared-map-pane-mobile.png'), fullPage: false });
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  const [mapBox, layerTriggerBox, layerPanelBox] = await Promise.all([
+    page.locator('.shared-map').boundingBox(),
+    page.getByRole('button', { name: 'Map layers' }).boundingBox(),
+    page.getByTestId('shared-layer-panel').boundingBox(),
+  ]);
+  expect(mapBox).not.toBeNull();
+  expect(layerTriggerBox).not.toBeNull();
+  expect(layerPanelBox).not.toBeNull();
+  expect(mapBox!.height).toBeGreaterThan(280);
+  expect(layerPanelBox!.height).toBeLessThan(mapBox!.height * 0.62);
+  expect(layerPanelBox!.y).toBeGreaterThanOrEqual(layerTriggerBox!.y + layerTriggerBox!.height + 4);
+  expect(layerPanelBox!.y + layerPanelBox!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height - 4);
+  await page.screenshot({ path: testInfo.outputPath('shared-map-layers-mobile.png'), fullPage: false });
+  await paneSwitch.getByRole('tab', { name: 'Data' }).click();
+  await expect(paneSwitch.getByRole('tab', { name: 'Data' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.shared-map')).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('shared-data-pane-mobile.png'), fullPage: false });
   const sectionNavigation = page.getByRole('navigation', { name: 'Shared project sections' });
+  await expect(sectionNavigation).toBeVisible();
   const sectionButtons = sectionNavigation.getByRole('button');
   await expect(sectionButtons).toHaveCount(8);
   await expect(page.getByRole('button', { name: 'Costs', exact: true })).toHaveCount(0);
@@ -188,17 +216,6 @@ test('creates a read-only project link from the library and exposes no mutation 
     return columns;
   }, []));
   expect(sectionButtonColumns).toHaveLength(3);
-  const [mapBox, layerTriggerBox, layerPanelBox] = await Promise.all([
-    page.locator('.shared-map').boundingBox(),
-    page.getByRole('button', { name: 'Map layers' }).boundingBox(),
-    page.getByTestId('shared-layer-panel').boundingBox(),
-  ]);
-  expect(mapBox).not.toBeNull();
-  expect(layerTriggerBox).not.toBeNull();
-  expect(layerPanelBox).not.toBeNull();
-  expect(layerTriggerBox!.y - mapBox!.y).toBeGreaterThanOrEqual(56);
-  expect(layerPanelBox!.y).toBeGreaterThanOrEqual(layerTriggerBox!.y + layerTriggerBox!.height + 6);
-  expect(layerPanelBox!.y + layerPanelBox!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height - 8);
   await sectionNavigation.screenshot({ path: testInfo.outputPath('shared-navigation-mobile.png') });
   await page.getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page.getByText('What is known about this site')).toBeVisible();
@@ -211,6 +228,8 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(page.getByText('Retrieved', { exact: true }).first()).toBeVisible();
   await expect(page.getByTestId('shared-climate-chart')).toBeVisible();
   await expect(page.getByTestId('wind-rose')).toBeVisible();
+  await paneSwitch.getByRole('tab', { name: 'Map' }).click();
+  await expect(page.getByTestId('shared-layer-panel')).toBeVisible();
   const bedrockLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Depth to bedrock' });
   const groundwaterLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Groundwater context' });
   await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Latest Sentinel image' })).toBeVisible();
@@ -226,6 +245,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   await groundwaterLayer.click();
   await expect(bedrockLayer).toHaveAttribute('aria-pressed', 'true');
   await expect(groundwaterLayer).toHaveAttribute('aria-pressed', 'true');
+  await paneSwitch.getByRole('tab', { name: 'Data' }).click();
   await page.getByRole('button', { name: 'Summer', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Summer', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('wind-climatology').screenshot({ path: testInfo.outputPath('shared-wind-mobile.png') });
@@ -250,7 +270,9 @@ test('creates a read-only project link from the library and exposes no mutation 
   const solarMapToggle = page.getByRole('checkbox', { name: 'Show shadows on the map' });
   await expect(solarMapToggle).not.toBeChecked();
   await solarMapToggle.check();
+  await paneSwitch.getByRole('tab', { name: 'Map' }).click();
   await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Sun and shade' })).toHaveAttribute('aria-pressed', 'true');
+  await paneSwitch.getByRole('tab', { name: 'Data' }).click();
   await page.getByTestId('shared-solar-analysis').screenshot({ path: testInfo.outputPath('shared-solar-mobile.png') });
   await page.getByRole('button', { name: 'Water', exact: true }).click();
   await expect(page.getByText('Irrigation demand and network')).toBeVisible();
@@ -259,6 +281,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(page.getByText('Firebreak and operational analysis')).toBeVisible();
   await expect(page.getByText('The plan is coherent, with one local fire review still required.')).toHaveCount(0);
   await expect(page.getByText('project.variants[0].firebreak.localReviewRequired')).toHaveCount(0);
+  await paneSwitch.getByRole('tab', { name: 'Map' }).click();
   const machineryLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Machinery' });
   await expect(machineryLayer).toHaveAttribute('aria-pressed', 'false');
   await machineryLayer.click();
