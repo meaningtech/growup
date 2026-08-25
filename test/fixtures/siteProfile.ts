@@ -244,6 +244,31 @@ export function openFieldProfile(site: SiteBoundary, countryCode = 'XZ'): SitePr
       limitations: ['Regional aquifer context does not measure water-table depth.'],
     },
     satellite,
+    nasaLandscape: {
+      status: 'available',
+      observedAt: '2026-08-24',
+      samples: [
+        {
+          id: 'precipitation',
+          layer: 'IMERG_Precipitation_Rate',
+          status: 'available',
+          label: '0.1–0.2',
+          value: 0.15,
+          unit: 'mm/hr',
+          evidence: source('NASA GPM IMERG via GIBS'),
+        },
+        {
+          id: 'flood',
+          layer: 'VIIRS_Combined_Flood_3-Day',
+          status: 'nodata',
+          label: 'No data',
+          value: null,
+          unit: null,
+          evidence: source('NASA VIIRS flood via GIBS'),
+        },
+      ],
+      limitations: ['NASA GIBS browse values are regional colormap screening. They do not replace Open-Meteo climate normals, SoilGrids chemistry or field-clipped Sentinel observations.'],
+    },
     warnings: [],
   };
 }

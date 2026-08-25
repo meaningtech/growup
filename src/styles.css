@@ -394,6 +394,13 @@ button { color: inherit; }
 .index-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
 .index-row span { padding: 6px; }
 .radar-line { display: flex; gap: 7px; align-items: center; margin: 10px 0; color: #4e6f68; font-size: var(--text-label); }
+.nasa-screening-card { display: grid; gap: 8px; margin-top: 12px; padding: 14px; background: linear-gradient(145deg,#10253d,#1d4f7a); color: #e8f4ff; border-radius: 13px 13px 13px 5px; }
+.nasa-screening-card .vegetation-metrics { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.nasa-screening-card .card-heading { color: #e8f4ff; }
+.nasa-screening-card p, .nasa-screening-card small { color: rgba(232,244,255,.72); }
+.nasa-screening-card .vegetation-metrics span { background: rgba(255,255,255,.08); }
+.nasa-screening-card .vegetation-metrics small { color: rgba(232,244,255,.55); }
+.nasa-screening-card .vegetation-metrics strong, .nasa-screening-card .vegetation-metrics i { color: #9fd4ff; font-style: normal; }
 .text-button { display: flex; align-items: center; gap: 4px; padding: 0; color: #667a2b; background: transparent; border: 0; font-size: var(--text-small); font-weight: 700; cursor: pointer; }
 a.text-button { text-decoration: none; }
 .warning-list { margin: 13px 0; padding: 8px 12px; color: #7d5d2d; background: #f6ead1; border-radius: 9px; font-size: var(--text-label); line-height: 1.45; }

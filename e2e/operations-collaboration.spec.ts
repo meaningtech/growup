@@ -235,6 +235,21 @@ test('adds NASA GIBS science overlays without replacing Sentinel or EFFIS', asyn
   await expect(panel.getByRole('link', { name: 'Open this field in NASA Worldview' })).toBeVisible();
 });
 
+test('shows NASA GIBS screening beside Sentinel without changing Open-Meteo rainfall', async ({ page }) => {
+  const project = projectFixture();
+  await mockBase(page);
+  await loadRecoveryDraft(page, project);
+  await page.getByTestId('step-profile').click();
+  await expect(page.getByText('720 mm')).toBeVisible();
+  await page.getByRole('tab', { name: /Satellite/ }).click();
+  const screening = page.getByTestId('nasa-landscape-screening');
+  await expect(screening).toBeVisible();
+  await expect(screening).toContainText('NASA GIBS complementary screening');
+  await expect(screening).toContainText('IMERG rain rate');
+  await expect(screening).toContainText('do not replace annual rainfall');
+  await expect(page.getByText('Sentinel field water', { exact: true })).toBeVisible();
+});
+
 test('creates the authenticated share link and renders the public review surface', async ({ page }) => {
   let project = projectFixture();
   await mockBase(page, true);

@@ -343,7 +343,27 @@ export type SiteProfile = {
   };
   groundwater?: GroundwaterProfile;
   satellite: SatelliteProfile;
+  nasaLandscape?: NasaLandscapeContext;
   warnings: string[];
+};
+
+export type NasaLandscapeSampleId = 'precipitation' | 'aerosol' | 'surface-water' | 'flood' | 'disturbance';
+
+export type NasaLandscapeSample = {
+  id: NasaLandscapeSampleId;
+  layer: string;
+  status: 'available' | 'nodata' | 'unavailable';
+  label: string | null;
+  value: number | null;
+  unit: string | null;
+  evidence: Evidence;
+};
+
+export type NasaLandscapeContext = {
+  status: 'available' | 'partial' | 'unavailable';
+  observedAt: string;
+  samples: NasaLandscapeSample[];
+  limitations: string[];
 };
 
 export type SiteProfileOverrideField =

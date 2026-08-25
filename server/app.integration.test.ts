@@ -348,6 +348,11 @@ describe('Growup API integration', () => {
       coverageEnd: '2025-12-31',
       retrievedAt: '2026-07-25T12:00:00.000Z',
     }));
+    expect(response.body.climate.annualPrecipitationMm).toBeGreaterThan(0);
+    expect(response.body.nasaLandscape).toEqual(expect.objectContaining({
+      status: 'unavailable',
+    }));
+    expect(response.body.nasaLandscape.limitations.join(' ')).toMatch(/do not replace Open-Meteo/);
     expect(response.body.terrain.evidence).toEqual(expect.objectContaining({
       computedAt: '2026-07-25T12:00:00.000Z',
     }));

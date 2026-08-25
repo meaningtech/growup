@@ -4,6 +4,7 @@ import { siteContainsCoordinate, sitePolygons } from '../src/lib/siteGeometry.js
 import { defaultFieldConditions } from '../src/lib/siteOverrides.js';
 import type { Coordinate, DepthToBedrockSample, Evidence, GroundwaterProfile, LocationSearchResult, SatelliteProfile, SiteBoundary, SiteProfile, SoilDepthLayer, SoilPropertyEstimate, SoilPropertyEstimateKey, SolarClimateBin, SolarResourceProfile, WindClimatologyPeriod, WindDirectionSector } from '../src/types.js';
 import { fetchSatelliteProfile, type SentinelProviderConfig, unavailableSatelliteProfile } from './sentinel.js';
+import { fetchNasaLandscapeContext, NASA_LANDSCAPE_LIMITATION, unavailableNasaLandscapeContext } from './gibsEvidence.js';
 
 const CLIMATE_START = '2021-01-01';
 const CLIMATE_END = '2025-12-31';
@@ -69,7 +70,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
   const fetchImpl = config.fetchImpl ?? fetch;
   const centroid = weightedSiteCentroid(polygons);
   const sampleCoordinates = terrainSamplingPoints(site, centroid);
-  const [location, elevations, climate, solar, soil, depthToBedrock, groundwater, landCover, satellite] = await Promise.all([
+  const [location, elevations, climate, solar, soil, depthToBedrock, groundwater, landCover, satellite, nasaLandscape] = await Promise.all([
     safeProvider(() => reverseGeocodeLocation(centroid, { ...config, fetchImpl }), 'Reverse geocoding is unavailable.'),
     safeProvider(() => fetchElevations(sampleCoordinates, fetchImpl, config), 'Terrain elevation is unavailable.'),
     safeProvider(() => fetchClimate(centroid, fetchImpl, config), 'Historical climate is unavailable.'),
@@ -79,8 +80,9 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
     safeProvider(() => fetchGroundwaterContext(centroid, fetchImpl, config), 'Global groundwater context is unavailable.'),
     safeProvider(() => fetchLandCover(centroid, fetchImpl, config), 'OSM land-cover context is unavailable.'),
     safeProvider(() => fetchSatelliteProfile(site, config), 'Sentinel-1/2 field-water context is unavailable.'),
+    safeProvider(() => fetchNasaLandscapeContext(centroid, fetchImpl, { now: config.now }), 'NASA GIBS landscape screening is unavailable.'),
   ]);
-  const warnings = [location.warning, elevations.warning, climate.warning, solar.warning, soil.warning, depthToBedrock.warning, groundwater.warning, landCover.warning, satellite.warning].filter(
+  const warnings = [location.warning, elevations.warning, climate.warning, solar.warning, soil.warning, depthToBedrock.warning, groundwater.warning, landCover.warning, satellite.warning, nasaLandscape.warning].filter(
     (warning): warning is string => Boolean(warning),
   );
 
@@ -90,6 +92,18 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
   const generatedAt = (config.now?.() ?? new Date()).toISOString();
   const terrain = summarizeTerrain(elevations.value.samples, elevations.value.evidence, generatedAt);
   const satelliteProfile = satellite.value ?? unavailableSatelliteProfile(config.now?.() ?? new Date());
+  const nasaLandscapeContext = nasaLandscape.value ?? unavailableNasaLandscapeContext(config.now?.() ?? new Date());
+  if (!satelliteProfile.limitations.includes(NASA_LANDSCAPE_LIMITATION)) {
+    satelliteProfile.limitations = [...satelliteProfile.limitations, NASA_LANDSCAPE_LIMITATION];
+  }
+  const wetScreening = nasaLandscapeContext.samples.some((sample) => (
+    (sample.id === 'flood' || sample.id === 'surface-water')
+    && sample.status === 'available'
+    && /water|flood|inundat/i.test(`${sample.label ?? ''}`)
+  ));
+  if (wetScreening) {
+    satelliteProfile.limitations = [...satelliteProfile.limitations, 'NASA GIBS flood or surface-water screening detected water near the parcel; confirm standing water in the field before relying on the next irrigation pulse.'];
+  }
   if (satelliteProfile.existingVegetation.suitability === 'reject') {
     warnings.push(satelliteProfile.existingVegetation.conclusion);
   } else if (satelliteProfile.existingVegetation.status !== 'available') {
@@ -125,6 +139,7 @@ export async function buildSiteProfile(site: SiteBoundary, config: SiteProviderC
     },
     groundwater: groundwater.value ?? unavailableGroundwater(config, generatedAt),
     satellite: satelliteProfile,
+    nasaLandscape: nasaLandscapeContext,
     warnings,
   };
 

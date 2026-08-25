@@ -911,6 +911,10 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
       </SharedDataCard>
       <SharedClimateChart climate={profile.climate} />
       <WindClimatologyCard solar={profile.solar} />
+      {profile.nasaLandscape && <SharedDataCard title={t('profile.nasaScreening')} icon={Satellite}>
+        <p>{t('profile.nasaScreeningBody')}</p>
+        {profile.nasaLandscape.samples.map((sample) => <SharedRow key={sample.id} label={t(`profile.nasaSample.${sample.id}`)} value={sample.label ?? t('profile.nasaNoData')} />)}
+      </SharedDataCard>}
       <SharedEvidenceList profile={profile} />
     </> : <p className="inline-empty">{t('shared.noEvidence')}</p>}
   </SharedSectionFrame>;
@@ -1094,6 +1098,7 @@ function siteProfileEvidence(profile: SiteProfile, additionalEvidence: Evidence[
     profile.landCover.evidence,
     ...profile.satellite.evidence,
     ...profile.satellite.existingVegetation.evidence,
+    ...(profile.nasaLandscape?.samples ?? []).map((sample) => sample.evidence),
     ...additionalEvidence,
   ].filter((item): item is Evidence => Boolean(item));
   const merged = new Map<string, Evidence>();
@@ -5611,7 +5616,7 @@ function ProfilePanel({ profile, hasSite, worldviewUrl, onAnalyze, onOpenSite, o
     ['wind', t('evidence.tab.wind'), profile.solar.windClimatology?.[0]?.sectors.length ?? 1],
     ['soil', t('evidence.tab.soil'), soilProperties.length || 1],
     ['subsurface', t('evidence.tab.subsurface'), verticalProfile.length + Number(Boolean(depthToBedrock)) + Number(Boolean(groundwater))],
-    ['satellite', t('evidence.tab.satellite'), profile.satellite.evidence.length + profile.satellite.existingVegetation.evidence.length],
+    ['satellite', t('evidence.tab.satellite'), profile.satellite.evidence.length + profile.satellite.existingVegetation.evidence.length + (profile.nasaLandscape?.samples.length ?? 0)],
     ['sources', t('evidence.tab.sources'), evidenceItems.length],
   ] as const;
   return (
@@ -5735,6 +5740,12 @@ function ProfilePanel({ profile, hasSite, worldviewUrl, onAnalyze, onOpenSite, o
           {worldviewUrl && <a className="text-button" href={worldviewUrl} target="_blank" rel="noopener noreferrer">{t('map.openWorldview')} <ExternalLink size={14} /></a>}
         </div>
       </div>
+      {profile.nasaLandscape && <div className="nasa-screening-card" data-testid="nasa-landscape-screening">
+        <div className="card-heading"><div><Satellite size={17} /><span><small>{t('profile.nasaScreening')}</small><strong>{translatedStatus(profile.nasaLandscape.status, t)}</strong></span></div><StatusPill status={profile.nasaLandscape.status} /></div>
+        <p>{t('profile.nasaScreeningBody')}</p>
+        <div className="vegetation-metrics">{profile.nasaLandscape.samples.map((sample) => <span key={sample.id}><small>{t(`profile.nasaSample.${sample.id}`)}</small><strong>{sample.label ?? t('profile.nasaNoData')}</strong>{sample.value !== null ? <i>{formatNumber(sample.value, sample.value >= 10 ? 1 : 3)}{sample.unit ? ` ${sample.unit}` : ''}</i> : null}</span>)}</div>
+        <small>{profile.nasaLandscape.observedAt} · {t('profile.nasaScreeningLimit')}</small>
+      </div>}
       </div>}
       {activeEvidenceTab === 'sources' && <div className="evidence-tabpanel" id="evidence-panel-sources" role="tabpanel" aria-labelledby="evidence-tab-sources">
       <div className="source-traceability" data-testid="evidence-traceability">
@@ -7471,6 +7482,11 @@ function evidenceUsageKey(item: Evidence) {
   if (source.includes('woody vegetation')) return 'evidence.usage.woodyLayer';
   if (source.includes('sentinel-2')) return 'evidence.usage.opticalWater';
   if (source.includes('sentinel-1')) return 'evidence.usage.radarWater';
+  if (source.includes('imerg') || source.includes('gpm')) return 'evidence.usage.nasaPrecip';
+  if (source.includes('omps')) return 'evidence.usage.nasaAerosol';
+  if (source.includes('dswx') || source.includes('surface water')) return 'evidence.usage.nasaWater';
+  if (source.includes('flood')) return 'evidence.usage.nasaFlood';
+  if (source.includes('dist-alert') || source.includes('disturbance')) return 'evidence.usage.nasaDisturbance';
   if (source.includes('planetary computer')) return 'evidence.usage.processing';
   if (/natural england|natural resources conservation service|civil protection department/.test(source)) return 'evidence.usage.firebreak';
   if (/agroforestry|almond orchard|alley model|windbreak|management practices/.test(source)) return 'evidence.usage.maintenance';
