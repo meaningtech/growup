@@ -33,7 +33,7 @@ export function speciesObjectiveScore(species: DesignSpecies, objectives: Design
   const productive = species.productiveFromYear !== null || species.roles.some((role) => /fruit|nut|food|crop|culinary|aromatic|resin|fodder/i.test(role));
   const production = productive ? 100 : species.roles.includes('timber') ? 70 : 35;
   const biodiversity = Math.min(100, 45 + species.roles.length * 7 + (species.nitrogenFixer ? 15 : 0));
-  const nativeHabitat = 50;
+  const nativeHabitat = species.roles.some((role) => /habitat|wildlife|native/.test(role)) ? 90 : 35;
   const waterResilience = species.droughtTolerance * 20;
   const lowMaintenance = Math.max(20, Math.min(100, 75 + species.droughtTolerance * 6 - species.growthRate * 55));
   const totalWeight = Object.values(normalized).reduce((sum, value) => sum + value, 0) || 1;

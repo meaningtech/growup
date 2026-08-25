@@ -1,4 +1,5 @@
-import type { DesignSpecies, DesignSystemId, SpeciesRecommendation } from '../types';
+import type { DesignObjectives, DesignSpecies, DesignSystemId, SpeciesRecommendation } from '../types';
+import { speciesObjectiveScore } from './objectives';
 
 const SYSTEMS: DesignSystemId[] = ['syntropic', 'alley-cropping', 'mixed-orchard', 'monoculture', 'windbreak', 'boundary-buffer'];
 const STRATA = ['emergent', 'high', 'medium', 'low', 'ground', 'climber'] as const;
@@ -20,9 +21,10 @@ export function normalizeDesignSystem(value: unknown): DesignSystemId {
 export function eligibleSpeciesForSystem(species: DesignSpecies[], system: DesignSystemId): DesignSpecies[] {
   const permitted = species.filter((item) => item.invasiveStatus !== 'blocked');
   if (system === 'monoculture' || system === 'mixed-orchard') {
-    const productive = permitted.filter((item) => item.treeLike && (item.productiveFromYear !== null || item.envelopeConfidence === 'unknown'));
-    if (system === 'monoculture') return productive.length ? productive : permitted.filter((item) => item.treeLike);
-    return productive.length >= 2 ? productive : permitted.filter((item) => item.treeLike);
+    const productive = permitted.filter((item) => item.productiveFromYear !== null || item.envelopeConfidence === 'unknown');
+    const woody = productive.filter((item) => item.treeLike);
+    if (system === 'monoculture') return woody.length ? woody : (productive.length ? productive : permitted);
+    return woody.length >= 2 ? woody : (productive.length >= 2 ? productive : permitted.filter((item) => item.treeLike));
   }
   if (system === 'windbreak') {
     const wind = permitted.filter((item) => item.treeLike && item.roles.some((role) => WIND_ROLES.includes(role)));
@@ -36,6 +38,7 @@ export function recommendedPalette(
   recommendations: SpeciesRecommendation[],
   system: DesignSystemId = 'syntropic',
   size?: number,
+  objectives?: DesignObjectives,
 ): SpeciesRecommendation[] {
   const limit = size ?? PALETTE_SIZE[system];
   const climateReady = recommendations.filter((item) => (
@@ -47,13 +50,22 @@ export function recommendedPalette(
     ))
   ));
   const eligibleIds = new Set(eligibleSpeciesForSystem(climateReady.map((item) => item.species), system).map((item) => item.id));
-  const eligible = climateReady.filter((item) => eligibleIds.has(item.species.id));
+  const eligible = orderForObjectives(climateReady.filter((item) => eligibleIds.has(item.species.id)), objectives);
   if (system === 'syntropic') return fillSyntropicPalette(eligible, limit);
   if (system === 'boundary-buffer') {
     const woody = eligible.filter((item) => item.species.treeLike);
     return [...woody, ...eligible.filter((item) => !woody.includes(item))].slice(0, limit);
   }
   return eligible.slice(0, limit);
+}
+
+function orderForObjectives(recommendations: SpeciesRecommendation[], objectives?: DesignObjectives) {
+  if (!objectives) return recommendations;
+  return [...recommendations].sort((a, b) => {
+    const aScore = speciesObjectiveScore(a.species, objectives) * 0.7 + a.score * 0.3;
+    const bScore = speciesObjectiveScore(b.species, objectives) * 0.7 + b.score * 0.3;
+    return bScore - aScore || a.species.scientificName.localeCompare(b.species.scientificName);
+  });
 }
 
 function fillSyntropicPalette(eligible: SpeciesRecommendation[], size: number): SpeciesRecommendation[] {

@@ -114,7 +114,7 @@ export async function mockPlanningApi(page: Page, site: SiteBoundary) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      json: { recommendations: [...extraRecommendations, ...catalogue], palette: recommendedPalette(catalogue, body.system ?? 'syntropic').map((item) => item.species) },
+      json: { recommendations: [...extraRecommendations, ...catalogue], palette: recommendedPalette(catalogue, body.system ?? 'syntropic', undefined, body.objectives).map((item) => item.species) },
     });
   });
   await page.route('**/api/economics/profile', async (route) => route.fulfill({

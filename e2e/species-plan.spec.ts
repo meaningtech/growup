@@ -88,6 +88,9 @@ test('rebuilds the palette when the planting system changes and searches the mon
   const picker = page.getByTestId('monoculture-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByText('Preferred for this site')).toBeVisible();
+  await picker.getByLabel('Search by common or scientific name').fill('grape');
+  await expect(picker.getByTestId('monoculture-design-hits')).toContainText('Grapevine');
+  await expect(picker.getByTestId('monoculture-design-hits')).toContainText('Vitis vinifera');
   await picker.getByLabel('Search by common or scientific name').fill('Olea');
   await picker.getByRole('button', { name: /Olea europaea/ }).click();
   await expect(picker).toHaveCount(0);
@@ -144,12 +147,20 @@ test('rebuilds plants and shares when design objectives change', async ({ page }
   expect((await objectiveRequest).postDataJSON()).toEqual(expect.objectContaining({
     objectives: expect.objectContaining({ production: 100 }),
   }));
+  await expect(page.getByText('Proposed plants and shares rebuilt for these priorities.')).toBeVisible();
   await expect(page.getByTestId('species-tab-system')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('objective-palette-strip')).toBeVisible();
+  const afterChipNames = await page.getByTestId('objective-palette-strip').locator('.species-chip').allTextContents();
   await page.getByTestId('species-tab-mix').click();
   const afterShares = await mix.getByRole('spinbutton', { name: /Target share/ }).evaluateAll((inputs) => (
     inputs.map((input) => Number((input as HTMLInputElement).value))
   ));
   const afterNames = await mix.locator('.species-mix-rows article strong').allTextContents();
   expect(afterShares.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 5);
-  expect(afterShares.join() === beforeShares.join() && afterNames.join() === beforeNames.join()).toBe(false);
+  expect(afterChipNames.length).toBeGreaterThan(0);
+  expect(
+    afterShares.join() === beforeShares.join()
+    && afterNames.join() === beforeNames.join()
+    && afterChipNames.join() === beforeNames.join(),
+  ).toBe(false);
 });

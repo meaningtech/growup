@@ -1673,27 +1673,31 @@ function WorkspaceApp() {
   }, [onboarding?.status, onboarding?.step]);
 
   useEffect(() => {
-    const objectiveKey = JSON.stringify(designConfiguration.objectives);
+    const objectives = designConfiguration.objectives;
+    const objectiveKey = JSON.stringify(objectives);
     if (!siteProfile || objectiveKey === recommendationObjectiveRef.current) return;
-    recommendationObjectiveRef.current = objectiveKey;
+    const system = designConfiguration.system;
+    const extras = userSpecies;
     const timeout = window.setTimeout(() => {
       const requestId = ++paletteRequestRef.current;
-      api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({
-        siteProfile,
-        objectives: designConfiguration.objectives,
-        system: designConfiguration.system,
-        userSpecies,
-      }))
-        .then((result) => {
-          if (requestId !== paletteRequestRef.current) return;
-          setRecommendations(result.recommendations);
-          const palette = result.palette.map((species) => species.id);
-          replacePalette(palette, {
-            monocultureSpeciesId: designConfiguration.system === 'monoculture' ? palette[0] ?? null : designConfiguration.monocultureSpeciesId,
-          });
-        })
-        .catch((rankingError) => setError(messageOf(rankingError)));
-    }, 250);
+      void runBusy(t('busy.proposingPalette'), async () => {
+        const result = await api<{ recommendations: SpeciesRecommendation[]; palette: DesignSpecies[] }>('/api/recommendations', post({
+          siteProfile,
+          objectives,
+          system,
+          userSpecies: extras,
+        }));
+        if (requestId !== paletteRequestRef.current) return;
+        recommendationObjectiveRef.current = objectiveKey;
+        setRecommendations(result.recommendations);
+        const palette = result.palette.map((species) => species.id);
+        replacePalette(palette, {
+          objectives,
+          monocultureSpeciesId: system === 'monoculture' ? palette[0] ?? null : designConfiguration.monocultureSpeciesId,
+        });
+        setNotice(t('notices.objectivePalette'));
+      });
+    }, 400);
     return () => window.clearTimeout(timeout);
   }, [designConfiguration.objectives, siteProfile]);
 
@@ -6425,6 +6429,13 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
   const matchesCropQuery = (species: DesignSpecies) => !cropQueryNormalized
     || species.scientificName.toLowerCase().includes(cropQueryNormalized)
     || speciesDisplayName(species, t).toLowerCase().includes(cropQueryNormalized);
+  const namedCropHits = cropQueryNormalized.length >= 2
+    ? [
+      ...DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && matchesCropQuery(species)),
+      ...userSpecies.filter((species) => species.invasiveStatus !== 'blocked' && matchesCropQuery(species) && !DESIGN_SPECIES_BY_ID.has(species.id)),
+    ].slice(0, 8)
+    : [];
+  const namedCropIds = new Set(namedCropHits.map((species) => species.id));
   const preferredCrops = recommendations.filter((item) => (
     (item.status === 'recommended' || item.status === 'conditional')
     && item.species.invasiveStatus !== 'blocked'
@@ -6432,11 +6443,13 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
     && item.species.productiveFromYear !== null
     && !item.components.some((component) => (component.key === 'climate' || component.key === 'water') && component.status === 'poor')
     && matchesCropQuery(item.species)
+    && !namedCropIds.has(item.species.id)
   )).map((item) => item.species);
   const preferredCropIds = new Set(preferredCrops.map((item) => item.id));
   const catalogueCrops = cropResults.filter((item) => {
-    const designSpecies = matchDesignSpecies(item);
-    return !designSpecies || !preferredCropIds.has(designSpecies.id);
+    const designSpecies = matchDesignSpecies(item) ?? library.get(item.id) ?? null;
+    if (designSpecies && (namedCropIds.has(designSpecies.id) || preferredCropIds.has(designSpecies.id))) return false;
+    return !namedCropIds.has(item.id);
   });
   const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
@@ -6538,6 +6551,10 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
         <p>{t('species.objectivesBody')}</p>
         {objectives.map((objective) => <label className="objective-control" key={objective.key}><span><b>{objective.label}</b><output>{design.objectives[objective.key]}</output></span><input aria-label={objective.label} type="range" min="0" max="100" step="5" value={design.objectives[objective.key]} onChange={(event) => update({ objectives: { ...design.objectives, [objective.key]: Number(event.target.value) } })} /></label>)}
+        {selectedSpecies.length > 0 && <div className="species-selected-strip" data-testid="objective-palette-strip">
+          <small>{t('species.selectedStrip', { count: selectedSpecies.length })}</small>
+          <div>{selectedSpecies.map((species) => <button key={species.id} type="button" className="species-chip" onClick={() => onToggle(species.id)} aria-label={t('species.remove', { name: speciesDisplayName(species, t) })}><i style={{ background: species.color }} /><span>{speciesDisplayName(species, t)}</span><X size={12} /></button>)}</div>
+        </div>}
       </div>
       <div className="recommendation-basis" data-testid="recommendation-basis"><Database size={17} /><span><strong>{t('planning.speciesBasisTitle')}</strong><p>{t('planning.speciesBasisBody', { count: DESIGN_SPECIES_BY_ID.size })}</p></span></div>
       {design.plantingLines.length > 0 && <div className="planting-lines" data-testid="planting-lines">
@@ -6720,6 +6737,16 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
               count: stats ? formatNumber(stats.total, 0) : '107,269',
               ready: stats ? formatNumber(stats.designReady, 0) : String(DESIGN_SPECIES.length),
             })}</p>
+            {namedCropHits.length > 0 && <div className="species-picker-group" data-testid="monoculture-design-hits">
+              <small>{t('species.filterDesignReady')}</small>
+              {namedCropHits.map((species) => {
+                const selected = monocultureCrop?.id === species.id;
+                return <button key={species.id} type="button" className={selected ? 'active' : ''} onClick={() => { onPickMonoculture(species.id); setCropPickerOpen(false); }}>
+                  <i style={{ background: species.color }} />
+                  <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
+                </button>;
+              })}
+            </div>}
             {preferredCrops.length > 0 && <div className="species-picker-group">
               <small>{t('design.preferredCrops')}</small>
               {preferredCrops.map((species) => {
@@ -6733,7 +6760,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
             <div className="species-picker-group">
               <small>{t('design.catalogueSearch')}</small>
               {cropSearching && <p className="inline-empty">{t('busy.searchingCatalogue')}</p>}
-              {!cropSearching && cropQuery.trim().length < 2 && <p className="inline-empty">{t('design.searchCropHint')}</p>}
+              {!cropSearching && cropQuery.trim().length < 2 && namedCropHits.length === 0 && <p className="inline-empty">{t('design.searchCropHint')}</p>}
               {!cropSearching && catalogueCrops.map((item) => {
                 const designSpecies = matchDesignSpecies(item) ?? library.get(item.id) ?? null;
                 const blocked = designSpecies?.invasiveStatus === 'blocked';
@@ -6752,7 +6779,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
                   </span>
                 </button>;
               })}
-              {!cropSearching && cropQuery.trim().length >= 2 && catalogueCrops.length === 0 && preferredCrops.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
+              {!cropSearching && cropQuery.trim().length >= 2 && catalogueCrops.length === 0 && preferredCrops.length === 0 && namedCropHits.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
             </div>
           </div>
         </section>

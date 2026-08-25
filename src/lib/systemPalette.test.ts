@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from '../data/designSpecies';
-import type { SiteProfile } from '../types';
+import type { DesignObjectives, SiteProfile } from '../types';
 import { DEFAULT_DESIGN_OBJECTIVES } from './objectives';
 import { rankSpecies } from './recommendations';
-import { recommendedPalette } from './systemPalette';
+import { eligibleSpeciesForSystem, recommendedPalette } from './systemPalette';
 
 function fieldProfile(ph: number | null = 7.2): SiteProfile {
   return {
@@ -57,5 +57,23 @@ describe('system-aware automatic palettes', () => {
       return Boolean(species && (species.treeLike || species.stratum === 'low'));
     })).toBe(true);
     expect(recommendedPalette(ranked).map((item) => item.species.id)).toEqual(syntropic);
+  });
+
+  it('rebuilds syntropic membership when production dominates biodiversity', () => {
+    const production: DesignObjectives = { production: 100, biodiversity: 0, nativeHabitat: 0, waterResilience: 20, lowMaintenance: 10 };
+    const habitat: DesignObjectives = { production: 0, biodiversity: 100, nativeHabitat: 100, waterResilience: 20, lowMaintenance: 10 };
+    const productionIds = recommendedPalette(rankSpecies(DESIGN_SPECIES, fieldProfile(), production), 'syntropic', undefined, production).map((item) => item.species.id);
+    const habitatIds = recommendedPalette(rankSpecies(DESIGN_SPECIES, fieldProfile(), habitat), 'syntropic', undefined, habitat).map((item) => item.species.id);
+    expect(productionIds).toHaveLength(9);
+    expect(habitatIds).toHaveLength(9);
+    expect(productionIds).not.toEqual(habitatIds);
+    const productiveCount = (ids: string[]) => ids.filter((id) => DESIGN_SPECIES_BY_ID.get(id)?.productiveFromYear !== null).length;
+    expect(productiveCount(productionIds)).toBeGreaterThan(productiveCount(habitatIds));
+  });
+
+  it('keeps an explicit grape monoculture even though it is not tree-like', () => {
+    const grape = DESIGN_SPECIES_BY_ID.get('vitis-vinifera')!;
+    expect(grape.treeLike).toBe(false);
+    expect(eligibleSpeciesForSystem([grape], 'monoculture').map((item) => item.id)).toEqual(['vitis-vinifera']);
   });
 });

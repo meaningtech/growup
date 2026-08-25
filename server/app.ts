@@ -223,11 +223,12 @@ export function createApp(config: GrowupAppConfig = {}) {
       const siteProfile = requireSiteProfile(req.body?.siteProfile);
       const system = normalizeDesignSystem(req.body?.system);
       const extras = normalizeUserSpecies(req.body?.userSpecies).filter((item) => !DESIGN_SPECIES_BY_ID.has(item.id));
-      const catalogue = rankSpecies(DESIGN_SPECIES, siteProfile, normalizeDesignObjectives(req.body?.objectives));
-      const extraRecommendations = extras.length ? rankSpecies(extras, siteProfile, normalizeDesignObjectives(req.body?.objectives)) : [];
+      const objectives = normalizeDesignObjectives(req.body?.objectives);
+      const catalogue = rankSpecies(DESIGN_SPECIES, siteProfile, objectives);
+      const extraRecommendations = extras.length ? rankSpecies(extras, siteProfile, objectives) : [];
       return {
         recommendations: [...extraRecommendations, ...catalogue],
-        palette: recommendedPalette(catalogue, system).map((item) => item.species),
+        palette: recommendedPalette(catalogue, system, undefined, objectives).map((item) => item.species),
       };
     });
   });

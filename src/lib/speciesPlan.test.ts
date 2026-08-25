@@ -47,7 +47,8 @@ describe('species planning configuration', () => {
     const habitat = speciesMixFromObjectives(species, { production: 10, biodiversity: 100, nativeHabitat: 100, waterResilience: 20, lowMaintenance: 10 });
     expect(total(production)).toBe(100);
     expect(total(habitat)).toBe(100);
-    expect(production['olea-europaea'].targetPercent).toBeGreaterThan(habitat['olea-europaea'].targetPercent);
+    expect(production['prunus-dulcis'].targetPercent).toBeGreaterThan(habitat['prunus-dulcis'].targetPercent);
+    expect(habitat['spartium-junceum'].targetPercent).toBeGreaterThan(production['spartium-junceum'].targetPercent);
     expect(production).not.toEqual(speciesMixFromObjectives(species, DEFAULT_DESIGN_OBJECTIVES));
   });
 
