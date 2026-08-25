@@ -64,6 +64,7 @@ test('inspects a usable species by default and keeps blocked taxa as an exclusio
   await expect(page.getByRole('button', { name: 'Analyse this field' })).toBeEnabled();
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
 
   await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.locator('.drawing-status')).toHaveCount(0);
@@ -157,9 +158,11 @@ test('adds a catalogue species and stores an editable planting row', async ({ pa
   await expect(page.getByRole('button', { name: 'Analyse this field' })).toBeEnabled();
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
 
   await expect(page.getByTestId('species-add')).toBeVisible();
   await page.getByTestId('species-add').getByRole('button', { name: 'Add' }).first().click();
+  await page.getByTestId('species-tab-mix').click();
   await expect(page.getByTestId('species-mix-config').getByLabel(/Planting distance/)).not.toHaveCount(0);
 
   await page.getByRole('button', { name: 'Draw a planting row' }).click();

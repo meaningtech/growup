@@ -187,6 +187,7 @@ test('keeps supporting text readable without oversized form controls', async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
 
   const readTypeScale = () => page.locator('.catalogue-advanced-filters').evaluate((panel) => {
     const label = panel.querySelector('label');
@@ -252,6 +253,7 @@ test('keeps planning subtabs and the primary action available above mobile navig
   await expect(page.getByTestId('firebreak-config')).toBeHidden();
 
   await page.getByRole('tab', { name: 'Species' }).click();
+  await page.getByTestId('species-tab-palette').click();
   await page.locator('.catalogue-advanced-filters').scrollIntoViewIfNeeded();
   await expect(action).toBeVisible();
 

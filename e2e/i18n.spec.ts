@@ -47,9 +47,11 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByRole('tab', { name: 'Specie' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: 'Tagliafuoco' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Mezzi di lavoro' })).toBeVisible();
+  await expect(page.getByTestId('species-tab-system')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('recommendation-basis')).toContainText(`catalogo curato di ${DESIGN_SPECIES_BY_ID.size} specie`);
   await expect(page.getByLabel('Sistema di impianto')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Solo perimetro' })).toBeVisible();
+  await page.getByTestId('species-tab-palette').click();
   await expect(page.getByPlaceholder('Cerca un genere o nome scientifico')).toHaveValue('');
   await page.setViewportSize({ width: 390, height: 844 });
   const workflowLabelsFit = await page.locator('.step-rail button > span:last-child').evaluateAll((labels) => labels.every((label) => {

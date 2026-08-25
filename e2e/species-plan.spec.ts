@@ -11,6 +11,7 @@ test('stores exact species targets and manual succession in the generated plan',
   await expect(page.getByRole('button', { name: 'Analyse this field' })).toBeEnabled();
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-mix').click();
 
   const mix = page.getByTestId('species-mix-config');
   const rows = mix.locator('.species-mix-rows article');
@@ -24,7 +25,7 @@ test('stores exact species targets and manual succession in the generated plan',
   await firstRow.getByRole('combobox', { name: /Succession/ }).selectOption('placenta');
   await expect(firstRow.getByRole('spinbutton', { name: /Target share/ })).toHaveValue('60');
   await expect(mix).toContainText(/100(?:\.0)?% total/);
-  const targetTotal = await mix.locator('input[type="number"]').evaluateAll((inputs) => (
+  const targetTotal = await mix.getByRole('spinbutton', { name: /Target share/ }).evaluateAll((inputs) => (
     inputs.reduce((sum, input) => sum + Number((input as HTMLInputElement).value), 0)
   ));
   expect(targetTotal).toBeCloseTo(100, 5);

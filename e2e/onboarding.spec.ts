@@ -127,6 +127,7 @@ test('shows a clear blocking loader while a workspace calculation is running', a
     });
   });
   await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-palette').click();
   await page.getByLabel('Search scientific catalogue').fill('olive');
   await page.locator('.catalogue-search').getByRole('button', { name: 'Search' }).click();
 

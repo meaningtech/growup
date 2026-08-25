@@ -11,8 +11,9 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await expect(page.getByTestId('existing-vegetation-audit')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('step-species').click();
 
-  await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.getByTestId('design-objectives')).toBeVisible();
+  await page.getByTestId('species-tab-palette').click();
+  await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.locator('.drawing-status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Draw a new field' })).toHaveCount(0);
   await expect(page.getByTestId('species-inspector')).not.toHaveClass(/blocked/);

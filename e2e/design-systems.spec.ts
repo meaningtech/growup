@@ -19,7 +19,7 @@ test('keeps the crop interior empty in perimeter mode and exposes measured solar
   expect(profile.solar.annualGlobalHorizontalKwhM2).toBeGreaterThan(1_000);
 
   await page.getByTestId('step-species').click();
-  await page.getByLabel('Design system').selectOption('boundary-buffer');
+  await page.getByRole('radio', { name: 'Boundary buffer / productive hedge' }).click();
   await expect(page.getByRole('button', { name: 'Perimeter only' })).toHaveClass(/active/);
   await page.getByRole('slider', { name: 'Boundary band' }).fill('7');
   await page.getByLabel('Orientation objective').selectOption('solar-crop');
@@ -49,7 +49,7 @@ test('keeps the crop interior empty in perimeter mode and exposes measured solar
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-perimeter-solar.png', fullPage: false });
 
   await page.getByTestId('step-species').click();
-  await page.getByLabel('Design system').selectOption('monoculture');
+  await page.getByRole('radio', { name: 'Monoculture orchard' }).click();
   const monoculturePromise = page.waitForResponse((response) => response.url().endsWith('/api/layout/generate') && response.request().method() === 'POST');
   await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
   const monocultureResponse = await monoculturePromise;

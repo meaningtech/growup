@@ -6126,6 +6126,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [planningTab, setPlanningTab] = useState<'species' | 'firebreak' | 'machinery'>('species');
+  const [speciesTab, setSpeciesTab] = useState<'system' | 'palette' | 'mix'>('system');
   const [filters, setFilters] = useState<CatalogueFilters>({
     treeOnly: true,
     globUntOnly: false,
@@ -6169,6 +6170,15 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
     { id: 'firebreak', label: t('planning.tab.firebreak'), icon: Flame },
     { id: 'machinery', label: t('planning.tab.machinery'), icon: Route },
   ] as const;
+  const speciesTabs = [
+    { id: 'system', label: t('planning.speciesTab.system') },
+    { id: 'palette', label: t('planning.speciesTab.palette') },
+    { id: 'mix', label: t('planning.speciesTab.mix') },
+  ] as const;
+  const designSystems: Array<DesignConfiguration['system']> = ['syntropic', 'alley-cropping', 'mixed-orchard', 'monoculture', 'windbreak', 'boundary-buffer'];
+  const setSystem = (system: DesignConfiguration['system']) => {
+    update({ system, extent: system === 'windbreak' ? 'selected-edges' : system === 'boundary-buffer' ? 'perimeter-band' : design.extent });
+  };
   return (
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
@@ -6188,12 +6198,145 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
       </div>
       <div id="planning-tab-panel" className="planning-tab-panel" role="tabpanel" aria-labelledby={`planning-tab-${planningTab}`}>
       {planningTab === 'species' && <>
+      <div className="planning-tabs species-subtabs" role="tablist" aria-label={t('planning.speciesTabsLabel')} data-testid="species-subtabs">
+        {speciesTabs.map(({ id, label }) => <button
+          key={id}
+          id={`species-tab-${id}`}
+          type="button"
+          role="tab"
+          aria-selected={speciesTab === id}
+          className={speciesTab === id ? 'active' : ''}
+          data-testid={`species-tab-${id}`}
+          onClick={() => setSpeciesTab(id)}
+        ><span>{label}</span>{id === 'mix' && selectedIds.length > 0 ? <b>{selectedIds.length}</b> : null}</button>)}
+      </div>
+      {speciesTab === 'system' && <>
+      <p className="species-step-lead">{t('planning.systemLead')}</p>
+      <div className="design-config" data-testid="design-config">
+        <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('design.logic')}</small><strong>{t('design.systemArea')}</strong></span></div></div>
+        <div className="system-switch" role="radiogroup" aria-label={t('design.system')} data-testid="design-system-switch">
+          {designSystems.map((system) => <button
+            key={system}
+            type="button"
+            role="radio"
+            aria-checked={design.system === system}
+            className={design.system === system ? 'active' : ''}
+            onClick={() => setSystem(system)}
+          >{t(system === 'alley-cropping' ? 'system.alley' : system === 'mixed-orchard' ? 'system.mixedOrchard' : system === 'boundary-buffer' ? 'system.boundary' : `system.${system}`)}</button>)}
+        </div>
+        <p className="design-explainer">{t(designSystemDescriptionKey(design.system))}</p>
+        <div className="extent-switch" role="group" aria-label={t('design.extent')}>
+          <button className={design.extent === 'full-field' ? 'active' : ''} disabled={design.system === 'windbreak' || design.system === 'boundary-buffer'} onClick={() => update({ extent: 'full-field' })}>{t('design.fullField')}</button>
+          <button className={design.extent === 'perimeter-band' ? 'active' : ''} disabled={design.system === 'windbreak'} onClick={() => update({ extent: 'perimeter-band' })}>{t('design.perimeterOnly')}</button>
+          {design.system === 'windbreak' && <button className="active" disabled>{t('design.selectedEdges')}</button>}
+        </div>
+        {design.extent !== 'full-field' && <label className="range-control"><span><b>{t('design.boundaryBand')}</b><output>{design.perimeterBandM} m</output></span><input aria-label={t('design.boundaryBand')} type="range" min="3" max="20" step="1" value={design.perimeterBandM} onChange={(event) => update({ perimeterBandM: Number(event.target.value) })} /></label>}
+        {design.system === 'alley-cropping' && <label className="range-control"><span><b>{t('design.cropAlley')}</b><output>{design.cropAlleyWidthM} m</output></span><input aria-label={t('design.cropAlley')} type="range" min="6" max="30" step="1" value={design.cropAlleyWidthM} onChange={(event) => update({ cropAlleyWidthM: Number(event.target.value) })} /></label>}
+        {design.system === 'windbreak' && <label className="range-control"><span><b>{t('design.windbreakRows')}</b><output>{design.windbreakRows}</output></span><input aria-label={t('design.windbreakRows')} type="range" min="1" max="5" step="1" value={design.windbreakRows} onChange={(event) => update({ windbreakRows: Number(event.target.value) })} /></label>}
+        {design.system === 'monoculture' && <label className="select-label"><span>{t('design.singleCrop')}</span><select aria-label={t('design.singleCrop')} value={design.monocultureSpeciesId ?? ''} onChange={(event) => update({ monocultureSpeciesId: event.target.value || null })}><option value="">{t('design.bestProductive')}</option>{selectedOptions.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)}</option>)}</select></label>}
+        <label className="select-label"><span>{t('design.orientation')}</span><select aria-label={t('design.orientation')} value={design.orientationObjective} onChange={(event) => update({ orientationObjective: event.target.value as DesignConfiguration['orientationObjective'] })}>
+          <option value="solar-crop">{t('orientation.solar')}</option>
+          <option value="contour">{t('orientation.contour')}</option>
+          <option value="operations">{t('orientation.operations')}</option>
+          <option value="wind-protection">{t('orientation.wind')}</option>
+          <option value="custom">{t('orientation.custom')}</option>
+        </select></label>
+        {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label={t('design.bearing')} type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
+      </div>
+      <div className="objective-panel" data-testid="design-objectives">
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
+        <p>{t('species.objectivesBody')}</p>
+        {objectives.map((objective) => <label className="objective-control" key={objective.key}><span><b>{objective.label}</b><output>{design.objectives[objective.key]}</output></span><input aria-label={objective.label} type="range" min="0" max="100" step="5" value={design.objectives[objective.key]} onChange={(event) => update({ objectives: { ...design.objectives, [objective.key]: Number(event.target.value) } })} /></label>)}
+      </div>
       <div className="recommendation-basis" data-testid="recommendation-basis"><Database size={17} /><span><strong>{t('planning.speciesBasisTitle')}</strong><p>{t('planning.speciesBasisBody', { count: DESIGN_SPECIES_BY_ID.size })}</p></span></div>
+      {design.plantingLines.length > 0 && <div className="planting-lines" data-testid="planting-lines">
+        <div className="card-heading"><div><PenLine size={17} /><span><small>{t('plantingLines.eyebrow')}</small><strong>{t('plantingLines.title')}</strong></span></div></div>
+        <p>{t('plantingLines.body')}</p>
+        {design.plantingLines.map((line, index) => <span key={line.id}>
+          <strong>{t('plantingLines.row', { count: index + 1 })}</strong>
+          <small>{t('plantingLines.vertices', { count: line.points.length })}</small>
+          <button type="button" aria-label={t('plantingLines.remove', { count: index + 1 })} onClick={() => update({ plantingLines: design.plantingLines.filter((item) => item.id !== line.id) })}><X size={13} /></button>
+        </span>)}
+      </div>}
+      </>}
+      {speciesTab === 'palette' && <>
+      <p className="species-step-lead">{t('planning.paletteLead')}</p>
+      {selectedSpecies.length > 0 && <div className="species-selected-strip" data-testid="species-selected-strip">
+        <small>{t('species.selectedStrip', { count: selectedSpecies.length })}</small>
+        <div>{selectedSpecies.map((species) => <button key={species.id} type="button" className="species-chip" onClick={() => onToggle(species.id)} aria-label={t('species.remove', { name: speciesDisplayName(species, t) })}><i style={{ background: species.color }} /><span>{speciesDisplayName(species, t)}</span><X size={12} /></button>)}</div>
+      </div>}
       {recommendations.length > 0 && <div className="safety-gate" data-testid="species-safety-gate"><ShieldCheck size={18} /><span><small>{t('species.safetyEyebrow')}</small><strong>{t('species.safetyCount', { blocked: blocked.length, monitored: monitored.length })}</strong><p>{t('species.safetyBody')}</p></span>{blocked.length > 0 && <button onClick={() => setInspectedId(blocked[0].species.id)}>{t('actions.inspect')}</button>}</div>}
-      {selectedSpecies.length > 0 && <div className="species-mix-config" data-testid="species-mix-config">
-        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.mixEyebrow')}</small><strong>{t('species.mixTitle')}</strong></span></div><output>{t('species.mixTotal', { total: formatNumber(Object.values(selectedMix).reduce((sum, item) => sum + item.targetPercent, 0), 1) })}</output></div>
+      <div className="catalogue-search"><Search size={16} /><input value={query} placeholder={t('species.searchPlaceholder')} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch(filters)} aria-label={t('species.searchCatalogue')} /><button onClick={() => onSearch(filters)}>{t('actions.search')}</button></div>
+      <div className="catalogue-filters" aria-label={t('species.catalogueFilters')}>{([
+        ['treeOnly', t('species.filterTrees')], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', t('species.filterDesignReady')],
+      ] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.checked })} /><span>{label}</span></label>)}</div>
+      <div className="catalogue-advanced-filters" data-testid="catalogue-advanced-filters">
+        <p>{t('species.advancedFiltersBody')}</p>
+        <label><span>{t('species.filterStratum')}</span><select aria-label={t('species.filterStratum')} value={filters.stratum} onChange={(event) => setFilters({ ...filters, stratum: event.target.value })}><option value="">{t('species.filterAny')}</option>{['emergent', 'high', 'medium', 'low', 'ground', 'climber'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterSuccession')}</span><select aria-label={t('species.filterSuccession')} value={filters.succession} onChange={(event) => setFilters({ ...filters, succession: event.target.value })}><option value="">{t('species.filterAny')}</option>{['placenta', 'secondary', 'climax'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterRole')}</span><select aria-label={t('species.filterRole')} value={filters.role} onChange={(event) => setFilters({ ...filters, role: event.target.value })}><option value="">{t('species.filterAny')}</option>{['food', 'fruit', 'biomass', 'nitrogen fixation', 'timber', 'fodder', 'wind protection', 'pollinator resource'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
+        <label><span>{t('species.filterEvergreen')}</span><select aria-label={t('species.filterEvergreen')} value={filters.evergreen} onChange={(event) => setFilters({ ...filters, evergreen: event.target.value as CatalogueFilters['evergreen'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('species.evergreen')}</option><option value="false">{t('species.deciduous')}</option></select></label>
+        <label><span>{t('species.filterNitrogen')}</span><select aria-label={t('species.filterNitrogen')} value={filters.nitrogenFixer} onChange={(event) => setFilters({ ...filters, nitrogenFixer: event.target.value as CatalogueFilters['nitrogenFixer'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('actions.yes')}</option><option value="false">{t('actions.no')}</option></select></label>
+        <label><span>{t('species.filterDrought')}</span><select aria-label={t('species.filterDrought')} value={filters.droughtMinimum} onChange={(event) => setFilters({ ...filters, droughtMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[3, 4, 5].map((value) => <option key={value} value={value}>{value}/5+</option>)}</select></label>
+        <label><span>{t('species.filterEvidence')}</span><select aria-label={t('species.filterEvidence')} value={filters.evidenceMinimum} onChange={(event) => setFilters({ ...filters, evidenceMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[2, 3, 4].map((value) => <option key={value} value={value}>{value}+</option>)}</select></label>
+      </div>
+      <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
+      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => {
+        const designSpecies = DESIGN_SPECIES_BY_ID.get(item.id);
+        const selected = Boolean(designSpecies && selectedIds.includes(designSpecies.id));
+        const blocked = designSpecies?.invasiveStatus === 'blocked';
+        return <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}{designSpecies && !blocked && <button type="button" onClick={() => onToggle(designSpecies.id)}>{selected ? t('species.removeShort') : t('species.addShort')}</button>}</span></span>;
+      })}</div>}
+      {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
+        const selected = selectedIds.includes(item.species.id);
+        return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>
+          <button className="species-open" onClick={() => setInspectedId(item.species.id)} aria-label={t('species.inspect', { name: speciesDisplayName(item.species, t) })}>
+            <span className="species-swatch" style={{ background: item.species.color }} />
+            <span className="species-name"><strong>{speciesDisplayName(item.species, t)}</strong><i>{item.species.scientificName}</i><small>{localizedEnum(item.species.stratum, t)} · {localizedEnum(item.species.succession, t)} · {item.species.roles.slice(0, 2).map((role) => localizedEnum(role, t)).join(' / ')}</small></span>
+            <span className="species-score"><strong>{item.score}</strong><small>/100</small></span>
+          </button>
+          <button className={`species-toggle ${selected ? 'on' : ''}`} onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={t(selected ? 'species.remove' : 'species.add', { name: speciesDisplayName(item.species, t) })}>{selected ? t('species.removeShort') : t('species.addShort')}</button>
+        </div>;
+      })}</div>}
+      {inspected && <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
+        <header>
+          <span className="species-swatch" style={{ background: inspected.species.color }} />
+          <span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>
+          <span className="species-inspector-actions">
+            {inspected.status === 'blocked' && <CircleOff size={20} />}
+            {inspected.status !== 'blocked' && <button type="button" className={`species-toggle ${selectedIds.includes(inspected.species.id) ? 'on' : ''}`} onClick={() => onToggle(inspected.species.id)}>{selectedIds.includes(inspected.species.id) ? t('species.removeShort') : t('species.addShort')}</button>}
+            {inspectedId && <button type="button" aria-label={t('actions.close')} onClick={() => setInspectedId(null)}><X size={16} /></button>}
+          </span>
+        </header>
+        {inspected.status === 'blocked' ? (
+          <div className="mitigation-list"><strong>{t('species.excludedFromLayouts')}</strong>{inspected.mitigations.map((item) => <p key={item}>{localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>
+        ) : (
+          <>
+            <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
+            {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
+          </>
+        )}
+        <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
+      </div>}
+      <div className="species-add" data-testid="species-add">
+        <div className="card-heading"><div><Plus size={17} /><span><small>{t('species.addEyebrow')}</small><strong>{t('species.addTitle')}</strong></span></div></div>
+        <p>{t('species.addBody')}</p>
+        {addableSpecies.map((species) => {
+          const displayName = speciesDisplayName(species, t);
+          return <div key={species.id} className="species-add-row">
+            <span className="species-swatch" style={{ background: species.color }} />
+            <span><strong>{displayName}</strong><i>{species.scientificName}</i><small>{localizedEnum(species.succession, t)} · {species.spacingM} m</small></span>
+            <button type="button" onClick={() => onToggle(species.id)}>{t('species.addShort')}</button>
+          </div>;
+        })}
+        {addableSpecies.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
+      </div>
+      </>}
+      {speciesTab === 'mix' && <div className="species-mix-config" data-testid="species-mix-config">
+        <p className="species-step-lead">{t('planning.mixLead')}</p>
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.mixEyebrow')}</small><strong>{t('species.mixTitle')}</strong></span></div>{selectedSpecies.length > 0 && <output>{t('species.mixTotal', { total: formatNumber(Object.values(selectedMix).reduce((sum, item) => sum + item.targetPercent, 0), 1) })}</output>}</div>
         <p>{t('species.mixBody')}</p>
-        <div className="species-mix-rows">
+        {selectedSpecies.length === 0 ? <p className="inline-empty">{t('species.noneSelected')}</p> : <div className="species-mix-rows">
           {selectedSpecies.map((species) => {
             const entry = selectedMix[species.id];
             const displayName = speciesDisplayName(species, t);
@@ -6214,69 +6357,11 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
                 ...selectedMix,
                 [species.id]: { ...entry, spacingOverrideM: Number(event.target.value) || species.spacingM },
               } })} /><b>m</b></span></label>
+              <button type="button" className="species-mix-remove" aria-label={t('species.remove', { name: displayName })} onClick={() => onToggle(species.id)}><X size={14} /></button>
             </article>;
           })}
-        </div>
+        </div>}
       </div>}
-      <div className="species-add" data-testid="species-add">
-        <div className="card-heading"><div><Plus size={17} /><span><small>{t('species.addEyebrow')}</small><strong>{t('species.addTitle')}</strong></span></div></div>
-        <p>{t('species.addBody')}</p>
-        {addableSpecies.map((species) => {
-          const displayName = speciesDisplayName(species, t);
-          return <div key={species.id} className="species-add-row">
-            <span className="species-swatch" style={{ background: species.color }} />
-            <span><strong>{displayName}</strong><i>{species.scientificName}</i><small>{localizedEnum(species.succession, t)} · {species.spacingM} m</small></span>
-            <button type="button" onClick={() => onToggle(species.id)}>{t('species.addShort')}</button>
-          </div>;
-        })}
-        {addableSpecies.length === 0 && <p className="inline-empty">{t('species.addEmpty')}</p>}
-      </div>
-      {design.plantingLines.length > 0 && <div className="planting-lines" data-testid="planting-lines">
-        <div className="card-heading"><div><PenLine size={17} /><span><small>{t('plantingLines.eyebrow')}</small><strong>{t('plantingLines.title')}</strong></span></div></div>
-        <p>{t('plantingLines.body')}</p>
-        {design.plantingLines.map((line, index) => <span key={line.id}>
-          <strong>{t('plantingLines.row', { count: index + 1 })}</strong>
-          <small>{t('plantingLines.vertices', { count: line.points.length })}</small>
-          <button type="button" aria-label={t('plantingLines.remove', { count: index + 1 })} onClick={() => update({ plantingLines: design.plantingLines.filter((item) => item.id !== line.id) })}><X size={13} /></button>
-        </span>)}
-      </div>}
-      <div className="objective-panel" data-testid="design-objectives">
-        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.priorityModel')}</small><strong>{t('species.designObjectives')}</strong></span></div><small>0–100</small></div>
-        <p>{t('species.objectivesBody')}</p>
-        {objectives.map((objective) => <label className="objective-control" key={objective.key}><span><b>{objective.label}</b><output>{design.objectives[objective.key]}</output></span><input aria-label={objective.label} type="range" min="0" max="100" step="5" value={design.objectives[objective.key]} onChange={(event) => update({ objectives: { ...design.objectives, [objective.key]: Number(event.target.value) } })} /></label>)}
-      </div>
-      <div className="design-config" data-testid="design-config">
-        <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('design.logic')}</small><strong>{t('design.systemArea')}</strong></span></div></div>
-        <label className="select-label"><span>{t('design.system')}</span><select aria-label={t('design.system')} value={design.system} onChange={(event) => {
-          const system = event.target.value as DesignConfiguration['system'];
-          update({ system, extent: system === 'windbreak' ? 'selected-edges' : system === 'boundary-buffer' ? 'perimeter-band' : design.extent });
-        }}>
-          <option value="syntropic">{t('system.syntropic')}</option>
-          <option value="alley-cropping">{t('system.alley')}</option>
-          <option value="mixed-orchard">{t('system.mixedOrchard')}</option>
-          <option value="monoculture">{t('system.monoculture')}</option>
-          <option value="windbreak">{t('system.windbreak')}</option>
-          <option value="boundary-buffer">{t('system.boundary')}</option>
-        </select></label>
-        <p className="design-explainer">{t(designSystemDescriptionKey(design.system))}</p>
-        <div className="extent-switch" role="group" aria-label={t('design.extent')}>
-          <button className={design.extent === 'full-field' ? 'active' : ''} disabled={design.system === 'windbreak' || design.system === 'boundary-buffer'} onClick={() => update({ extent: 'full-field' })}>{t('design.fullField')}</button>
-          <button className={design.extent === 'perimeter-band' ? 'active' : ''} disabled={design.system === 'windbreak'} onClick={() => update({ extent: 'perimeter-band' })}>{t('design.perimeterOnly')}</button>
-          {design.system === 'windbreak' && <button className="active" disabled>{t('design.selectedEdges')}</button>}
-        </div>
-        {design.extent !== 'full-field' && <label className="range-control"><span><b>{t('design.boundaryBand')}</b><output>{design.perimeterBandM} m</output></span><input aria-label={t('design.boundaryBand')} type="range" min="3" max="20" step="1" value={design.perimeterBandM} onChange={(event) => update({ perimeterBandM: Number(event.target.value) })} /></label>}
-        {design.system === 'alley-cropping' && <label className="range-control"><span><b>{t('design.cropAlley')}</b><output>{design.cropAlleyWidthM} m</output></span><input aria-label={t('design.cropAlley')} type="range" min="6" max="30" step="1" value={design.cropAlleyWidthM} onChange={(event) => update({ cropAlleyWidthM: Number(event.target.value) })} /></label>}
-        {design.system === 'windbreak' && <label className="range-control"><span><b>{t('design.windbreakRows')}</b><output>{design.windbreakRows}</output></span><input aria-label={t('design.windbreakRows')} type="range" min="1" max="5" step="1" value={design.windbreakRows} onChange={(event) => update({ windbreakRows: Number(event.target.value) })} /></label>}
-        {design.system === 'monoculture' && <label className="select-label"><span>{t('design.singleCrop')}</span><select aria-label={t('design.singleCrop')} value={design.monocultureSpeciesId ?? ''} onChange={(event) => update({ monocultureSpeciesId: event.target.value || null })}><option value="">{t('design.bestProductive')}</option>{selectedOptions.map((species) => <option key={species.id} value={species.id}>{speciesDisplayName(species, t)}</option>)}</select></label>}
-        <label className="select-label"><span>{t('design.orientation')}</span><select aria-label={t('design.orientation')} value={design.orientationObjective} onChange={(event) => update({ orientationObjective: event.target.value as DesignConfiguration['orientationObjective'] })}>
-          <option value="solar-crop">{t('orientation.solar')}</option>
-          <option value="contour">{t('orientation.contour')}</option>
-          <option value="operations">{t('orientation.operations')}</option>
-          <option value="wind-protection">{t('orientation.wind')}</option>
-          <option value="custom">{t('orientation.custom')}</option>
-        </select></label>
-        {design.orientationObjective === 'custom' && <label className="range-control"><span><b>{t('design.bearing')}</b><output>{design.customBearingDegrees}°</output></span><input aria-label={t('design.bearing')} type="range" min="0" max="175" step="5" value={design.customBearingDegrees} onChange={(event) => update({ customBearingDegrees: Number(event.target.value) })} /></label>}
-      </div>
       </>}
       {planningTab === 'firebreak' && <div className="firebreak-config" data-testid="firebreak-config">
         <div className="card-heading"><div><Flame size={17} /><span><small>{t('firebreak.eyebrow')}</small><strong>{t('firebreak.title')}</strong></span></div><label className="compact-toggle"><input aria-label={t('firebreak.enabled')} type="checkbox" checked={design.firebreak.enabled} onChange={(event) => updateFirebreak({ enabled: event.target.checked })} /><span>{t('firebreak.enabled')}</span></label></div>
@@ -6322,59 +6407,6 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, onToggle, onG
         <div className="machinery-result"><span><small>{t('machinery.requiredCorridor')}</small><strong>{formatNumber(machineEnvelope.corridorWidthM, 2)} m</strong></span><span><small>{t('machinery.headland')}</small><strong>{formatNumber(machineEnvelope.headlandDepthM, 2)} m</strong></span></div>
         <label className="pipe-crossing-toggle"><input type="checkbox" checked={design.machinery.protectPipeCrossings} disabled={!design.machinery.enabled} onChange={(event) => updateMachinery({ protectPipeCrossings: event.target.checked })} /><span><strong>{t('machinery.pipeCrossings')}</strong><small>{t('machinery.pipeCrossingsBody')}</small></span></label>
       </div>}
-      {planningTab === 'species' && <>
-      <div className="catalogue-search"><Search size={16} /><input value={query} placeholder={t('species.searchPlaceholder')} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch(filters)} aria-label={t('species.searchCatalogue')} /><button onClick={() => onSearch(filters)}>{t('actions.search')}</button></div>
-      <div className="catalogue-filters" aria-label={t('species.catalogueFilters')}>{([
-        ['treeOnly', t('species.filterTrees')], ['globUntOnly', 'GlobUNT'], ['designReadyOnly', t('species.filterDesignReady')],
-      ] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.checked })} /><span>{label}</span></label>)}</div>
-      <div className="catalogue-advanced-filters" data-testid="catalogue-advanced-filters">
-        <p>{t('species.advancedFiltersBody')}</p>
-        <label><span>{t('species.filterStratum')}</span><select aria-label={t('species.filterStratum')} value={filters.stratum} onChange={(event) => setFilters({ ...filters, stratum: event.target.value })}><option value="">{t('species.filterAny')}</option>{['emergent', 'high', 'medium', 'low', 'ground', 'climber'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
-        <label><span>{t('species.filterSuccession')}</span><select aria-label={t('species.filterSuccession')} value={filters.succession} onChange={(event) => setFilters({ ...filters, succession: event.target.value })}><option value="">{t('species.filterAny')}</option>{['placenta', 'secondary', 'climax'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
-        <label><span>{t('species.filterRole')}</span><select aria-label={t('species.filterRole')} value={filters.role} onChange={(event) => setFilters({ ...filters, role: event.target.value })}><option value="">{t('species.filterAny')}</option>{['food', 'fruit', 'biomass', 'nitrogen fixation', 'timber', 'fodder', 'wind protection', 'pollinator resource'].map((value) => <option key={value} value={value}>{localizedEnum(value, t)}</option>)}</select></label>
-        <label><span>{t('species.filterEvergreen')}</span><select aria-label={t('species.filterEvergreen')} value={filters.evergreen} onChange={(event) => setFilters({ ...filters, evergreen: event.target.value as CatalogueFilters['evergreen'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('species.evergreen')}</option><option value="false">{t('species.deciduous')}</option></select></label>
-        <label><span>{t('species.filterNitrogen')}</span><select aria-label={t('species.filterNitrogen')} value={filters.nitrogenFixer} onChange={(event) => setFilters({ ...filters, nitrogenFixer: event.target.value as CatalogueFilters['nitrogenFixer'] })}><option value="">{t('species.filterAny')}</option><option value="true">{t('actions.yes')}</option><option value="false">{t('actions.no')}</option></select></label>
-        <label><span>{t('species.filterDrought')}</span><select aria-label={t('species.filterDrought')} value={filters.droughtMinimum} onChange={(event) => setFilters({ ...filters, droughtMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[3, 4, 5].map((value) => <option key={value} value={value}>{value}/5+</option>)}</select></label>
-        <label><span>{t('species.filterEvidence')}</span><select aria-label={t('species.filterEvidence')} value={filters.evidenceMinimum} onChange={(event) => setFilters({ ...filters, evidenceMinimum: Number(event.target.value) })}><option value="0">{t('species.filterAny')}</option>{[2, 3, 4].map((value) => <option key={value} value={value}>{value}+</option>)}</select></label>
-      </div>
-      <div className="catalogue-meta"><span><strong>{stats ? formatNumber(stats.total, 0) : '—'}</strong> {t('species.switchboardTaxa')}</span><span><strong>{stats ? formatNumber(stats.globUnt, 0) : '—'}</strong> {t('species.globUntRecords')}</span></div>
-      {catalogueResults.length > 0 && <div className="catalogue-results">{catalogueResults.map((item) => {
-        const designSpecies = DESIGN_SPECIES_BY_ID.get(item.id);
-        const selected = Boolean(designSpecies && selectedIds.includes(designSpecies.id));
-        const blocked = designSpecies?.invasiveStatus === 'blocked';
-        return <span key={item.id}><i>{item.scientificName}</i><span>{item.designReady && <small>{t('species.filterDesignReady')}</small>}{item.globUnt && <small>GlobUNT</small>}{item.stratum && <small>{localizedEnum(item.stratum, t)}</small>}{item.succession && <small>{localizedEnum(item.succession, t)}</small>}{designSpecies && !blocked && <button type="button" onClick={() => onToggle(designSpecies.id)}>{selected ? t('species.removeShort') : t('species.addShort')}</button>}</span></span>;
-      })}</div>}
-      {!recommendations.length ? <div className="inline-empty">{t('species.empty')}</div> : <div className="species-list">{visible.map((item) => {
-        const selected = selectedIds.includes(item.species.id);
-        return <div key={item.species.id} className={`species-row ${selected ? 'selected' : ''} ${inspected?.species.id === item.species.id ? 'inspected' : ''}`}>
-          <button className="species-open" onClick={() => setInspectedId(item.species.id)} aria-label={t('species.inspect', { name: speciesDisplayName(item.species, t) })}>
-            <span className="species-swatch" style={{ background: item.species.color }} />
-            <span className="species-name"><strong>{speciesDisplayName(item.species, t)}</strong><i>{item.species.scientificName}</i><small>{localizedEnum(item.species.stratum, t)} · {localizedEnum(item.species.succession, t)} · {item.species.roles.slice(0, 2).map((role) => localizedEnum(role, t)).join(' / ')}</small></span>
-            <span className="species-score"><strong>{item.score}</strong><small>/100</small></span>
-          </button>
-          <button className="select-check" onClick={() => onToggle(item.species.id)} aria-pressed={selected} aria-label={t(selected ? 'species.remove' : 'species.add', { name: speciesDisplayName(item.species, t) })}>{selected && <Check size={13} />}</button>
-        </div>;
-      })}</div>}
-      {inspected && <div className={`species-inspector ${inspected.status}`} data-testid="species-inspector">
-        <header>
-          <span className="species-swatch" style={{ background: inspected.species.color }} />
-          <span><small>{translatedStatus(inspected.status, t)} · {t('species.score', { score: inspected.score })}</small><strong>{speciesDisplayName(inspected.species, t)}</strong><i>{inspected.species.scientificName}</i></span>
-          <span className="species-inspector-actions">
-            {inspected.status === 'blocked' && <CircleOff size={20} />}
-            {inspectedId && <button type="button" aria-label={t('actions.close')} onClick={() => setInspectedId(null)}><X size={16} /></button>}
-          </span>
-        </header>
-        {inspected.status === 'blocked' ? (
-          <div className="mitigation-list"><strong>{t('species.excludedFromLayouts')}</strong>{inspected.mitigations.map((item) => <p key={item}>{localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>
-        ) : (
-          <>
-            <div className="suitability-components">{inspected.components.map((component) => <div key={component.key} className={component.status}><span><strong>{t(`species.component.${component.key}`)}</strong><small>{t('species.weightStatus', { weight: Math.round(component.weight * 100), status: translatedStatus(component.status, t) })}</small></span><output>{component.score}</output><div><i style={{ width: `${component.score}%` }} /></div><p>{localizedSuitabilityExplanation(component, inspected.species, siteProfile, t)}</p></div>)}</div>
-            {inspected.mitigations.length > 0 && <div className="mitigation-list"><strong>{t('species.checksBeforeUse')}</strong>{inspected.mitigations.map((item) => <p key={item}>• {localizedMitigation(item, inspected, siteProfile, t)}</p>)}</div>}
-          </>
-        )}
-        <div className="species-sources"><strong>{t('species.linkedEvidence')}</strong>{inspected.species.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={`${source.label}-${source.version}`}><span>{source.label}</span><small>{source.version} · {source.supports.map((value) => localizedEnum(value, t)).join(', ')}</small></a>)}</div>
-      </div>}
-      </>}
       </div>
       </div>
       <div className="panel-action-bar">
