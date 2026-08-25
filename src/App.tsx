@@ -70,6 +70,17 @@ import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakE
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope, normalizeMachineryConfiguration } from './data/machinery';
 import { disabledFirebreakPlan } from './lib/firebreak';
 import { defaultFireOperationsPlan, effisFireWeatherTile, normalizeFireOperationsPlan } from './lib/fireOperations';
+import {
+  GIBS_FIRE_LAYERS,
+  GIBS_FIRE_RESOLUTION_M,
+  GIBS_RASTER_LAYERS,
+  type GibsRasterId,
+  gibsFireOverlay,
+  gibsObservationDate,
+  gibsRasterOverlay,
+  normalizeGibsDate,
+  worldviewPermalink,
+} from './lib/gibs';
 import { assessFireScreening, type FireScreeningComponentId } from './lib/fireRisk';
 import { defaultProjectCollaboration, normalizeProjectCollaboration } from './lib/collaboration';
 import { growthState } from './lib/growth';
@@ -311,7 +322,7 @@ export default function App() {
 }
 
 type SharedSection = Exclude<WorkspaceSection, 'analysis'>;
-type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'recentImagery' | 'moisture' | 'bedrock' | 'groundwater' | 'wind' | 'solar' | 'comments';
+type SharedLayerId = 'boundary' | 'constraints' | 'infrastructure' | 'vegetation' | 'plants' | 'machinery' | 'firebreak' | 'irrigation' | 'recentImagery' | 'landscapeImagery' | 'observedFires' | 'hls' | 'surfaceWater' | 'flood' | 'aerosol' | 'disturbance' | 'precipitation' | 'moisture' | 'bedrock' | 'groundwater' | 'wind' | 'solar' | 'comments';
 const SHARED_STEPS = STEPS.filter((step) => step.id !== 'analysis') as Array<{ id: SharedSection; label: string; icon: typeof MapIcon }>;
 
 const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
@@ -324,6 +335,14 @@ const DEFAULT_SHARED_LAYERS: Record<SharedLayerId, boolean> = {
   firebreak: true,
   irrigation: true,
   recentImagery: false,
+  landscapeImagery: false,
+  observedFires: false,
+  hls: false,
+  surfaceWater: false,
+  flood: false,
+  aerosol: false,
+  disturbance: false,
+  precipitation: false,
   moisture: false,
   bedrock: false,
   groundwater: false,
@@ -349,10 +368,13 @@ function SharedProjectPage({ token }: { token: string }) {
   const [solarMonth, setSolarMonth] = useState(6);
   const [solarHour, setSolarHour] = useState(12);
   const [mapReady, setMapReady] = useState(false);
+  const [gibsDate] = useState(() => gibsObservationDate());
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const sharedAsideRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
+  const gibsRasterOverlaysRef = useRef<Partial<Record<GibsRasterId, any>>>({});
+  const gibsFireOverlayRef = useRef<any>(null);
 
   useEffect(() => {
     Promise.all([api<AppConfig>('/api/config'), api<SharedProjectState>(`/api/shared/projects/${token}`)])
@@ -665,6 +687,34 @@ function SharedProjectPage({ token }: { token: string }) {
     };
   }, [layers, locale, mapReady, project, selectedSolarHour, selectedTreeId, t, variant]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    const enabled: Partial<Record<GibsRasterId, number>> = {};
+    if (layers.landscapeImagery) enabled['true-color'] = 0.72;
+    if (layers.hls) enabled.hls = 0.78;
+    if (layers.surfaceWater) enabled['surface-water'] = 0.72;
+    if (layers.flood) enabled.flood = 0.78;
+    if (layers.aerosol) enabled.aerosol = 0.7;
+    if (layers.disturbance) enabled.disturbance = 0.72;
+    if (layers.precipitation) enabled.precipitation = 0.7;
+    syncGibsRasterOverlays(map, maps, gibsRasterOverlaysRef, enabled, gibsDate, project?.site ?? null);
+    return () => syncGibsRasterOverlays(map, maps, gibsRasterOverlaysRef, {}, gibsDate, null);
+  }, [gibsDate, layers.aerosol, layers.disturbance, layers.flood, layers.hls, layers.landscapeImagery, layers.precipitation, layers.surfaceWater, mapReady, project]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    gibsFireOverlayRef.current?.setMap(null);
+    gibsFireOverlayRef.current = null;
+    if (!map || !maps || !project || !layers.observedFires) return;
+    const overlay = gibsFireOverlay(project.site, gibsDate);
+    gibsFireOverlayRef.current = new maps.GroundOverlay(overlay.url, overlay.bounds, { opacity: 0.86, clickable: false });
+    gibsFireOverlayRef.current.setMap(map);
+    return () => gibsFireOverlayRef.current?.setMap(null);
+  }, [gibsDate, layers.observedFires, mapReady, project]);
+
   async function submitComment() {
     if (!reviewerName.trim() || !message.trim()) return;
     setBusy(true);
@@ -725,6 +775,14 @@ function SharedProjectPage({ token }: { token: string }) {
     { id: 'firebreak', icon: Flame },
     { id: 'irrigation', icon: Waves },
     { id: 'recentImagery', icon: Satellite },
+    { id: 'landscapeImagery', icon: Satellite },
+    { id: 'observedFires', icon: Flame },
+    { id: 'hls', icon: Satellite },
+    { id: 'surfaceWater', icon: Waves },
+    { id: 'flood', icon: Droplets },
+    { id: 'aerosol', icon: WindIcon },
+    { id: 'disturbance', icon: Scissors },
+    { id: 'precipitation', icon: CloudSun },
     { id: 'moisture', icon: Droplets },
     { id: 'bedrock', icon: Layers3 },
     { id: 'groundwater', icon: Droplets },
@@ -748,6 +806,16 @@ function SharedProjectPage({ token }: { token: string }) {
       </div>}
       {selectedTree && selectedTreeSpecies && <div className="shared-tree-detail" data-testid="shared-tree-detail"><button aria-label={t('actions.close')} onClick={() => setSelectedTreeId(null)}><X size={14} /></button><span className="tree-dot" style={{ background: selectedTreeSpecies.color }} /><span><small>{plantPositionCode(selectedTree)}</small><strong>{speciesDisplayName(selectedTreeSpecies, t)}</strong><i>{selectedTreeSpecies.scientificName}</i></span></div>}
       {canReview && <span className="shared-map-hint"><MousePointer2 size={14} />{t('shared.mapHint')}</span>}
+      <div className="map-source-attribution" aria-live="polite">
+        {layers.landscapeImagery && <span>{t('map.gibsAttribution', { date: gibsDate })}</span>}
+        {layers.observedFires && <span>{t('map.firmsAttribution', { date: gibsDate })}</span>}
+        {layers.hls && <span>{t('map.hlsAttribution', { date: gibsDate })}</span>}
+        {layers.surfaceWater && <span>{t('map.surfaceWaterAttribution', { date: gibsDate })}</span>}
+        {layers.flood && <span>{t('map.floodAttribution', { date: gibsDate })}</span>}
+        {layers.aerosol && <span>{t('map.aerosolAttribution', { date: gibsDate })}</span>}
+        {layers.disturbance && <span>{t('map.disturbanceAttribution', { date: gibsDate })}</span>}
+        {layers.precipitation && <span>{t('map.precipitationAttribution', { date: gibsDate })}</span>}
+      </div>
     </section>
     <aside ref={sharedAsideRef}>
       <nav className="shared-section-nav" aria-label={t('shared.projectSections')}>{availableSections.map(({ id, icon: Icon }) => <button key={id} data-section={id} aria-current={section === id ? 'page' : undefined} onClick={() => selectSharedSection(id)}><Icon size={16} /><span>{id === 'species' ? t('shared.speciesTab') : t(`nav.${id}`)}</span></button>)}</nav>
@@ -941,6 +1009,7 @@ function SharedProjectSection({ project, variant, species, section, dailySolarEx
       {project.fireOperations.tasks.map((task) => <SharedRow key={task.id} label={t(`fireOperations.task.${task.id}`)} value={translatedStatus(task.status, t)} />)}
       <p>{project.fireOperations.notes || t('shared.noOperationsNotes')}</p>
       <a href={project.fireOperations.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{project.fireOperations.sourceSnapshot.provider} · {project.fireOperations.sourceSnapshot.layer} · {shortDate(project.fireOperations.sourceSnapshot.forecastDate, locale)}</a>
+      <a href={worldviewPermalink(project.site, gibsObservationDate())} target="_blank" rel="noreferrer">{t('map.openWorldview')}</a>
     </SharedDataCard>
   </SharedSectionFrame>;
   if (section === 'costs') return <SharedSectionFrame eyebrow={t('shared.section.costsEyebrow')} title={t('shared.section.costsTitle')} body={t('shared.section.costsBody')}>
@@ -1204,10 +1273,20 @@ function WorkspaceApp() {
   const [treeSpeciesId, setTreeSpeciesId] = useState<string>('');
   const [showNdmi, setShowNdmi] = useState(false);
   const [showRecentImagery, setShowRecentImagery] = useState(false);
+  const [showGibsImagery, setShowGibsImagery] = useState(false);
+  const [showGibsFires, setShowGibsFires] = useState(false);
+  const [showGibsHls, setShowGibsHls] = useState(false);
+  const [showGibsSurfaceWater, setShowGibsSurfaceWater] = useState(false);
+  const [showGibsFlood, setShowGibsFlood] = useState(false);
+  const [showGibsAerosol, setShowGibsAerosol] = useState(false);
+  const [showGibsDisturbance, setShowGibsDisturbance] = useState(false);
+  const [showGibsPrecipitation, setShowGibsPrecipitation] = useState(false);
+  const [gibsDate, setGibsDate] = useState(() => gibsObservationDate());
   const [showDepthToBedrock, setShowDepthToBedrock] = useState(false);
   const [showGroundwater, setShowGroundwater] = useState(false);
   const [basemap, setBasemap] = useState<'google' | 'esri'>('google');
   const [imageryOpacity, setImageryOpacity] = useState(0.72);
+  const [gibsImageryOpacity, setGibsImageryOpacity] = useState(0.72);
   const [groundwaterOpacity, setGroundwaterOpacity] = useState(0.58);
   const [showWaterSamples, setShowWaterSamples] = useState(false);
   const [showExistingVegetation, setShowExistingVegetation] = useState(true);
@@ -1286,6 +1365,8 @@ function WorkspaceApp() {
   const machineryOverlaysRef = useRef<any[]>([]);
   const firebreakOverlaysRef = useRef<any[]>([]);
   const fireWeatherOverlayRef = useRef<any>(null);
+  const gibsRasterOverlaysRef = useRef<Partial<Record<GibsRasterId, any>>>({});
+  const gibsFireOverlayRef = useRef<any>(null);
   const windOverlaysRef = useRef<any[]>([]);
   const solarOverlaysRef = useRef<any[]>([]);
   const waterOverlaysRef = useRef<any[]>([]);
@@ -1928,6 +2009,46 @@ function WorkspaceApp() {
     fireWeatherOverlayRef.current.setMap(map);
     return () => fireWeatherOverlayRef.current?.setMap(null);
   }, [site, showFireWeather, fireOperations.sourceSnapshot.forecastDate]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
+    const enabled: Partial<Record<GibsRasterId, number>> = {};
+    if (showGibsImagery) enabled['true-color'] = gibsImageryOpacity;
+    if (showGibsHls) enabled.hls = 0.78;
+    if (showGibsSurfaceWater) enabled['surface-water'] = 0.72;
+    if (showGibsFlood) enabled.flood = 0.78;
+    if (showGibsAerosol) enabled.aerosol = 0.7;
+    if (showGibsDisturbance) enabled.disturbance = 0.72;
+    if (showGibsPrecipitation) enabled.precipitation = 0.7;
+    syncGibsRasterOverlays(map, maps, gibsRasterOverlaysRef, enabled, gibsDate, site);
+    return () => syncGibsRasterOverlays(map, maps, gibsRasterOverlaysRef, {}, gibsDate, null);
+  }, [
+    gibsDate,
+    gibsImageryOpacity,
+    mapReady,
+    showGibsAerosol,
+    showGibsDisturbance,
+    showGibsFlood,
+    showGibsHls,
+    showGibsImagery,
+    showGibsPrecipitation,
+    showGibsSurfaceWater,
+    site,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    gibsFireOverlayRef.current?.setMap(null);
+    gibsFireOverlayRef.current = null;
+    if (!map || !maps || !site || !showGibsFires) return;
+    const overlay = gibsFireOverlay(site, gibsDate);
+    gibsFireOverlayRef.current = new maps.GroundOverlay(overlay.url, overlay.bounds, { opacity: 0.86, clickable: false });
+    gibsFireOverlayRef.current.setMap(map);
+    return () => gibsFireOverlayRef.current?.setMap(null);
+  }, [gibsDate, mapReady, showGibsFires, site]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -4015,10 +4136,25 @@ function WorkspaceApp() {
             <MapLayerToggle icon={Droplets} tone="irrigation" active={showIrrigation} disabled={!irrigation} label={t('map.layerIrrigation')} hint={t('map.layerIrrigationHint')} toggleLabel={t('map.toggleIrrigation')} onToggle={() => { const next = !showIrrigation; setShowIrrigation(next); if (!next) setEditingIrrigation(false); }} />
             <small>{t('map.evidenceLayers')}</small>
             <MapLayerToggle icon={Flame} tone="risk" active={showFireWeather} disabled={!site} label={t('map.layerFireWeather')} hint={t('map.layerFireWeatherHint')} toggleLabel={t('map.toggleFireWeather')} onToggle={() => setShowFireWeather((value) => !value)} />
+            <MapLayerToggle icon={Flame} tone="gibs-fires" active={showGibsFires} disabled={!site} label={t('map.layerObservedFires')} hint={t('map.layerObservedFiresHint')} toggleLabel={t('map.toggleObservedFires')} onToggle={() => setShowGibsFires((value) => !value)} />
             <MapLayerToggle icon={WindIcon} tone="wind" active={showWind} disabled={siteProfile?.solar.status !== 'available'} label={t('map.layerWind')} hint={t('map.layerWindHint')} toggleLabel={t('map.toggleWind')} onToggle={() => setShowWind((value) => !value)} />
             <MapLayerToggle icon={TreePine} tone="vegetation" active={showExistingVegetation} disabled={!siteProfile?.satellite.existingVegetation.patches.length} label={t('map.layerVegetation')} hint={t('map.layerVegetationHint')} toggleLabel={t('map.toggleVegetation')} onToggle={() => setShowExistingVegetation((value) => !value)} />
             <MapLayerToggle icon={Satellite} tone="recent-imagery" active={showRecentImagery} disabled={!siteProfile?.satellite.optical.trueColorPreviewUrl} label={t('map.layerRecentImagery')} hint={t('map.layerRecentImageryHint')} toggleLabel={t('map.toggleRecentImagery')} onToggle={() => setShowRecentImagery((value) => !value)} />
             {showRecentImagery && <LayerOpacityControl label={t('map.opacity')} value={imageryOpacity} onChange={setImageryOpacity} />}
+            <small>{t('map.nasaLayers')}</small>
+            <MapLayerToggle icon={Satellite} tone="gibs-imagery" active={showGibsImagery} disabled={!site} label={t('map.layerLandscapeImagery')} hint={t('map.layerLandscapeImageryHint')} toggleLabel={t('map.toggleLandscapeImagery')} onToggle={() => setShowGibsImagery((value) => !value)} />
+            {showGibsImagery && <LayerOpacityControl label={t('map.opacity')} value={gibsImageryOpacity} onChange={setGibsImageryOpacity} />}
+            <MapLayerToggle icon={Satellite} tone="gibs-hls" active={showGibsHls} disabled={!site} label={t('map.layerHls')} hint={t('map.layerHlsHint')} toggleLabel={t('map.toggleHls')} onToggle={() => setShowGibsHls((value) => !value)} />
+            <MapLayerToggle icon={Waves} tone="gibs-water" active={showGibsSurfaceWater} disabled={!site} label={t('map.layerSurfaceWater')} hint={t('map.layerSurfaceWaterHint')} toggleLabel={t('map.toggleSurfaceWater')} onToggle={() => setShowGibsSurfaceWater((value) => !value)} />
+            <MapLayerToggle icon={Droplets} tone="gibs-flood" active={showGibsFlood} disabled={!site} label={t('map.layerFlood')} hint={t('map.layerFloodHint')} toggleLabel={t('map.toggleFlood')} onToggle={() => setShowGibsFlood((value) => !value)} />
+            <MapLayerToggle icon={WindIcon} tone="gibs-aerosol" active={showGibsAerosol} disabled={!site} label={t('map.layerAerosol')} hint={t('map.layerAerosolHint')} toggleLabel={t('map.toggleAerosol')} onToggle={() => setShowGibsAerosol((value) => !value)} />
+            <MapLayerToggle icon={Scissors} tone="gibs-disturbance" active={showGibsDisturbance} disabled={!site} label={t('map.layerDisturbance')} hint={t('map.layerDisturbanceHint')} toggleLabel={t('map.toggleDisturbance')} onToggle={() => setShowGibsDisturbance((value) => !value)} />
+            <MapLayerToggle icon={CloudSun} tone="gibs-precip" active={showGibsPrecipitation} disabled={!site} label={t('map.layerPrecipitation')} hint={t('map.layerPrecipitationHint')} toggleLabel={t('map.togglePrecipitation')} onToggle={() => setShowGibsPrecipitation((value) => !value)} />
+            {(showGibsImagery || showGibsFires || showGibsHls || showGibsSurfaceWater || showGibsFlood || showGibsAerosol || showGibsDisturbance || showGibsPrecipitation) && <label className="layer-date-control">
+              <span>{t('map.gibsDate')}</span>
+              <input aria-label={t('map.gibsDate')} type="date" value={gibsDate} onChange={(event) => setGibsDate(normalizeGibsDate(event.target.value))} />
+            </label>}
+            {site && <a className="map-worldview-link" href={worldviewPermalink(site, gibsDate)} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />{t('map.openWorldview')}</a>}
             <MapLayerToggle icon={Waves} tone="ndmi" active={showNdmi} disabled={!siteProfile?.satellite.optical.ndmiPreviewUrl} label={t('map.layerNdmi')} hint={t('map.layerNdmiHint')} toggleLabel={t('map.toggleNdmi')} onToggle={() => setShowNdmi((value) => !value)} />
             <MapLayerToggle icon={Droplets} tone="water" active={showWaterSamples} disabled={!siteProfile?.satellite.optical.waterSamples.length} label={t('map.layerWater')} hint={t('map.layerWaterHint')} toggleLabel={t('map.toggleWater')} onToggle={() => setShowWaterSamples((value) => !value)} />
             <MapLayerToggle icon={Layers3} tone="bedrock" active={showDepthToBedrock} disabled={!siteProfile?.soil.depthToBedrock?.samples.length} label={t('map.layerDepthToBedrock')} hint={t('map.layerDepthToBedrockHint')} toggleLabel={t('map.toggleDepthToBedrock')} onToggle={() => setShowDepthToBedrock((value) => !value)} />
@@ -4044,6 +4180,14 @@ function WorkspaceApp() {
           <div className="map-source-attribution" aria-live="polite">
             <span>{t(basemap === 'esri' ? 'map.esriAttribution' : 'map.googleAttribution')}</span>
             {showRecentImagery && <span>{t('map.sentinelAttribution')}</span>}
+            {showGibsImagery && <span>{t('map.gibsAttribution', { date: gibsDate })}</span>}
+            {showGibsFires && <span>{t('map.firmsAttribution', { date: gibsDate })}</span>}
+            {showGibsHls && <span>{t('map.hlsAttribution', { date: gibsDate })}</span>}
+            {showGibsSurfaceWater && <span>{t('map.surfaceWaterAttribution', { date: gibsDate })}</span>}
+            {showGibsFlood && <span>{t('map.floodAttribution', { date: gibsDate })}</span>}
+            {showGibsAerosol && <span>{t('map.aerosolAttribution', { date: gibsDate })}</span>}
+            {showGibsDisturbance && <span>{t('map.disturbanceAttribution', { date: gibsDate })}</span>}
+            {showGibsPrecipitation && <span>{t('map.precipitationAttribution', { date: gibsDate })}</span>}
             {showGroundwater && <span>{t('map.groundwaterAttribution')}</span>}
           </div>
           {showWind && siteProfile?.solar.status === 'available' && siteProfile.solar.prevailingWindDirectionDegrees !== null && (
@@ -4117,7 +4261,7 @@ function WorkspaceApp() {
             canRedo={siteRedoRef.current.length > 0}
             busy={Boolean(busy)}
           />}
-          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
+          {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} worldviewUrl={site ? worldviewPermalink(site, gibsDate) : null} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowGibsImagery={() => { setShowGibsImagery(true); setShowLayerPanel(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} onToggle={toggleSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} />}
           {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
           {section === 'water' && <WaterPanel
@@ -4153,9 +4297,13 @@ function WorkspaceApp() {
             profile={siteProfile}
             variant={selectedVariant}
             plan={fireOperations}
+            site={site}
+            gibsDate={gibsDate}
             onPlan={(value) => setFireOperations(normalizeFireOperationsPlan(value))}
             onTask={updateFireTask}
             onShowLayer={() => setShowFireWeather(true)}
+            onShowGibsFires={() => { setShowGibsFires(true); setShowLayerPanel(true); }}
+            onGibsDate={setGibsDate}
             onCosts={() => setSection('costs')}
           />}
           {section === 'costs' && <CostsPanel costs={costs} irrigation={irrigation} species={selectedSpecies} configuration={economicConfiguration} onConfiguration={(value) => setEconomicConfiguration(normalizeEconomicConfiguration(value, siteProfile?.location.countryCode ?? value.countryCode))} canCalculate={Boolean(selectedVariant && siteProfile)} onCalculate={recalculateCosts} onPrepare={() => setSection(selectedVariant ? 'layout' : 'species')} />}
@@ -4458,7 +4606,7 @@ function OnboardingTour({
 
 function MapLayerToggle({ icon: Icon, tone, active, disabled, label, hint, toggleLabel, onToggle }: {
   icon: typeof Layers3;
-  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'solar' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind' | 'basemap-google' | 'basemap-esri' | 'recent-imagery' | 'bedrock' | 'groundwater';
+  tone: 'boundary' | 'exclusions' | 'paths' | 'infrastructure' | 'observed' | 'trees' | 'solar' | 'machinery' | 'firebreak' | 'risk' | 'irrigation' | 'vegetation' | 'ndmi' | 'water' | 'wind' | 'basemap-google' | 'basemap-esri' | 'recent-imagery' | 'gibs-imagery' | 'gibs-fires' | 'gibs-hls' | 'gibs-water' | 'gibs-flood' | 'gibs-aerosol' | 'gibs-disturbance' | 'gibs-precip' | 'bedrock' | 'groundwater';
   active: boolean;
   disabled: boolean;
   label: string;
@@ -4836,13 +4984,17 @@ function ClearSiteDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
-function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLayer, onCosts }: {
+function FireOperationsPanel({ profile, variant, plan, site, gibsDate, onPlan, onTask, onShowLayer, onShowGibsFires, onGibsDate, onCosts }: {
   profile: SiteProfile | null;
   variant: LayoutVariant | null;
   plan: FireOperationsPlan;
+  site: SiteBoundary | null;
+  gibsDate: string;
   onPlan: (plan: FireOperationsPlan) => void;
   onTask: (id: FireMaintenanceTask['id'], patch: Partial<FireMaintenanceTask>) => void;
   onShowLayer: () => void;
+  onShowGibsFires: () => void;
+  onGibsDate: (value: string) => void;
   onCosts: () => void;
 }) {
   const { t, locale } = useI18n();
@@ -4914,6 +5066,7 @@ function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLay
         </section>}
       </>}
       <EffisSourceCard plan={plan} onPlan={onPlan} onShowLayer={onShowLayer} />
+      {site && <GibsFireSourceCard site={site} date={gibsDate} onDate={onGibsDate} onShowLayer={onShowGibsFires} />}
     </div>}
 
     {tab === 'data' && <div className="fire-data-view" data-testid="fire-analysis-data">
@@ -4927,11 +5080,13 @@ function FireOperationsPanel({ profile, variant, plan, onPlan, onTask, onShowLay
         </section>;
       })}
       <EffisSourceCard plan={plan} onPlan={onPlan} onShowLayer={onShowLayer} />
+      {site && <GibsFireSourceCard site={site} date={gibsDate} onDate={onGibsDate} onShowLayer={onShowGibsFires} />}
     </div>}
 
     {tab === 'sources' && <div className="fire-sources-view" data-testid="fire-analysis-sources">
       <div className="fire-data-note"><Satellite size={17} /><span><strong>{t('fireAnalysis.sourcesTitle')}</strong><small>{t('fireAnalysis.sourcesBody')}</small></span></div>
       <article className="fire-evidence-card"><span><Flame size={16} /><i><strong>Copernicus EFFIS</strong><small>{plan.sourceSnapshot.layer} · {plan.sourceSnapshot.forecastDate}</small></i></span><b>{t('fireOperations.resolution', { value: plan.sourceSnapshot.resolutionKm })}</b><p>{t('fireOperations.sourceBody')}</p><a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a></article>
+      {site && <article className="fire-evidence-card"><span><Satellite size={16} /><i><strong>NASA FIRMS / GIBS</strong><small>{GIBS_FIRE_LAYERS[0]} · {gibsDate}</small></i></span><b>{t('fireOperations.firmsResolution', { value: GIBS_FIRE_RESOLUTION_M })}</b><p>{t('fireOperations.firmsBody')}</p><a href={worldviewPermalink(site, gibsDate)} target="_blank" rel="noreferrer">{t('map.openWorldview')} <ChevronRight size={13} /></a></article>}
       {evidence.map((item) => <article className="fire-evidence-card" key={`${item.source}-${item.version}`}>
         <span><Database size={16} /><i><strong>{item.source}</strong><small>{item.version}</small></i></span>
         <b>{t(`evidence.confidence.${item.confidence}`)}</b>
@@ -4974,6 +5129,22 @@ function EffisSourceCard({ plan, onPlan, onShowLayer }: {
     <p>{t('fireOperations.sourceBody')}</p>
     <div><label><span>{t('fireOperations.forecastDate')}</span><input type="date" value={plan.sourceSnapshot.forecastDate} onChange={(event) => onPlan({ ...plan, sourceSnapshot: { ...plan.sourceSnapshot, forecastDate: event.target.value, observedAt: new Date().toISOString() } })} /></label><button onClick={onShowLayer}><Layers3 size={14} />{t('fireOperations.showLayer')}</button></div>
     <a href={plan.sourceSnapshot.sourceUrl} target="_blank" rel="noreferrer">{t('fireOperations.openSource')} <ChevronRight size={13} /></a>
+  </div>;
+}
+
+function GibsFireSourceCard({ site, date, onDate, onShowLayer }: {
+  site: SiteBoundary;
+  date: string;
+  onDate: (value: string) => void;
+  onShowLayer: () => void;
+}) {
+  const { t } = useI18n();
+  return <div className="fire-source-card nasa" data-testid="gibs-fire-source">
+    <span><Satellite size={18} /><i><small>{t('fireOperations.firmsSource')}</small><strong>NASA FIRMS · VIIRS</strong></i></span>
+    <b>{t('fireOperations.firmsResolution', { value: GIBS_FIRE_RESOLUTION_M })}</b>
+    <p>{t('fireOperations.firmsBody')}</p>
+    <div><label><span>{t('map.gibsDate')}</span><input type="date" value={date} onChange={(event) => onDate(normalizeGibsDate(event.target.value))} /></label><button onClick={onShowLayer}><Layers3 size={14} />{t('fireOperations.showLayer')}</button></div>
+    <a href={worldviewPermalink(site, date)} target="_blank" rel="noopener noreferrer">{t('map.openWorldview')} <ChevronRight size={13} /></a>
   </div>;
 }
 
@@ -5408,7 +5579,7 @@ function scheduleTaskValues(schedule: OperationalSchedule, site: SiteBoundary, p
   return values;
 }
 
-function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onShowSubsurface, onOverride, additionalEvidence, onContinue }: { profile: SiteProfile | null; hasSite: boolean; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onShowSubsurface: (layer: 'depth' | 'groundwater') => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[]; onContinue: () => void }) {
+function ProfilePanel({ profile, hasSite, worldviewUrl, onAnalyze, onOpenSite, onShowNdmi, onShowGibsImagery, onShowSubsurface, onOverride, additionalEvidence, onContinue }: { profile: SiteProfile | null; hasSite: boolean; worldviewUrl: string | null; onAnalyze: () => void; onOpenSite: () => void; onShowNdmi: () => void; onShowGibsImagery: () => void; onShowSubsurface: (layer: 'depth' | 'groundwater') => void; onOverride: (input: { field: SiteProfileOverrideField; value: string; reason: string; sourceLabel: string; observedAt: string }) => Promise<void>; additionalEvidence: Evidence[]; onContinue: () => void }) {
   const { t, locale } = useI18n();
   const [activeEvidenceTab, setActiveEvidenceTab] = useState<'overview' | 'wind' | 'soil' | 'subsurface' | 'satellite' | 'sources'>('overview');
   const [overrideField, setOverrideField] = useState<SiteProfileOverrideField>(SITE_PROFILE_OVERRIDE_DEFINITIONS[0].field);
@@ -5560,6 +5731,8 @@ function ProfilePanel({ profile, hasSite, onAnalyze, onOpenSite, onShowNdmi, onS
           {optical ? <><p>{t('profile.clearPixels', { date: shortDate(optical.acquiredAt, locale), cloud: optical.fieldCloudPercent })}</p><div className="index-row"><Index label="NDVI" value={optical.ndvi.mean} /><Index label="NDMI" value={optical.ndmi.mean} /><Index label="NDWI" value={optical.ndwi.mean} /></div></> : <p>{t('profile.noClearSentinel')}</p>}
           <div className="radar-line"><Waves size={15} /><span>Sentinel-1: <strong>{localizedEnum(radar.surfaceMoistureSignal, t)}</strong>{radar.latestVvAnomalyDb !== null ? ` · ${signed(radar.latestVvAnomalyDb)} dB` : ''}</span></div>
           <button className="text-button" onClick={onShowNdmi}>{t('profile.showWaterLayers')} <ChevronRight size={14} /></button>
+          <button className="text-button" onClick={onShowGibsImagery}>{t('profile.showLandscapeImagery')} <ChevronRight size={14} /></button>
+          {worldviewUrl && <a className="text-button" href={worldviewUrl} target="_blank" rel="noopener noreferrer">{t('map.openWorldview')} <ExternalLink size={14} /></a>}
         </div>
       </div>
       </div>}
@@ -7111,6 +7284,24 @@ function groundwaterImageUrl(
 function removeOverlayMapType(map: any, overlay: any) {
   for (let index = map.overlayMapTypes.getLength() - 1; index >= 0; index -= 1) {
     if (map.overlayMapTypes.getAt(index) === overlay) map.overlayMapTypes.removeAt(index);
+  }
+}
+function syncGibsRasterOverlays(
+  map: any,
+  maps: any,
+  store: { current: Partial<Record<GibsRasterId, any>> },
+  enabled: Partial<Record<GibsRasterId, number>>,
+  date: string,
+  site: SiteBoundary | null,
+) {
+  for (const id of Object.keys(GIBS_RASTER_LAYERS) as GibsRasterId[]) {
+    store.current[id]?.setMap(null);
+    store.current[id] = null;
+    const opacity = enabled[id];
+    if (opacity == null || !site) continue;
+    const overlay = gibsRasterOverlay(GIBS_RASTER_LAYERS[id], site, date);
+    store.current[id] = new maps.GroundOverlay(overlay.url, overlay.bounds, { opacity, clickable: false });
+    store.current[id].setMap(map);
   }
 }
 function depthToBedrockColor(depthM: number) {

@@ -135,7 +135,7 @@ async function loadRecoveryDraft(page: Page, project: ProjectState) {
     window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
   }, project);
   await page.goto('/');
-  await expect(page.getByText(project.name)).toBeVisible();
+  await expect(page.getByLabel('Project name')).toHaveValue(project.name);
 }
 
 test('persists fire operations and advanced group edits through local recovery', async ({ page }) => {
@@ -161,6 +161,9 @@ test('persists fire operations and advanced group edits through local recovery',
   const operations = page.getByTestId('fire-operations-panel');
   await expect(operations).toContainText('EFFIS · FWI');
   await expect(operations).toContainText('8 km forecast grid');
+  await expect(operations.getByTestId('gibs-fire-source')).toContainText('NASA FIRMS · VIIRS');
+  await expect(operations.getByTestId('gibs-fire-source')).toContainText('375 m thermal detections');
+  await expect(operations.getByRole('link', { name: 'Open this field in NASA Worldview' })).toBeVisible();
   await operations.getByRole('tab', { name: 'Operations' }).click();
   const firstTask = operations.locator('.fire-task-list article').filter({ hasText: 'Remove accumulated surface fuels' });
   await firstTask.locator('select').selectOption('complete');
@@ -168,11 +171,22 @@ test('persists fire operations and advanced group edits through local recovery',
   await operations.getByLabel('Next field inspection').fill('2026-08-15');
   await page.screenshot({ path: '/private/tmp/growup-fire-operations-checklist.png', fullPage: false });
   await operations.getByRole('tab', { name: 'Analysis' }).click();
-  await operations.getByRole('button', { name: 'Show on map' }).click();
+  await operations.locator('.fire-source-card').filter({ hasText: 'EFFIS · FWI' }).getByRole('button', { name: 'Show on map' }).click();
 
   await page.getByRole('button', { name: 'Map layers' }).click();
   const fireWeather = page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide EFFIS fire weather' });
+  const observedFires = page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide observed satellite fires' });
+  const sentinel = page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide the latest Sentinel image' });
+  const landscape = page.getByTestId('map-layer-panel').getByRole('button', { name: 'Show or hide NASA landscape imagery' });
   await expect(fireWeather).toHaveAttribute('aria-pressed', 'true');
+  await expect(observedFires).toHaveAttribute('aria-pressed', 'false');
+  await observedFires.click();
+  await expect(observedFires).toHaveAttribute('aria-pressed', 'true');
+  await expect(fireWeather).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('map-layer-panel').getByRole('link', { name: 'Open this field in NASA Worldview' })).toBeVisible();
+  await landscape.click();
+  await expect(landscape).toHaveAttribute('aria-pressed', 'true');
+  await expect(sentinel).toHaveAttribute('aria-pressed', 'false');
   await fireWeather.scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/private/tmp/growup-operations-and-fire-weather.png', fullPage: false });
   await expect.poll(async () => {
@@ -187,6 +201,38 @@ test('persists fire operations and advanced group edits through local recovery',
   await page.getByTestId('step-fire').click();
   await page.getByTestId('fire-operations-panel').getByRole('tab', { name: 'Operations' }).click();
   await expect(page.getByTestId('fire-operations-panel')).toContainText('1 of 5 controls closed');
+});
+
+test('adds NASA GIBS science overlays without replacing Sentinel or EFFIS', async ({ page }) => {
+  const project = projectFixture();
+  await mockBase(page);
+  await loadRecoveryDraft(page, project);
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  const panel = page.getByTestId('map-layer-panel');
+  const fireWeather = panel.getByRole('button', { name: 'Show or hide EFFIS fire weather' });
+  const sentinel = panel.getByRole('button', { name: 'Show or hide the latest Sentinel image' });
+  await fireWeather.click();
+  await expect(fireWeather).toHaveAttribute('aria-pressed', 'true');
+  await expect(sentinel).toBeVisible();
+  const nasaOverlays = [
+    'Show or hide NASA landscape imagery',
+    'Show or hide observed satellite fires',
+    'Show or hide NASA HLS 30 m reflectance',
+    'Show or hide NASA surface-water extent',
+    'Show or hide NASA 3-day flood extent',
+    'Show or hide NASA smoke and aerosol',
+    'Show or hide NASA vegetation disturbance',
+    'Show or hide NASA IMERG precipitation',
+  ];
+  for (const name of nasaOverlays) {
+    const overlay = panel.getByRole('button', { name });
+    await expect(overlay).toBeVisible();
+    await overlay.click();
+    await expect(overlay).toHaveAttribute('aria-pressed', 'true');
+  }
+  await expect(fireWeather).toHaveAttribute('aria-pressed', 'true');
+  await expect(sentinel).toHaveAttribute('aria-pressed', 'false');
+  await expect(panel.getByRole('link', { name: 'Open this field in NASA Worldview' })).toBeVisible();
 });
 
 test('creates the authenticated share link and renders the public review surface', async ({ page }) => {

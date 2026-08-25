@@ -173,7 +173,7 @@ test('creates a read-only project link from the library and exposes no mutation 
   expect(await page.locator('#root').evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
   const sectionNavigation = page.getByRole('navigation', { name: 'Shared project sections' });
   const sectionButtons = sectionNavigation.getByRole('button');
-  await expect(sectionButtons).toHaveCount(6);
+  await expect(sectionButtons).toHaveCount(8);
   await expect(page.getByRole('button', { name: 'Costs', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Analysis', exact: true })).toHaveCount(0);
   const sectionButtonRows = await sectionButtons.evaluateAll((buttons) => buttons.reduce<number[]>((rows, button) => {
@@ -181,7 +181,7 @@ test('creates a read-only project link from the library and exposes no mutation 
     if (!rows.some((row) => Math.abs(row - y) <= 2)) rows.push(y);
     return rows;
   }, []));
-  expect(sectionButtonRows).toHaveLength(2);
+  expect(sectionButtonRows).toHaveLength(3);
   const sectionButtonColumns = await sectionButtons.evaluateAll((buttons) => buttons.reduce<number[]>((columns, button) => {
     const x = Math.round(button.getBoundingClientRect().x);
     if (!columns.some((column) => Math.abs(column - x) <= 2)) columns.push(x);
@@ -213,6 +213,15 @@ test('creates a read-only project link from the library and exposes no mutation 
   await expect(page.getByTestId('wind-rose')).toBeVisible();
   const bedrockLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Depth to bedrock' });
   const groundwaterLayer = page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Groundwater context' });
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Latest Sentinel image' })).toBeVisible();
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'NASA landscape image' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Observed fires' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'HLS 30 m reflectance' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Surface water extent' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: '3-day flood' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Smoke and aerosol' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Vegetation disturbance' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('shared-layer-panel').getByRole('button', { name: 'Satellite precipitation' })).toHaveAttribute('aria-pressed', 'false');
   await bedrockLayer.click();
   await groundwaterLayer.click();
   await expect(bedrockLayer).toHaveAttribute('aria-pressed', 'true');

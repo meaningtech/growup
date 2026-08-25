@@ -38,6 +38,16 @@ Harvest mass is a per-tree planning catalogue in `src/data/harvestCatalogue.ts` 
 - [ESA WorldCover 2021 v200](https://planetarycomputer.microsoft.com/dataset/esa-worldcover): 10 m tree-cover class derived from Sentinel-1 and Sentinel-2, CC BY 4.0.
 - [Copernicus HRL Woody Vegetation Layer 2021](https://land.copernicus.eu/en/products/high-resolution-layer-small-landscape-features/woody-vegetation-layer-2021): official 5 m WMS, including isolated trees and permanent woody crops.
 - Google satellite imagery: high-resolution visual validation of the parcel boundary. It is not redistributed or used as an unlicensed analytical raster.
+- [NASA Global Imagery Browse Services (GIBS)](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api): optional dated landscape overlays. None replace parcel Sentinel clips, SoilGrids, Open-Meteo or EFFIS.
+  - VIIRS SNPP true-colour WMTS at 250 m.
+  - HLS S30 Nadir BRDF-Adjusted Reflectance at 30 m (`HLS_S30_Nadir_BRDF_Adjusted_Reflectance`).
+  - OPERA Dynamic Surface Water Extent from HLS at 30 m (`OPERA_L3_Dynamic_Surface_Water_Extent-HLS`).
+  - VIIRS combined 3-day flood at 250 m (`VIIRS_Combined_Flood_3-Day`).
+  - OMPS aerosol index (`OMPS_Aerosol_Index`).
+  - OPERA DIST-ALERT vegetation disturbance at 30 m (`OPERA_L3_DIST-ALERT-HLS_Color_Index`).
+  - IMERG precipitation rate at 10 km (`IMERG_Precipitation_Rate`).
+- [NASA FIRMS VIIRS thermal anomalies](https://firms.modaps.eosdis.nasa.gov/): optional 375 m hotspot overlay via GIBS WMS. Near-real-time detections, not a parcel ignition model, and not a substitute for the EFFIS Fire Weather Index.
+- [NASA Worldview](https://worldview.earthdata.nasa.gov/): permalink from the parcel bounding box into the official GIBS client. Growup does not fork that interface.
 
 The classifier combines independent tree/woody classes with absolute and field-relative multi-date NDVI persistence. Connected pixels become protected polygons with a 2.5 m safety buffer. Layout generation and manual placement both reject coordinates inside those polygons. Parcels above the accepted woody-cover threshold are rejected from blank-slate generation.
 
