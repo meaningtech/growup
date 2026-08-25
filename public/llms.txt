@@ -4,6 +4,10 @@
 
 GrowUp analyses a user-defined field boundary with terrain, historical climate, soil and Sentinel evidence. It ranks suitable species, generates reproducible planting systems, protects existing vegetation, designs editable irrigation networks and estimates establishment and operating costs. Plans remain preliminary until field surveys, soil tests, water-source verification and local professional review are complete.
 
+## Data sources
+
+Climate, solar, wind and elevation: Open-Meteo, with Google Elevation as a fallback. Soil: ISRIC SoilGrids. Bedrock: ISRIC/Shangguan depth-to-bedrock. Groundwater context: BGR/UNESCO WHYMAP. Vegetation and water indices: Copernicus Sentinel-2 and Sentinel-1 via Microsoft Planetary Computer, ESA WorldCover, Impact Observatory land cover and the Copernicus woody vegetation layer. Basemaps: Google satellite and optional Esri World Imagery. Place search: Nominatim first, Google Geocoding as a credential-protected fallback. Complementary landscape overlays: NASA GIBS and FIRMS; they do not replace Sentinel, SoilGrids or Open-Meteo. Fire operations: EFFIS Fire Weather Index. Species catalogue: Switchboard 4.0 and GlobUNT, with FAO ECOCROP, EUFORGEN and Plants of the World Online envelopes. Planning costs: Sicilian agriculture price book, with local rates as explicit user overrides. Unknown provider values stay unknown.
+
 ## Product
 
 - [GrowUp planning workspace](https://growup.earth/)

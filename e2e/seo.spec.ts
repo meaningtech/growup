@@ -12,6 +12,9 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   expect(html).toContain('name="twitter:site" content="@turinglabsorg"');
   expect(html).toContain('<h1>Data driven agroforestry planning</h1>');
   expect(html).toContain('<h2 id="seo-about-title">From field boundary to buildable plan</h2>');
+  expect(html).toContain('<h2 id="seo-sources-title">Data sources</h2>');
+  expect(html).toContain('Open-Meteo');
+  expect(html).toContain('SoilGrids');
   expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180"');
   expect(html).toContain('<link rel="manifest" href="/site.webmanifest"');
   expect(html).toContain('type="application/ld+json"');
@@ -51,10 +54,10 @@ test('serves indexable metadata, crawler files and the social sharing image', as
   expect(await manifest.json()).toMatchObject({ name: 'GrowUp - Data driven agroforestry planning', short_name: 'GrowUp', start_url: '/' });
 });
 
-test('keeps product information behind an explicit control', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+test('keeps product information behind an explicit control on a computer', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(page.getByTestId('info-panel')).toHaveCount(0);
+  await expect(page.getByTestId('info-landing')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open menu' }).click();
   await page.getByRole('dialog', { name: 'Menu' }).getByRole('button', { name: 'Info' }).click();
   const panel = page.getByTestId('info-panel');
@@ -63,13 +66,14 @@ test('keeps product information behind an explicit control', async ({ page }, te
   await expect(panel).toContainText('Read the land');
   await expect(panel).toContainText('Design the system');
   await expect(panel).toContainText('Prepare implementation');
+  await expect(panel).toContainText('Open-Meteo Historical Weather API');
+  await expect(panel).toContainText('ISRIC SoilGrids');
+  await expect(panel).toContainText('Copernicus Sentinel-2 L2A');
+  await expect(panel).toContainText('GrowUp supports planning decisions');
   const repository = panel.getByRole('link', { name: /GrowUp is open source/ });
   await expect(repository).toHaveAttribute('href', 'https://github.com/meaningtech/growup');
-  const bounds = await panel.boundingBox();
-  expect(bounds).not.toBeNull();
-  expect(bounds!.x).toBeGreaterThanOrEqual(0);
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: testInfo.outputPath('growup-info-mobile.png'), fullPage: false });
+  await expect(panel).toHaveAttribute('role', 'dialog');
+  await page.screenshot({ path: testInfo.outputPath('growup-info-desktop.png'), fullPage: false });
   await panel.getByRole('button', { name: 'Close information' }).click();
   await expect(panel).toHaveCount(0);
 });

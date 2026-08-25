@@ -65,6 +65,7 @@ import {
   X,
 } from 'lucide-react';
 import { DESIGN_SPECIES, DESIGN_SPECIES_BY_ID } from './data/designSpecies';
+import { INFO_DATA_SOURCE_GROUPS } from './lib/productSources';
 import { defaultEconomicConfiguration, normalizeEconomicConfiguration } from './data/economicProfiles';
 import { FIREBREAK_FUEL_PRESETS, firebreakConfigurationFromFuelModel, firebreakEnvelope, normalizeFirebreakConfiguration } from './data/firebreak';
 import { MACHINERY_PRESETS, machineryConfigurationFromPreset, machineryEnvelope, normalizeMachineryConfiguration } from './data/machinery';
@@ -319,6 +320,21 @@ function onboardingWorkspaceSection(step: OnboardingStep): WorkspaceSection | nu
 export default function App() {
   const sharedToken = window.location.pathname.match(/^\/shared\/([^/]+)$/)?.[1] ?? null;
   return sharedToken ? <SharedProjectPage token={sharedToken} /> : <WorkspaceApp />;
+}
+
+const COMPACT_VIEWPORT_QUERY = '(max-width: 820px)';
+const PHONE_VIEWPORT_QUERY = '(max-width: 820px) and (pointer: coarse)';
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const sync = () => setMatches(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, [query]);
+  return matches;
 }
 
 type SharedSection = Exclude<WorkspaceSection, 'analysis'>;
@@ -1240,6 +1256,9 @@ function SharedMonthlyWaterChart({ monthly }: { monthly: Array<{ month: number; 
 
 function WorkspaceApp() {
   const { t, locale, setLocale } = useI18n();
+  const compactViewport = useMediaQuery(COMPACT_VIEWPORT_QUERY);
+  const phoneViewport = useMediaQuery(PHONE_VIEWPORT_QUERY);
+  const [sessionResolved, setSessionResolved] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [catalogueStats, setCatalogueStats] = useState<CatalogueStats | null>(null);
   const [site, setSite] = useState<SiteBoundary | null>(null);
@@ -1446,11 +1465,13 @@ function WorkspaceApp() {
         }
         if (session.user) void refreshProjects(workspace?.projectId).catch((refreshError) => setError(messageOf(refreshError)));
         setBusy(null);
+        setSessionResolved(true);
       })
       .catch((loadError) => {
         if (cancelled) return;
         setError(messageOf(loadError));
         setBusy(null);
+        setSessionResolved(true);
       });
     return () => { cancelled = true; };
   }, []);
@@ -3978,6 +3999,8 @@ function WorkspaceApp() {
     }
   }
 
+  const showPhoneInfoLanding = phoneViewport && (!sessionResolved || !authUser);
+
   const completed = {
     site: Boolean(site),
     profile: Boolean(siteProfile),
@@ -4000,6 +4023,56 @@ function WorkspaceApp() {
       <span>{t(stepLabelKey(step.id))}</span>
     </button>;
   };
+
+  if (showPhoneInfoLanding) {
+    return (
+      <>
+        <div className="info-landing" data-testid="info-landing">
+          <header className="topbar">
+            <span className="brand">
+              <span className="brand-mark"><Sprout size={21} strokeWidth={2.4} /></span>
+              <span><strong>growup</strong><small>{t('brand.tagline')}</small></span>
+            </span>
+            <div className="top-actions">
+              <div className="info-landing-locales" role="group" aria-label={t('language.label')}>
+                {SUPPORTED_LOCALES.map((item) => (
+                  <button
+                    key={item.code}
+                    type="button"
+                    aria-label={item.label}
+                    aria-pressed={locale === item.code}
+                    className={locale === item.code ? 'active' : ''}
+                    onClick={() => setLocale(item.code)}
+                  >
+                    <b aria-hidden="true">{item.flag}</b><small>{item.shortLabel}</small>
+                  </button>
+                ))}
+              </div>
+              <button
+                className="mobile-top-action account-trigger signed-out"
+                data-testid="topbar-account"
+                aria-label={t('auth.signIn')}
+                title={t('auth.signIn')}
+                onClick={() => setAuthOpen(true)}
+              >
+                <LogIn size={17} />
+              </button>
+            </div>
+          </header>
+          {sessionResolved
+            ? <InfoPanel layout="page" />
+            : <WorkspaceLoader label={t('busy.loading')} />}
+        </div>
+        {authOpen && <AuthPanel
+          configured={Boolean(config?.auth.configured)}
+          clientId={config?.auth.googleClientId ?? ''}
+          locale={locale}
+          onCredential={authenticateGoogle}
+          onClose={() => setAuthOpen(false)}
+        />}
+      </>
+    );
+  }
 
   return (
     <div className={`app-shell ${selectedVariant ? 'has-succession-timeline' : ''} ${onboarding?.status === 'active' ? `onboarding-active onboarding-active-${onboarding.step}` : ''}`}>
@@ -4407,7 +4480,7 @@ function WorkspaceApp() {
         onClose={() => setAuthOpen(false)}
       />}
 
-      {infoOpen && <InfoPanel onClose={() => setInfoOpen(false)} />}
+      {infoOpen && <InfoPanel layout={compactViewport ? 'page' : 'dialog'} onClose={() => setInfoOpen(false)} />}
 
       {clearSiteOpen && <ClearSiteDialog onCancel={() => setClearSiteOpen(false)} onConfirm={clearSite} />}
 
@@ -4701,30 +4774,63 @@ function AuthPanel({ configured, clientId, locale, onCredential, onClose }: {
   );
 }
 
-function InfoPanel({ onClose }: { onClose: () => void }) {
+function InfoDocument() {
   const { t } = useI18n();
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [onClose]);
   const features = [
     { icon: Satellite, title: t('info.readTitle'), body: t('info.readBody') },
     { icon: TreePine, title: t('info.designTitle'), body: t('info.designBody') },
     { icon: Droplets, title: t('info.buildTitle'), body: t('info.buildBody') },
   ];
+  return <>
+    <header><span className="info-mark"><Sprout size={24} /></span><small>{t('info.eyebrow')}</small><h2 id="info-title">{t('info.title')}</h2><p>{t('info.body')}</p></header>
+    <div className="info-features">{features.map(({ icon: Icon, title, body }, index) => <article key={title}><span><Icon size={17} /></span><small>0{index + 1}</small><h3>{title}</h3><p>{body}</p></article>)}</div>
+    <section className="info-sources" aria-labelledby="info-sources-title">
+      <small>{t('info.sourcesEyebrow')}</small>
+      <h3 id="info-sources-title">{t('info.sourcesTitle')}</h3>
+      <p>{t('info.sourcesBody')}</p>
+      {INFO_DATA_SOURCE_GROUPS.map((group) => (
+        <div key={group.id} className="info-source-group">
+          <h4>{t(`info.sources.${group.id}`)}</h4>
+          {group.sources.map((source) => (
+            <a key={source.id} href={source.href} target="_blank" rel="noreferrer">
+              <strong>{source.name}</strong>
+              <p>{t(`info.source.${source.id}.use`)}</p>
+            </a>
+          ))}
+        </div>
+      ))}
+    </section>
+    <a className="info-open-source" href="https://github.com/meaningtech/growup" target="_blank" rel="noreferrer">
+      <span><Github size={19} /></span>
+      <span><small>{t('info.openSourceEyebrow')}</small><strong>{t('info.openSourceTitle')}</strong><p>{t('info.openSourceBody')}</p></span>
+      <ChevronRight size={18} />
+    </a>
+    <footer><ShieldCheck size={15} /><p>{t('info.disclaimer')}</p></footer>
+  </>;
+}
+
+function InfoPanel({ onClose, layout }: { onClose?: () => void; layout: 'dialog' | 'page' }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    if (!onClose) return;
+    const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+  if (layout === 'page') {
+    const page = (
+      <main className="info-page" aria-labelledby="info-title" data-testid="info-panel">
+        {onClose && <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>}
+        <InfoDocument />
+      </main>
+    );
+    return onClose ? <div className="info-page-shell">{page}</div> : page;
+  }
   return (
-    <div className="info-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="info-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
       <section className="info-panel" role="dialog" aria-modal="true" aria-labelledby="info-title" data-testid="info-panel">
-        <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>
-        <header><span className="info-mark"><Sprout size={24} /></span><small>{t('info.eyebrow')}</small><h2 id="info-title">{t('info.title')}</h2><p>{t('info.body')}</p></header>
-        <div className="info-features">{features.map(({ icon: Icon, title, body }, index) => <article key={title}><span><Icon size={17} /></span><small>0{index + 1}</small><h3>{title}</h3><p>{body}</p></article>)}</div>
-        <a className="info-open-source" href="https://github.com/meaningtech/growup" target="_blank" rel="noreferrer">
-          <span><Github size={19} /></span>
-          <span><small>{t('info.openSourceEyebrow')}</small><strong>{t('info.openSourceTitle')}</strong><p>{t('info.openSourceBody')}</p></span>
-          <ChevronRight size={18} />
-        </a>
-        <footer><ShieldCheck size={15} /><p>{t('info.disclaimer')}</p></footer>
+        {onClose && <button className="info-close" aria-label={t('info.close')} onClick={onClose} autoFocus><X size={17} /></button>}
+        <InfoDocument />
       </section>
     </div>
   );
