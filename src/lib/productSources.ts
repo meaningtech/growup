@@ -42,7 +42,7 @@ export const INFO_DATA_SOURCE_GROUPS: Array<{ id: InfoSourceGroupId; sources: In
       { id: 'overpass', name: 'OpenStreetMap Overpass', href: 'https://overpass-api.de/' },
       { id: 'switchboard', name: 'Agroforestry Species Switchboard 4.0', href: 'https://doi.org/10.5281/zenodo.15628568' },
       { id: 'globunt', name: 'GlobalUsefulNativeTrees', href: 'https://doi.org/10.5281/zenodo.7994433' },
-      { id: 'ecocrop', name: 'FAO ECOCROP', href: 'https://www.fao.org/land-water/land/land-governance/land-resources-planning-toolbox/category/details/en/c/1026348/' },
+      { id: 'ecocrop', name: 'FAO ECOCROP', href: 'https://gaez.fao.org/pages/ecocrop' },
       { id: 'euforgen', name: 'EUFORGEN', href: 'https://www.euforgen.org/' },
       { id: 'powo', name: 'Plants of the World Online', href: 'https://powo.science.kew.org/' },
       { id: 'sicilianPrices', name: 'Sicilian agriculture price book', href: 'https://www.regione.sicilia.it/' },
