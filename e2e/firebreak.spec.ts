@@ -87,6 +87,18 @@ test('configures, maps and enforces a perimeter firebreak', async ({ page }) => 
   await page.getByRole('button', { name: 'Analyse this field' }).click();
   expect((await profilePromise).ok()).toBeTruthy();
   await expect(page.getByTestId('evidence-tabs').getByRole('tab')).toHaveCount(6);
+  const evidenceTabRow = await page.getByTestId('evidence-tabs').evaluate((element) => {
+    const style = getComputedStyle(element);
+    const buttons = [...element.querySelectorAll('[role="tab"]')].map((button) => Math.round(button.getBoundingClientRect().y));
+    return {
+      wrap: style.flexWrap,
+      overflowX: style.overflowX,
+      uniqueRows: new Set(buttons).size,
+    };
+  });
+  expect(evidenceTabRow.wrap).toBe('nowrap');
+  expect(['auto', 'scroll', 'overlay']).toContain(evidenceTabRow.overflowX);
+  expect(evidenceTabRow.uniqueRows).toBe(1);
   await expect(page.getByTestId('wind-map-legend')).toContainText('From NW');
   await page.getByRole('tab', { name: /Wind/ }).click();
   const windClimatology = page.getByTestId('wind-climatology');

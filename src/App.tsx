@@ -93,6 +93,22 @@ import { rankSpecies } from './lib/recommendations';
 import { rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { normalizeUserSpecies, planningSpeciesFromCatalogue, speciesLibrary, suggestedCatalogueSpacingM } from './lib/userCatalogue';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
+import {
+  STRATUM_BANDS,
+  SUCCESSION_PROFILE_YEARS,
+  buildRowProfile,
+  buildSuccessionFrames,
+  canopyPath,
+  chooseProfileRow,
+  heightTicks,
+  listProfileRows,
+  plantScreenPosition,
+  profileViewBox,
+  sharedProfileScale,
+  trunkPath,
+  withSharedScale,
+  type SuccessionRowProfile,
+} from './lib/successionProfile';
 import { simulateDailyPlantExposure, type DailyPlantSolarExposure } from './lib/solarExposure';
 import { buildHarvestPlan, HARVEST_HORIZON_YEARS, normalizeHarvestPriceOverrides } from './lib/harvest';
 import {
@@ -4664,7 +4680,7 @@ function WorkspaceApp() {
           />}
           {section === 'profile' && <ProfilePanel profile={siteProfile} hasSite={Boolean(site)} worldviewUrl={site ? worldviewPermalink(site, gibsDate) : null} onAnalyze={analyzeSite} onOpenSite={() => setSection('site')} onShowNdmi={() => { setShowNdmi(true); setShowWaterSamples(true); }} onShowGibsImagery={() => { setShowGibsImagery(true); setShowLayerPanel(true); }} onShowSubsurface={(layer) => { if (layer === 'depth') setShowDepthToBedrock(true); else setShowGroundwater(true); setShowLayerPanel(true); }} onOverride={overrideSiteProfile} additionalEvidence={selectedVariant?.firebreak?.enabled ? selectedVariant.firebreak.evidence : []} onContinue={() => setSection('species')} />}
           {section === 'species' && <SpeciesPanel recommendations={recommendations} siteProfile={siteProfile} selectedIds={selectedSpeciesIds} userSpecies={userSpecies} onToggle={toggleSpecies} onAddCatalogue={addCatalogueSpecies} onGenerate={generateDesign} query={catalogueQuery} onQuery={setCatalogueQuery} onSearch={searchCatalogue} catalogueResults={catalogueResults} stats={catalogueStats} design={designConfiguration} onDesign={updateDesignConfiguration} onSystemChange={changeDesignSystem} onPickMonoculture={pickMonocultureSpecies} onSearchCatalogue={searchCatalogueByQuery} />}
-          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} />}
+          {section === 'layout' && <LayoutPanel variants={variants} selectedVariant={selectedVariant} onSelect={(id) => { setSelectedVariantId(id); setSelectedTreeId(null); setSelectedTreeIds([]); }} selectedTree={selectedTree} selectedTreeIds={selectedTreeIds} onTreeSelect={selectTree} onSelectGroup={selectTreeGroup} onClearSelection={() => { setSelectedTreeId(null); setSelectedTreeIds([]); }} onReplaceSelected={replaceSelectedTrees} onLockSelected={lockSelectedTrees} onDeleteSelected={deleteSelectedTrees} onAlignSelected={() => alignSelectedTrees(false)} onSpaceSelected={() => alignSelectedTrees(true)} selectedSpecies={selectedSpecies} hiddenSpeciesIds={hiddenPlannedSpeciesIds} onToggleSpeciesVisibility={(speciesId) => { setShowPlannedTrees(true); setHiddenPlannedSpeciesIds((ids) => ids.includes(speciesId) ? ids.filter((id) => id !== speciesId) : [...ids, speciesId]); }} treeSpeciesId={treeSpeciesId} onTreeSpecies={setTreeSpeciesId} drawMode={drawMode} onMode={activateDrawMode} onDelete={deleteSelectedTree} onLock={toggleTreeLock} onUndo={undoTrees} onRedo={redoTrees} canUndo={undoRef.current.length > 0} canRedo={redoRef.current.length > 0} onRegenerate={regenerateUnlockedDesign} onCalculate={calculateWaterAndCosts} onOpenSpecies={() => setSection('species')} onFireOperations={() => setSection('fire')} dailySolarExposure={dailySolarExposure} solarMonth={solarMonth} solarHour={solarHour} showSolarExposure={showSolarExposure} onSolarMonth={setSolarMonth} onSolarHour={setSolarHour} onShowSolarExposure={setShowSolarExposure} timelineYear={timelineYear} onTimelineYear={setTimelineYear} />}
           {section === 'water' && <WaterPanel
             site={site}
             irrigation={irrigation}
@@ -6810,7 +6826,127 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
   );
 }
 
-function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedTreeIds, onTreeSelect, onSelectGroup, onClearSelection, onReplaceSelected, onLockSelected, onDeleteSelected, onAlignSelected, onSpaceSelected, selectedSpecies, hiddenSpeciesIds, onToggleSpeciesVisibility, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies, onFireOperations, dailySolarExposure, solarMonth, solarHour, showSolarExposure, onSolarMonth, onSolarHour, onShowSolarExposure }: {
+function SuccessionProfileCard({ variant, species, year, selectedTreeId, rowIndex, onRowIndex, onYear, onTreeSelect }: {
+  variant: LayoutVariant;
+  species: DesignSpecies[];
+  year: number;
+  selectedTreeId: string | null;
+  rowIndex: number | null;
+  onRowIndex: (rowIndex: number) => void;
+  onYear: (year: number) => void;
+  onTreeSelect: (id: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const rows = listProfileRows(variant.trees);
+  const activeRow = rowIndex ?? chooseProfileRow(variant.trees, selectedTreeId);
+  const frames = buildSuccessionFrames(variant, species, activeRow);
+  const scale = sharedProfileScale(frames);
+  const profile = withSharedScale(buildRowProfile(variant, species, year, activeRow), scale);
+  return (
+    <div className="succession-profile" data-testid="succession-profile">
+      <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.profileEyebrow')}</small><strong>{t('layout.profileTitle')}</strong></span></div>
+        <label className="succession-profile-row">
+          <span>{t('layout.profileRow')}</span>
+          <select aria-label={t('layout.profileRow')} value={activeRow} onChange={(event) => onRowIndex(Number(event.target.value))}>
+            {rows.map((item) => <option key={item} value={item}>{t('layout.profileRowOption', { row: plantingRowLabel(item) })}</option>)}
+          </select>
+        </label>
+      </div>
+      <p>{t('layout.profileBody')}</p>
+      <SuccessionProfileSvg profile={profile} selectedTreeId={selectedTreeId} onTreeSelect={onTreeSelect} height={340} />
+      <div className="succession-profile-legend" aria-hidden="true">
+        {(['placenta', 'secondary', 'climax'] as const).map((phase) => <span key={phase} data-phase={phase}>{localizedEnum(phase, t)}</span>)}
+      </div>
+      <div className="succession-profile-years" role="group" aria-label={t('layout.profileYears')}>
+        {SUCCESSION_PROFILE_YEARS.map((item) => <button key={item} type="button" className={item === year ? 'active' : ''} aria-pressed={item === year} onClick={() => onYear(item)}>{t('layout.profileYear', { year: item })}</button>)}
+      </div>
+      <div className="succession-profile-frames">
+        {frames.map((frame) => (
+          <button key={frame.year} type="button" className={frame.year === year ? 'active' : ''} onClick={() => onYear(frame.year)}>
+            <small>{t('layout.profileYear', { year: frame.year })}</small>
+            <SuccessionProfileSvg profile={frame} compact selectedTreeId={selectedTreeId} />
+          </button>
+        ))}
+      </div>
+      <p className="succession-profile-note">{t('layout.profileLimitation')}</p>
+    </div>
+  );
+}
+
+function SuccessionProfileSvg({ profile, selectedTreeId, onTreeSelect, compact = false, height }: {
+  profile: SuccessionRowProfile;
+  selectedTreeId?: string | null;
+  onTreeSelect?: (id: string | null) => void;
+  compact?: boolean;
+  height?: number;
+}) {
+  const { t } = useI18n();
+  const view = profileViewBox(profile, compact ? 240 : 860, compact ? 92 : height ?? 340);
+  const groundY = view.height - view.padBottom;
+  const plotLeft = view.padLeft;
+  const plotRight = view.width - view.padRight;
+  const plants = [...profile.plants].sort((a, b) => b.heightM - a.heightM || a.distanceM - b.distanceM);
+  const skyId = `succession-sky-${profile.year}-${compact ? 'm' : 'f'}`;
+  const soilId = `succession-soil-${profile.year}-${compact ? 'm' : 'f'}`;
+  const grass = Array.from({ length: compact ? 18 : 42 }, (_, index) => {
+    const x = plotLeft + (index + 0.35) / (compact ? 18 : 42) * (plotRight - plotLeft);
+    const blade = compact ? 3.2 : 5.5;
+    return { x, h: blade + (index % 3) * 1.1, lean: index % 2 === 0 ? -1.2 : 1.4 };
+  });
+  return (
+    <svg className={`succession-profile-svg${compact ? ' compact' : ''}`} viewBox={`0 0 ${view.width} ${view.height}`} role={compact ? 'presentation' : 'img'} aria-label={compact ? undefined : t('layout.profileTitle')}>
+      <defs>
+        <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#c9d6b8" />
+          <stop offset="42%" stopColor="#e4ead4" />
+          <stop offset="100%" stopColor="#f3edd9" />
+        </linearGradient>
+        <linearGradient id={soilId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#6d5a3c" />
+          <stop offset="100%" stopColor="#3f3324" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width={view.width} height={view.height} fill={`url(#${skyId})`} rx={compact ? 6 : 12} />
+      {STRATUM_BANDS.map((band) => {
+        if (band.fromM >= profile.heightM) return null;
+        const y = groundY - Math.min(profile.heightM, band.fromM) * view.scaleY;
+        return <g key={band.id}>
+          <line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="rgba(47, 64, 42, 0.14)" strokeDasharray="3 7" />
+          {!compact && <text x={8} y={y - 3} fill="#6d7a68" fontSize="9" fontFamily="Manrope, sans-serif">{localizedEnum(band.id, t)}</text>}
+        </g>;
+      })}
+      {!compact && heightTicks(profile.heightM).filter((tick) => tick > 0).map((tick) => {
+        const y = groundY - tick * view.scaleY;
+        return <g key={tick}>
+          <line x1={plotLeft - 4} y1={y} x2={plotLeft} y2={y} stroke="#7d8874" />
+          <text x={plotLeft - 7} y={y + 3} textAnchor="end" fill="#5f6b58" fontSize="9" fontFamily="DM Mono, monospace">{tick}</text>
+        </g>;
+      })}
+      {plants.map((plant) => {
+        const screen = plantScreenPosition(profile, plant, view);
+        return <path key={`${plant.treeId}-trunk`} d={trunkPath(plant, screen)} fill="#3d2c1c" opacity={plant.active ? 0.95 : 0.25} />;
+      })}
+      {plants.map((plant) => {
+        const screen = plantScreenPosition(profile, plant, view);
+        const selected = plant.treeId === selectedTreeId;
+        return <g key={plant.treeId} opacity={plant.active ? 1 : 0.3} style={{ cursor: onTreeSelect ? 'pointer' : 'default' }} onClick={() => onTreeSelect?.(plant.treeId)}>
+          <path d={canopyPath(plant, screen)} fill={plant.color} stroke={selected ? '#fff7d6' : plant.succession === 'placenta' ? '#b08d3e' : '#10281e'} strokeWidth={selected ? 2.2 : 0.85} strokeDasharray={plant.active ? undefined : '3 3'} />
+        </g>;
+      })}
+      <rect x={plotLeft} y={groundY} width={plotRight - plotLeft} height={view.padBottom - 8} fill={`url(#${soilId})`} />
+      <path d={`M ${plotLeft} ${groundY} Q ${(plotLeft + plotRight) / 2} ${groundY - 3} ${plotRight} ${groundY}`} fill="none" stroke="#2f3d28" strokeWidth="1.8" />
+      {grass.map((blade, index) => <path key={index} d={`M ${blade.x} ${groundY} L ${blade.x + blade.lean} ${groundY - blade.h}`} stroke="#4f6a38" strokeWidth="0.9" strokeLinecap="round" opacity="0.7" />)}
+      {!compact && plants.filter((plant) => plant.active).map((plant) => {
+        const screen = plantScreenPosition(profile, plant, view);
+        return <text key={`${plant.treeId}-label`} x={screen.cx} y={groundY + 18} textAnchor="middle" fill="#efe7d4" fontSize="8" fontFamily="DM Mono, monospace">{plant.plantCode}</text>;
+      })}
+      {!compact && <text x={plotLeft} y={view.height - 6} fill="#d9d0bc" fontSize="9" fontFamily="DM Mono, monospace">0 m</text>}
+      {!compact && <text x={plotRight} y={view.height - 6} textAnchor="end" fill="#d9d0bc" fontSize="9" fontFamily="DM Mono, monospace">{formatNumber(profile.lengthM, 0)} m</text>}
+    </svg>
+  );
+}
+
+function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, selectedTreeIds, onTreeSelect, onSelectGroup, onClearSelection, onReplaceSelected, onLockSelected, onDeleteSelected, onAlignSelected, onSpaceSelected, selectedSpecies, hiddenSpeciesIds, onToggleSpeciesVisibility, treeSpeciesId, onTreeSpecies, drawMode, onMode, onDelete, onLock, onUndo, onRedo, canUndo, canRedo, onRegenerate, onCalculate, onOpenSpecies, onFireOperations, dailySolarExposure, solarMonth, solarHour, showSolarExposure, onSolarMonth, onSolarHour, onShowSolarExposure, timelineYear, onTimelineYear }: {
   variants: LayoutVariant[];
   selectedVariant: LayoutVariant | null;
   onSelect: (id: string) => void;
@@ -6848,12 +6984,18 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
   onSolarMonth: (month: number) => void;
   onSolarHour: (hour: number) => void;
   onShowSolarExposure: (show: boolean) => void;
+  timelineYear: number;
+  onTimelineYear: (year: number) => void;
 }) {
   const { t, locale } = useI18n();
-  const [layoutTab, setLayoutTab] = useState<'summary' | 'plants' | 'solar' | 'edit'>('summary');
+  const [layoutTab, setLayoutTab] = useState<'summary' | 'plants' | 'profile' | 'solar' | 'edit'>('summary');
+  const [profileRowIndex, setProfileRowIndex] = useState<number | null>(null);
   useEffect(() => {
-    if (selectedTree) setLayoutTab('edit');
+    if (selectedTree && layoutTab !== 'profile') setLayoutTab('edit');
   }, [selectedTree?.id]);
+  useEffect(() => {
+    if (layoutTab === 'profile' && selectedVariant?.design.system !== 'syntropic') setLayoutTab('summary');
+  }, [layoutTab, selectedVariant?.design.system]);
   if (!selectedVariant) return <EmptyState icon={TreePine} title={t('layout.emptyTitle')} body={t('layout.emptyBody')} action={t('layout.openSpecies')} onAction={onOpenSpecies} />;
   const selectedTreeSpecies = selectedTree ? selectedSpecies.find((item) => item.id === selectedTree.speciesId) ?? DESIGN_SPECIES_BY_ID.get(selectedTree.speciesId) ?? null : null;
   const selectedTreeGrowth = selectedTree && selectedTreeSpecies ? growthState(selectedTreeSpecies, selectedTree, selectedVariant.design.analysisYear) : null;
@@ -6876,11 +7018,12 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
     };
   }).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.species.id.localeCompare(b.species.id));
   const layoutTabs = [
-    { id: 'summary', label: t('layout.tab.summary'), icon: ClipboardCheck },
-    { id: 'plants', label: t('layout.tab.plants'), icon: Sprout },
-    { id: 'solar', label: t('layout.tab.solar'), icon: CloudSun },
-    { id: 'edit', label: t('layout.tab.edit'), icon: PencilRuler },
-  ] as const;
+    { id: 'summary' as const, label: t('layout.tab.summary'), icon: ClipboardCheck },
+    { id: 'plants' as const, label: t('layout.tab.plants'), icon: Sprout },
+    ...(selectedVariant.design.system === 'syntropic' ? [{ id: 'profile' as const, label: t('layout.tab.profile'), icon: Layers3 }] : []),
+    { id: 'solar' as const, label: t('layout.tab.solar'), icon: CloudSun },
+    { id: 'edit' as const, label: t('layout.tab.edit'), icon: PencilRuler },
+  ];
   return (
     <div className="panel-body persistent-action-panel">
       <div className="panel-scroll-content">
@@ -6931,6 +7074,16 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
           })}
         </div>
       </div>}
+      {layoutTab === 'profile' && selectedVariant.design.system === 'syntropic' && <SuccessionProfileCard
+        variant={selectedVariant}
+        species={selectedSpecies}
+        year={timelineYear}
+        selectedTreeId={selectedTree?.id ?? null}
+        rowIndex={profileRowIndex}
+        onRowIndex={setProfileRowIndex}
+        onYear={onTimelineYear}
+        onTreeSelect={onTreeSelect}
+      />}
       {layoutTab === 'summary' && <div className="composition-card" data-testid="layout-composition">
         <div className="card-heading"><div><Layers3 size={17} /><span><small>{t('layout.objectiveCheck')}</small><strong>{t('layout.composition')}</strong></span></div></div>
         <div className="composition-targets">{[

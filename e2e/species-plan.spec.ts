@@ -56,6 +56,21 @@ test('stores exact species targets and manual succession in the generated plan',
   await expect(speciesToggle).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('shows a syntropic side-view of one planting row after the grid is generated', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  await expect(page.getByTestId('layout-tab-profile')).toBeVisible();
+  await page.getByTestId('layout-tab-profile').click();
+  await expect(page.getByTestId('succession-profile')).toBeVisible();
+  await expect(page.getByTestId('succession-profile')).toContainText('Side view of one planting row');
+  await page.getByRole('button', { name: 'Year 20' }).first().click();
+  await expect(page.getByTestId('succession-timeline').locator('input')).toHaveValue('20');
+});
+
 test('rebuilds the palette when the planting system changes and searches the monoculture crop', async ({ page }) => {
   await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
   await page.goto('/');

@@ -2,6 +2,31 @@ import { expect, test } from '@playwright/test';
 import { DESIGN_SPECIES_BY_ID } from '../src/data/designSpecies';
 import { TEMPERATE_OPEN_FIELD_FIXTURE } from '../test/fixtures/sites';
 import { importSiteFixture } from './support/siteFixture';
+import { mockPlanningApi } from './support/mockPlanningApi';
+
+async function readTabRow(locator: { evaluate: (fn: (element: Element) => unknown) => Promise<unknown> }) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const buttons = [...element.querySelectorAll('[role="tab"]')].map((button) => Math.round(button.getBoundingClientRect().y));
+    return {
+      display: style.display,
+      wrap: style.flexWrap,
+      overflowX: style.overflowX,
+      position: style.position,
+      uniqueRows: new Set(buttons).size,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    };
+  }) as Promise<{
+    display: string;
+    wrap: string;
+    overflowX: string;
+    position: string;
+    uniqueRows: number;
+    scrollWidth: number;
+    clientWidth: number;
+  }>;
+}
 
 test('places the mobile flow guide directly below the map without covering the panel title', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -233,6 +258,8 @@ test('keeps planning subtabs and the primary action available above mobile navig
   await page.getByTestId('step-species').click();
 
   const planningTabs = page.getByTestId('planning-tabs');
+  const speciesSubtabs = page.getByTestId('species-subtabs');
+  const title = page.locator('.panel-intro h1');
   const action = page.locator('.generate-design-action');
   const navigation = page.locator('.step-rail');
   await expect(planningTabs).toBeVisible();
@@ -242,6 +269,21 @@ test('keeps planning subtabs and the primary action available above mobile navig
   await expect(page.getByTestId('recommendation-basis')).toContainText(`curated ${DESIGN_SPECIES_BY_ID.size}-species design catalogue`);
   await planningTabs.scrollIntoViewIfNeeded();
   await expect(action).toBeVisible();
+
+  const [titleBox, tabsBox, subtabsBox] = await Promise.all([title.boundingBox(), planningTabs.boundingBox(), speciesSubtabs.boundingBox()]);
+  expect(titleBox).not.toBeNull();
+  expect(tabsBox).not.toBeNull();
+  expect(subtabsBox).not.toBeNull();
+  expect(tabsBox!.y).toBeGreaterThan(titleBox!.y + titleBox!.height - 1);
+  expect(subtabsBox!.y).toBeGreaterThan(tabsBox!.y + tabsBox!.height - 1);
+
+  const tabRow = await readTabRow(planningTabs);
+  expect(tabRow.display).toBe('flex');
+  expect(tabRow.wrap).toBe('nowrap');
+  expect(['auto', 'scroll', 'overlay']).toContain(tabRow.overflowX);
+  expect(tabRow.position).not.toBe('sticky');
+  expect(tabRow.uniqueRows).toBe(1);
+
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs-top.png'), fullPage: false });
 
   await page.getByRole('tab', { name: 'Firebreak' }).click();
@@ -271,6 +313,66 @@ test('keeps planning subtabs and the primary action available above mobile navig
   expect(labelsFitNavigationButtons).toBe(true);
 
   await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs.png'), fullPage: false });
+});
+
+test('keeps Italian inspector tabs on one scrollable row below the title on a phone', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('growup.locale', 'it');
+  });
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await expect(page.getByRole('button', { name: 'Analizza questo terreno' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Analizza questo terreno' }).click();
+
+  const evidenceTabs = page.getByTestId('evidence-tabs');
+  const evidenceTitle = page.locator('.panel-intro h1');
+  await expect(evidenceTabs.getByRole('tab')).toHaveCount(6);
+  const [evidenceTitleBox, evidenceTabsBox] = await Promise.all([evidenceTitle.boundingBox(), evidenceTabs.boundingBox()]);
+  expect(evidenceTitleBox).not.toBeNull();
+  expect(evidenceTabsBox).not.toBeNull();
+  expect(evidenceTabsBox!.y).toBeGreaterThan(evidenceTitleBox!.y + evidenceTitleBox!.height - 1);
+  const evidenceRow = await readTabRow(evidenceTabs);
+  expect(evidenceRow.wrap).toBe('nowrap');
+  expect(evidenceRow.position).not.toBe('sticky');
+  expect(evidenceRow.uniqueRows).toBe(1);
+  expect(evidenceRow.scrollWidth).toBeGreaterThan(evidenceRow.clientWidth);
+  await evidenceTabs.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await expect(evidenceTabs.getByRole('tab').last()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-evidence-tabs-it.png'), fullPage: false });
+
+  await page.getByTestId('step-species').click();
+  const planningTabs = page.getByTestId('planning-tabs');
+  const planningTitle = page.locator('.panel-intro h1');
+  await expect(planningTabs.getByRole('tab', { name: 'Mezzi di lavoro' })).toBeVisible();
+  const [planningTitleBox, planningTabsBox] = await Promise.all([planningTitle.boundingBox(), planningTabs.boundingBox()]);
+  expect(planningTitleBox).not.toBeNull();
+  expect(planningTabsBox).not.toBeNull();
+  expect(planningTabsBox!.y).toBeGreaterThan(planningTitleBox!.y + planningTitleBox!.height - 1);
+  const planningRow = await readTabRow(planningTabs);
+  expect(planningRow.wrap).toBe('nowrap');
+  expect(planningRow.position).not.toBe('sticky');
+  expect(planningRow.uniqueRows).toBe(1);
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-planning-tabs-it.png'), fullPage: false });
+
+  await page.getByRole('button', { name: /Genera tre progetti valutati/ }).click();
+  const layoutTabs = page.getByTestId('layout-tabs');
+  const layoutTitle = page.locator('.panel-intro h1');
+  await expect(layoutTabs.getByRole('tab')).toHaveCount(5);
+  await expect(layoutTabs.getByRole('tab', { name: 'Sezione' })).toBeVisible();
+  const [layoutTitleBox, layoutTabsBox] = await Promise.all([layoutTitle.boundingBox(), layoutTabs.boundingBox()]);
+  expect(layoutTitleBox).not.toBeNull();
+  expect(layoutTabsBox).not.toBeNull();
+  expect(layoutTabsBox!.y).toBeGreaterThan(layoutTitleBox!.y + layoutTitleBox!.height - 1);
+  const layoutRow = await readTabRow(layoutTabs);
+  expect(layoutRow.wrap).toBe('nowrap');
+  expect(layoutRow.position).not.toBe('sticky');
+  expect(layoutRow.uniqueRows).toBe(1);
+  expect(layoutRow.scrollWidth).toBeGreaterThan(layoutRow.clientWidth);
+  await layoutTabs.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await expect(layoutTabs.getByRole('tab', { name: 'Modifica' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-layout-tabs-it.png'), fullPage: false });
 });
 
 test('keeps the complete map-layer control keyboard-accessible on a mobile viewport', async ({ page }, testInfo) => {

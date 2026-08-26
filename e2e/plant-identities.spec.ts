@@ -31,7 +31,8 @@ test('labels every active plant point and opens its row-sequence identity from t
   const expectedInitials = plantSpeciesInitials(firstSpecies.commonName, 'en');
 
   const layoutTabs = page.getByTestId('layout-tabs');
-  await expect(layoutTabs.getByRole('tab')).toHaveCount(4);
+  await expect(layoutTabs.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByTestId('layout-tab-profile')).toBeVisible();
   await expect(page.getByTestId('layout-tab-summary')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('generation-audit')).toHaveCount(0);
   await expect(page.getByTestId('plan-species-summary')).toHaveCount(0);
@@ -71,8 +72,24 @@ test('labels every active plant point and opens its row-sequence identity from t
   }, { code: expectedCode });
   await expect(mapTooltip).toBeHidden();
 
-  await page.getByTestId('step-costs').click();
   await page.setViewportSize({ width: 390, height: 844 });
+  await layoutTabs.scrollIntoViewIfNeeded();
+  const layoutTabRow = await layoutTabs.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const buttons = [...element.querySelectorAll('[role="tab"]')].map((button) => Math.round(button.getBoundingClientRect().y));
+    return {
+      wrap: style.flexWrap,
+      overflowX: style.overflowX,
+      position: style.position,
+      uniqueRows: new Set(buttons).size,
+    };
+  });
+  expect(layoutTabRow.wrap).toBe('nowrap');
+  expect(['auto', 'scroll', 'overlay']).toContain(layoutTabRow.overflowX);
+  expect(layoutTabRow.position).not.toBe('sticky');
+  expect(layoutTabRow.uniqueRows).toBe(1);
+
+  await page.getByTestId('step-costs').click();
   await page.evaluate(({ code }) => {
     const marker = (window as any).__growupMapMarkers.find((item: any) => item.active && item.options.title?.startsWith(`${code} · `));
     marker.emit('click', { domEvent: { shiftKey: false } });
