@@ -109,7 +109,7 @@ Then start the API and Vite development server:
 npm run dev
 ```
 
-Open `http://127.0.0.1:5174`. The default local PostGIS connection is `postgresql://growup:growup@127.0.0.1:55432/growup`.
+Open `http://127.0.0.1:5174`. The default local PostGIS connection is `postgresql://growup:growup@127.0.0.1:55432/growup`. The host port is 55432 rather than the usual 5432 so the container cannot collide with a Cloud SQL Auth Proxy bound to 5432. If 55432 is already occupied on your machine, set `GROWUP_POSTGRES_PORT` and point `DATABASE_URL` at the same port instead of editing `docker-compose.yml`.
 
 The core workflow intentionally starts with an empty map. Import or draw a field; no localized demo parcel is bundled into the application.
 

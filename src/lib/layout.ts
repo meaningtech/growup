@@ -50,6 +50,8 @@ export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   extent: 'full-field',
   perimeterBandM: 8,
   cropAlleyWidthM: 14,
+  rowSpacingM: null,
+  plantSpacingM: null,
   windbreakRows: 2,
   orientationObjective: 'solar-crop',
   customBearingDegrees: 0,
@@ -62,6 +64,16 @@ export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   machinery: DEFAULT_MACHINERY_CONFIGURATION,
   firebreak: DEFAULT_FIREBREAK_CONFIGURATION,
 };
+
+export const MIN_PLANTING_DISTANCE_M = 1.6;
+export const MAX_PLANTING_DISTANCE_M = 30;
+
+function normalizeSpacingOverride(value: unknown): number | null {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return clamp(numeric, MIN_PLANTING_DISTANCE_M, MAX_PLANTING_DISTANCE_M);
+}
 
 function normalizePlantingLines(value: unknown): PlantingLine[] {
   if (!Array.isArray(value)) return [];
@@ -94,6 +106,8 @@ export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration
     extent: system === 'windbreak' ? 'selected-edges' : system === 'boundary-buffer' ? 'perimeter-band' : requestedExtent,
     perimeterBandM: clamp(Number(value?.perimeterBandM ?? 8), 3, 30),
     cropAlleyWidthM: clamp(Number(value?.cropAlleyWidthM ?? 14), 6, 40),
+    rowSpacingM: normalizeSpacingOverride(value?.rowSpacingM),
+    plantSpacingM: normalizeSpacingOverride(value?.plantSpacingM),
     windbreakRows: Math.round(clamp(Number(value?.windbreakRows ?? 2), 1, 5)),
     orientationObjective: objectives.includes(value?.orientationObjective as DesignConfiguration['orientationObjective']) ? value!.orientationObjective! : DEFAULT_DESIGN_CONFIGURATION.orientationObjective,
     customBearingDegrees: normalizeDirection(Number(value?.customBearingDegrees ?? 0)),
@@ -665,17 +679,36 @@ function systemSpecies(species: DesignSpecies[], design: DesignConfiguration) {
   return [requested ?? eligible[0] ?? permitted[0]].filter((item): item is DesignSpecies => Boolean(item));
 }
 
-function systemGeometry(species: DesignSpecies[], design: DesignConfiguration) {
+function automaticSystemSpacing(species: DesignSpecies[], design: DesignConfiguration) {
   const mix = resolvedSpeciesMix(species, design.speciesMix);
   const averageSpacing = species.reduce((sum, item) => sum + effectiveSpacingM(item, mix), 0) / Math.max(1, species.length);
   const machineCorridorM = machineryEnvelope(design.machinery).corridorWidthM;
-  const result = design.system === 'alley-cropping' ? { rowSpacingM: design.cropAlleyWidthM, treeSpacingM: clamp(averageSpacing * 0.8, 3.5, 8) }
+  const derived = design.system === 'alley-cropping' ? { rowSpacingM: design.cropAlleyWidthM, treeSpacingM: clamp(averageSpacing * 0.8, 3.5, 8) }
     : design.system === 'mixed-orchard' ? { rowSpacingM: clamp(averageSpacing * 1.08, 5, 11), treeSpacingM: clamp(averageSpacing, 4, 10) }
       : design.system === 'monoculture' ? { rowSpacingM: clamp(averageSpacing, 3, 12), treeSpacingM: clamp(averageSpacing, 3, 12) }
         : design.system === 'windbreak' ? { rowSpacingM: 3.5, treeSpacingM: clamp(averageSpacing * 0.55, 2.8, 5) }
           : design.system === 'boundary-buffer' ? { rowSpacingM: 4.5, treeSpacingM: clamp(averageSpacing * 0.65, 2.8, 6) }
             : { rowSpacingM: 6.5, treeSpacingM: 3.8 };
-  return { ...result, rowSpacingM: Math.max(result.rowSpacingM, machineCorridorM) };
+  return {
+    rowSpacingM: Math.max(derived.rowSpacingM, machineCorridorM),
+    treeSpacingM: Math.max(MIN_PLANTING_DISTANCE_M, derived.treeSpacingM),
+  };
+}
+
+function systemGeometry(species: DesignSpecies[], design: DesignConfiguration) {
+  const automatic = automaticSystemSpacing(species, design);
+  const machineCorridorM = machineryEnvelope(design.machinery).corridorWidthM;
+  return {
+    rowSpacingM: design.rowSpacingM == null ? automatic.rowSpacingM : Math.max(design.rowSpacingM, machineCorridorM),
+    treeSpacingM: design.plantSpacingM == null ? automatic.treeSpacingM : Math.max(MIN_PLANTING_DISTANCE_M, design.plantSpacingM),
+  };
+}
+
+export function designSpacingDefaults(selectedSpecies: DesignSpecies[], design: DesignConfiguration): { rowSpacingM: number; treeSpacingM: number } | null {
+  const normalized = normalizeDesignConfiguration(design);
+  const plantable = systemSpecies(selectedSpecies, normalized);
+  if (!plantable.length) return null;
+  return automaticSystemSpacing(plantable, normalized);
 }
 
 function designBoundaryClearanceM(site: SiteBoundary, design: DesignConfiguration) {

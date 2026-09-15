@@ -179,3 +179,44 @@ test('rebuilds plants and shares when design objectives change', async ({ page }
     && afterChipNames.join() === beforeNames.join(),
   ).toBe(false);
 });
+
+test('plants the metres the grower chooses instead of the derived monoculture grid', async ({ page }) => {
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-system').click();
+  await page.getByRole('radio', { name: 'Monoculture orchard' }).click();
+
+  const distances = page.getByTestId('design-distances');
+  await expect(distances).toBeVisible();
+  await expect(distances).toContainText('Automatic from the spacing');
+
+  const rowSpacing = page.getByTestId('design-row-spacing');
+  const plantSpacing = page.getByTestId('design-plant-spacing');
+  await rowSpacing.fill('6');
+  await plantSpacing.fill('3');
+  await plantSpacing.blur();
+  await expect(rowSpacing).toHaveValue('6');
+  await expect(plantSpacing).toHaveValue('3');
+  await expect(distances).toContainText('Manually set');
+
+  const responsePromise = page.waitForResponse((response) => response.url().endsWith('/api/layout/generate') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: /Generate three evidence-scored designs/ }).click();
+  const { variants } = await (await responsePromise).json() as { variants: LayoutVariant[] };
+  expect(variants[0].rowSpacingM).toBe(6);
+  expect(variants[0].treeSpacingM).toBe(3);
+  expect(variants[0].design.rowSpacingM).toBe(6);
+  expect(variants[0].design.plantSpacingM).toBe(3);
+
+  await expect(page.getByTestId('layout-tab-summary')).toBeVisible();
+  await page.getByTestId('layout-tab-summary').click();
+  await expect(page.getByTestId('layout-tab-panel')).toContainText('6.0 m');
+  await expect(page.getByTestId('layout-tab-panel')).toContainText('3.0 m');
+
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('design-spacing-auto').click();
+  await expect(page.getByTestId('design-spacing-auto')).toHaveCount(0);
+  await expect(distances).toContainText('Automatic from the spacing');
+});

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
+import { MAX_PLANTING_DISTANCE_M, MIN_PLANTING_DISTANCE_M } from '../src/lib/layout.js';
 import { projectAnalysisFingerprint } from '../src/lib/projectAnalysis.js';
 import { rankSpecies } from '../src/lib/recommendations.js';
 import type {
@@ -209,6 +210,7 @@ Explain uncertainty briefly. Proposed changes are not executed automatically and
 Never claim that a field check, permit, missing evidence or physical operation is resolved by a software action.
 If adding or removing species when a layout exists, also propose regenerate_layout and recalculate_water_and_costs.
 If changing species mix, design spacing, machinery or firebreak parameters, also propose regenerate_layout and recalculate_water_and_costs.
+Planting distances are freely settable for every design system: rowSpacingM is the distance between rows and plantSpacingM the distance between plants within a row, both in metres between 1.6 and 30, and null restores the spacing derived from the selected species. Never answer that the planting grid cannot be chosen. The machinery corridor stays a minimum, so the generated row spacing may end up wider than the value set here.
 If changing irrigation parameters, also propose recalculate_water_and_costs.
 Do not invent field measurements, supplier prices, inspection dates or regulatory approvals to make a finding disappear.
 Do not propose blocked or invasive species. Respect the minimum palette size for the selected design system.
@@ -216,7 +218,7 @@ Allowed action JSON shapes:
 {"type":"add_species","speciesIds":["id"]}
 {"type":"remove_species","speciesIds":["id"]}
 {"type":"set_species_mix","entries":[{"speciesId":"id","targetPercent":25,"successionOverride":"placenta|secondary|climax|null"}]}
-{"type":"set_design_spacing","cropAlleyWidthM":14,"perimeterBandM":8,"analysisYear":10,"customBearingDegrees":0}
+{"type":"set_design_spacing","cropAlleyWidthM":14,"perimeterBandM":8,"rowSpacingM":6,"plantSpacingM":3,"analysisYear":10,"customBearingDegrees":0}
 {"type":"set_machinery_parameters","enabled":true,"presetId":"bcs-740","widthM":0.79,"lengthM":2,"turningRadiusM":1.2,"implementWidthM":0.8,"safetyClearanceM":0.35}
 {"type":"set_firebreak_parameters","enabled":true,"fuelModel":"crop-residue","treatment":"mown","expectedFlameLengthM":2,"widthM":5,"supportVehicleAccess":true}
 {"type":"set_irrigation_parameters","availableFlowM3Hour":5,"inletPressureBar":2.5,"emitterFlowLHour":4,"emittersPerPlant":2,"distributionEfficiencyPercent":90,"maxZoneRuntimeHours":8}
@@ -607,6 +609,10 @@ function validateAction(value: unknown, context: AssistantProjectContext): Assis
     const action: Extract<AssistantAction, { type: 'set_design_spacing' }> = { type: 'set_design_spacing' };
     if (raw.cropAlleyWidthM !== undefined) action.cropAlleyWidthM = boundedActionNumber(raw.cropAlleyWidthM, 6, 40, 'Crop alley width');
     if (raw.perimeterBandM !== undefined) action.perimeterBandM = boundedActionNumber(raw.perimeterBandM, 3, 30, 'Perimeter band');
+    if (raw.rowSpacingM === null) action.rowSpacingM = null;
+    else if (raw.rowSpacingM !== undefined) action.rowSpacingM = boundedActionNumber(raw.rowSpacingM, MIN_PLANTING_DISTANCE_M, MAX_PLANTING_DISTANCE_M, 'Row spacing');
+    if (raw.plantSpacingM === null) action.plantSpacingM = null;
+    else if (raw.plantSpacingM !== undefined) action.plantSpacingM = boundedActionNumber(raw.plantSpacingM, MIN_PLANTING_DISTANCE_M, MAX_PLANTING_DISTANCE_M, 'Plant spacing');
     if (raw.analysisYear !== undefined) action.analysisYear = boundedActionNumber(raw.analysisYear, 1, 30, 'Analysis year', true);
     if (raw.customBearingDegrees !== undefined) action.customBearingDegrees = boundedActionNumber(raw.customBearingDegrees, 0, 359.999, 'Custom bearing');
     if (Object.keys(action).length === 1) throw new Error('Assistant proposed design spacing without parameters.');

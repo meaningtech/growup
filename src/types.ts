@@ -904,6 +904,8 @@ export type DesignConfiguration = {
   extent: PlantingExtent;
   perimeterBandM: number;
   cropAlleyWidthM: number;
+  rowSpacingM: number | null;
+  plantSpacingM: number | null;
   windbreakRows: number;
   orientationObjective: OrientationObjective;
   customBearingDegrees: number;
@@ -1446,7 +1448,7 @@ export type AssistantAction =
   | { type: 'add_species'; speciesIds: string[] }
   | { type: 'remove_species'; speciesIds: string[] }
   | { type: 'set_species_mix'; entries: Array<{ speciesId: string; targetPercent: number; successionOverride: SuccessionPhase | null }> }
-  | { type: 'set_design_spacing'; cropAlleyWidthM?: number; perimeterBandM?: number; analysisYear?: number; customBearingDegrees?: number }
+  | { type: 'set_design_spacing'; cropAlleyWidthM?: number; perimeterBandM?: number; rowSpacingM?: number | null; plantSpacingM?: number | null; analysisYear?: number; customBearingDegrees?: number }
   | { type: 'set_machinery_parameters'; enabled?: boolean; presetId?: AgriculturalMachinePresetId; widthM?: number; lengthM?: number; turningRadiusM?: number; implementWidthM?: number; safetyClearanceM?: number }
   | { type: 'set_firebreak_parameters'; enabled?: boolean; fuelModel?: FirebreakFuelModel; treatment?: FirebreakTreatment; expectedFlameLengthM?: number; widthM?: number; supportVehicleAccess?: boolean }
   | { type: 'set_irrigation_parameters'; availableFlowM3Hour?: number; inletPressureBar?: number; emitterFlowLHour?: number; emittersPerPlant?: number; distributionEfficiencyPercent?: number; maxZoneRuntimeHours?: number }

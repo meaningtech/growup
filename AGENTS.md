@@ -46,7 +46,7 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 
 ## Domain invariants
 
-- `DesignConfiguration.objectives` controls suitability weights, automatic palette membership and species-mix shares for the current planting system. Moving an objective slider rebuilds `selectedSpeciesIds` and `speciesMix` after a short debounce; opening a saved project does not. `DesignConfiguration.speciesMix` persists normalized target percentages, optional succession overrides and optional planting-distance overrides; the deterministic layout engine allocates against those targets while preserving spacing and hard site constraints. `DesignConfiguration.plantingLines` is an optional list of user-drawn planting rows; when present the layout plants along those polylines instead of the automatic field grid, and omitted or empty lines keep the automatic rows. Draw and vertex-edit planting rows from Planning/Design the same way as other map geometry. A high existing-woody `reject` blocks only blank-slate (automatic-grid) generation; user-drawn rows must still generate, skip protected crowns, and never be refused because the parcel is wooded. Normalize every untrusted configuration before use. Planning must let the user add any non-blocked Switchboard taxon, not only the ranked 51-species suggestion list.
+- `DesignConfiguration.objectives` controls suitability weights, automatic palette membership and species-mix shares for the current planting system. Moving an objective slider rebuilds `selectedSpeciesIds` and `speciesMix` after a short debounce; opening a saved project does not. `DesignConfiguration.speciesMix` persists normalized target percentages, optional succession overrides and optional planting-distance overrides; the deterministic layout engine allocates against those targets while preserving spacing and hard site constraints. `DesignConfiguration.rowSpacingM` and `DesignConfiguration.plantSpacingM` are the optional user-chosen planting distances between rows and between plants within a row; `null` means automatic from the spacing of the selected species, and any explicit value is normalized to 1.6–30 m. Both apply to every planting system, and the machinery corridor stays an inderogable minimum on `rowSpacingM`, so the generated distance can end up wider than the value the user set. `DesignConfiguration.plantingLines` is an optional list of user-drawn planting rows; when present the layout plants along those polylines instead of the automatic field grid, and omitted or empty lines keep the automatic rows. Draw and vertex-edit planting rows from Planning/Design the same way as other map geometry. A high existing-woody `reject` blocks only blank-slate (automatic-grid) generation; user-drawn rows must still generate, skip protected crowns, and never be refused because the parcel is wooded. Normalize every untrusted configuration before use. Planning must let the user add any non-blocked Switchboard taxon, not only the ranked 51-species suggestion list.
 - The internal `species` workflow section is presented as Planning/Progetta and contains Species, Firebreak and Work equipment subtabs; the Species tab itself is ordered System, Palette then Shares. The following `layout` step is Design/Piano. Keep both internal identifiers stable for persisted projects and onboarding; subtab changes must not reset `DesignConfiguration`, and mobile workflow labels must stay inside their navigation buttons. Fire/Incendi is a normal `WorkspaceSection` between Water/Acqua and Costs/Costi; Analysis/Analisi follows Costs; Care/Cura follows Analysis; Harvest/Resa is the final step after Care. All participate in previous/next and assistant navigation and must never reopen as modals or backdrops. Populated Evidence and Fire inspectors retain persistent footer actions to Planning and Costs respectively. The Care inspector is a handbook plus calendar built from the selected layout; it is not the Fire operations checklist. Harvest estimates per-tree kg and farm-gate value from a curated catalogue (olive oil, carob, wine included); it must not apply FAO t/ha to mixed layouts, and species without a record stay unknown.
 - `LayoutVariant.composition` records actual stratum/succession counts plus productive, native and nitrogen-fixer shares and their targets.
 - Species with `invasiveStatus: blocked` never enter a layout. `monitor` species can never be rated `recommended`. Missing critical soil pH caps a result at `conditional`.
@@ -109,3 +109,40 @@ New or changed backend behavior must extend `server/app.integration.test.ts`; re
 - `e2e/firebreak.spec.ts` is the browser contract for soil evidence, wind visualization, source traceability and firebreak configuration/enforcement. Keep its wind-layer toggle, seasonal rose, windward-priority and no-plant assertions intact when these schemas evolve.
 - `e2e/operations-collaboration.spec.ts` is the browser contract for the analysis-first fire page, secondary fire operations, formal AI review persistence, bulk tree editing, authenticated sharing, public comments/review and local recovery.
 - `e2e/assistant-live.spec.ts` is the opt-in deployed-provider contract: it must complete a real evidence/design/calculation flow, validate and apply an assistant proposal, then obtain an eight-dimension formal review without API mocks.
+
+### Local stack
+
+Browser verification runs against the real stack, not against mocks of it. Start it with:
+
+```bash
+docker compose up -d     # PostGIS 16-3.4; host port 55432, deliberately not 5432
+npm run db:migrate       # creates the postgis extension
+npm run dev              # Express API on 8788 + Vite on 5174
+```
+
+The container publishes **55432** instead of 5432 so it cannot be shadowed by a Cloud SQL Auth Proxy bound to 5432. If 55432 is already taken on your machine, export `GROWUP_POSTGRES_PORT=<port>` (compose reads it from `.env`) and set `DATABASE_URL` to the same port; if the two disagree, the API still answers, silently validating geometry against whatever else is listening. Create a gitignored `.env` for the local run:
+
+```dotenv
+GOOGLE_MAPS_BROWSER_API_KEY=your_browser_key
+GROWUP_POSTGRES_PORT=55432
+DATABASE_URL=postgresql://growup:growup@127.0.0.1:55432/growup
+GROWUP_SKIP_DATABASE_MIGRATION=1
+PORT=8788
+```
+
+`GROWUP_SKIP_DATABASE_MIGRATION=1` boots the API without a Mongo-compatible store; `/api/health` then reports `"database":"unavailable"` and that is expected locally. Everything that persists — accounts, private projects, immutable revisions, share links, project comments, the fire-operations checklist and the formal AI review — needs `MONGODB_URI` + `AUTH_SESSION_SECRET`, and sign-in additionally needs `GOOGLE_OAUTH_CLIENT_ID`. The planning assistant needs `AI_PROVIDER_API_KEY`. None of these belong in the repository.
+
+Run the browser suite against an already-running stack with `GROWUP_BASE_URL`, which disables the built-in `webServer`:
+
+```bash
+GROWUP_BASE_URL=http://127.0.0.1:5174 GROWUP_BROWSER_CHANNEL=chrome npx playwright test
+```
+
+Point `GROWUP_BASE_URL` at the production server (`npm run build && NODE_ENV=production npm start`, port 8788) rather than at Vite whenever a spec asserts a response header, because only Express sends them; `e2e/seo.spec.ts` asserts `Cross-Origin-Resource-Policy` and fails against the Vite dev server for that reason alone.
+
+Specs split into two classes, and a failure is only meaningful once you know which one you are looking at:
+
+- **API-mocked** — `e2e/planning-workspace.spec.ts`, `plant-identities`, `plant-prices`, `responsive-accessibility`, `solar-exposure` and `species-plan` stub the planning API through `e2e/support/mockPlanningApi.ts`, so they run with no stack at all. `plant-identities`, `read-only-sharing` and `solar-exposure` also stub Google Maps.
+- **Un-mocked** — every other spec drives the real API and needs the stack above. Those touching accounts, persistence or sharing (`auth`, `full-flow`, `operations-collaboration`) additionally need Mongo and OAuth, and those that assert map rendering (`initial`, `design-systems`, `site-authoring`, `partial-regeneration`) need a browser-restricted `GOOGLE_MAPS_BROWSER_API_KEY` — without it `.gm-style` never appears and the map canvas reports `data-zoom="0"`.
+
+Treat the un-mocked specs as opt-in per credential: decide which of them a local run can reach before reading a red suite as a regression, and say plainly which ones the run could not cover.

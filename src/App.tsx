@@ -43,6 +43,7 @@ import {
   Printer,
   Redo2,
   Route,
+  Ruler,
   Satellite,
   Save,
   ScanLine,
@@ -88,7 +89,7 @@ import { growthState } from './lib/growth';
 import { DEFAULT_IRRIGATION_CONFIGURATION, normalizeIrrigationConfiguration } from './lib/irrigation';
 import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOverrides';
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
-import { DEFAULT_DESIGN_CONFIGURATION, normalizeDesignConfiguration, recalculateLayoutMetrics } from './lib/layout';
+import { DEFAULT_DESIGN_CONFIGURATION, MAX_PLANTING_DISTANCE_M, MIN_PLANTING_DISTANCE_M, designSpacingDefaults, normalizeDesignConfiguration, recalculateLayoutMetrics } from './lib/layout';
 import { rankSpecies } from './lib/recommendations';
 import { rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { normalizeUserSpecies, planningSpeciesFromCatalogue, speciesLibrary, suggestedCatalogueSpacingM } from './lib/userCatalogue';
@@ -4424,6 +4425,7 @@ function WorkspaceApp() {
           <span className="eyebrow">{site ? t('project.activeField') : t('project.noField')}</span>
           <input
             aria-label={t('project.nameLabel')}
+            data-testid="project-name"
             value={projectName}
             maxLength={120}
             onChange={(event) => {
@@ -6334,6 +6336,14 @@ function WindClimatologyCard({ solar }: { solar: SiteProfile['solar'] }) {
   </div>;
 }
 
+function parseSpacingDraft(raw: string): number | null | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+}
+
 function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, onToggle, onAddCatalogue, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign, onSystemChange, onPickMonoculture, onSearchCatalogue }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; userSpecies: DesignSpecies[]; onToggle: (id: string) => void; onAddCatalogue: (item: CatalogueSpecies, spacingM: number) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void; onSystemChange: (system: DesignConfiguration['system']) => void; onPickMonoculture: (id: string) => void; onSearchCatalogue: (query: string) => Promise<CatalogueSpecies[]> }) {
   const { t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
@@ -6345,6 +6355,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
   const [cropSearching, setCropSearching] = useState(false);
   const [pendingCatalogue, setPendingCatalogue] = useState<CatalogueSpecies | null>(null);
   const [pendingSpacingM, setPendingSpacingM] = useState(6);
+  const [rowSpacingDraft, setRowSpacingDraft] = useState<string | null>(null);
+  const [plantSpacingDraft, setPlantSpacingDraft] = useState<string | null>(null);
   const [filters, setFilters] = useState<CatalogueFilters>({
     treeOnly: true,
     globUntOnly: false,
@@ -6469,6 +6481,20 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
   });
   const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
+  const spacingDefaults = designSpacingDefaults(selectedSpecies, design);
+  useEffect(() => { setRowSpacingDraft(null); }, [design.rowSpacingM]);
+  useEffect(() => { setPlantSpacingDraft(null); }, [design.plantSpacingM]);
+  const commitSpacing = (field: 'rowSpacingM' | 'plantSpacingM', raw: string) => {
+    if (field === 'rowSpacingM') setRowSpacingDraft(null); else setPlantSpacingDraft(null);
+    const value = parseSpacingDraft(raw);
+    if (value !== undefined) update({ [field]: value } as Partial<DesignConfiguration>);
+  };
+  const spacingInputValue = (field: 'rowSpacingM' | 'plantSpacingM', draft: string | null) => {
+    if (draft !== null) return draft;
+    const override = design[field];
+    if (override !== null) return String(override);
+    return spacingDefaults ? String(Number((field === 'rowSpacingM' ? spacingDefaults.rowSpacingM : spacingDefaults.treeSpacingM).toFixed(1))) : '';
+  };
   const updateMachinery = (patch: Partial<DesignConfiguration['machinery']>) => update({ machinery: { ...design.machinery, ...patch } });
   const updateFirebreak = (patch: Partial<DesignConfiguration['firebreak']>) => update({ firebreak: { ...design.firebreak, ...patch } });
   const machineEnvelope = machineryEnvelope(design.machinery);
@@ -6554,6 +6580,46 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
           <strong>{monocultureCrop ? speciesDisplayName(monocultureCrop, t) : t('design.bestProductive')}</strong>
           <small>{monocultureCrop ? monocultureCrop.scientificName : t('design.chooseCrop')}</small>
         </button>}
+        <div className="design-distances" data-testid="design-distances">
+          <div className="design-distances-heading">
+            <div><Ruler size={16} /><span><small>{t('design.distancesEyebrow')}</small><strong>{t('design.distances')}</strong></span></div>
+            {(design.rowSpacingM !== null || design.plantSpacingM !== null) && <button type="button" className="text-button" data-testid="design-spacing-auto" onClick={() => { setRowSpacingDraft(null); setPlantSpacingDraft(null); update({ rowSpacingM: null, plantSpacingM: null }); }}>{t('design.distanceReset')}</button>}
+          </div>
+          <p>{t('design.distancesBody')}</p>
+          <div className="design-input-grid">
+            <label className="number-label">
+              <span>{t('design.rowSpacing')}</span>
+              <span className="design-number"><input
+                aria-label={t('design.rowSpacingLong')}
+                data-testid="design-row-spacing"
+                type="number"
+                inputMode="decimal"
+                min={MIN_PLANTING_DISTANCE_M}
+                max={MAX_PLANTING_DISTANCE_M}
+                step="0.5"
+                value={spacingInputValue('rowSpacingM', rowSpacingDraft)}
+                onChange={(event) => setRowSpacingDraft(event.target.value)}
+                onBlur={(event) => commitSpacing('rowSpacingM', event.target.value)}
+              /><b>m</b></span>
+            </label>
+            <label className="number-label">
+              <span>{t('design.plantSpacing')}</span>
+              <span className="design-number"><input
+                aria-label={t('design.plantSpacingLong')}
+                data-testid="design-plant-spacing"
+                type="number"
+                inputMode="decimal"
+                min={MIN_PLANTING_DISTANCE_M}
+                max={MAX_PLANTING_DISTANCE_M}
+                step="0.5"
+                value={spacingInputValue('plantSpacingM', plantSpacingDraft)}
+                onChange={(event) => setPlantSpacingDraft(event.target.value)}
+                onBlur={(event) => commitSpacing('plantSpacingM', event.target.value)}
+              /><b>m</b></span>
+            </label>
+          </div>
+          <small className="design-distances-note">{t(design.rowSpacingM === null && design.plantSpacingM === null ? 'design.distanceAutomaticNote' : 'design.distanceOverriddenNote')}</small>
+        </div>
         <label className="select-label"><span>{t('design.orientation')}</span><select aria-label={t('design.orientation')} value={design.orientationObjective} onChange={(event) => update({ orientationObjective: event.target.value as DesignConfiguration['orientationObjective'] })}>
           <option value="solar-crop">{t('orientation.solar')}</option>
           <option value="contour">{t('orientation.contour')}</option>
@@ -7057,6 +7123,8 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         <Metric label={t('layout.canopyY20')} value={`${selectedVariant.metrics.projectedCanopyYear20Percent}%`} detail={t('layout.projectedCover')} />
         <Metric label={t('layout.openInterior')} value={`${formatNumber(selectedVariant.metrics.cropInteriorAreaM2, 0)} m²`} detail={t(selectedVariant.design.extent === 'full-field' ? 'layout.betweenRows' : 'layout.keptFree')} />
         <Metric label={t('layout.rowBearing')} value={`${selectedVariant.directionDegrees.toFixed(0)}°`} detail={localizedEnum(selectedVariant.design.orientationObjective, t)} />
+        <Metric label={t('shared.rowSpacing')} value={`${formatNumber(selectedVariant.rowSpacingM, 1)} m`} detail={t(selectedVariant.design.rowSpacingM === null ? 'layout.distanceDerived' : 'layout.distanceManual')} />
+        <Metric label={t('shared.treeSpacing')} value={`${formatNumber(selectedVariant.treeSpacingM, 1)} m`} detail={t(selectedVariant.design.plantSpacingM === null ? 'layout.distanceDerived' : 'layout.distanceManual')} />
       </div>}
       {layoutTab === 'plants' && <div className="plan-species-summary" data-testid="plan-species-summary">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('layout.speciesPlanEyebrow')}</small><strong>{t('layout.speciesPlanTitle')}</strong></span></div><output>{t('layout.speciesPlanTotal', { count: selectedVariant.trees.length })}</output></div>

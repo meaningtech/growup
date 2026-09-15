@@ -1204,7 +1204,7 @@ describe('Growup API integration', () => {
                   successionOverride: null,
                 })),
               },
-              { type: 'set_design_spacing', cropAlleyWidthM: 16, analysisYear: 12 },
+              { type: 'set_design_spacing', cropAlleyWidthM: 16, rowSpacingM: 6, plantSpacingM: 3, analysisYear: 12 },
               { type: 'set_machinery_parameters', enabled: true, presetId: 'bcs-740', safetyClearanceM: 0.4 },
               { type: 'set_firebreak_parameters', enabled: true, widthM: 7.5, supportVehicleAccess: true },
               { type: 'set_irrigation_parameters', availableFlowM3Hour: 6, distributionEfficiencyPercent: 92 },
@@ -1244,13 +1244,93 @@ describe('Growup API integration', () => {
           successionOverride: null,
         })),
       },
-      { type: 'set_design_spacing', cropAlleyWidthM: 16, analysisYear: 12 },
+      { type: 'set_design_spacing', cropAlleyWidthM: 16, rowSpacingM: 6, plantSpacingM: 3, analysisYear: 12 },
       { type: 'set_machinery_parameters', enabled: true, presetId: 'bcs-740', safetyClearanceM: 0.4 },
       { type: 'set_firebreak_parameters', enabled: true, supportVehicleAccess: true, widthM: 7.5 },
       { type: 'set_irrigation_parameters', availableFlowM3Hour: 6, distributionEfficiencyPercent: 92 },
       { type: 'regenerate_layout' },
       { type: 'recalculate_water_and_costs' },
     ]);
+  });
+
+  it('accepts freely chosen planting distances and rejects out-of-range ones', async () => {
+    const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    const context = {
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds,
+      designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+      economicConfiguration: defaultEconomicConfiguration('IT'),
+      variants: [],
+      selectedVariantId: null,
+      timelineYear: 5,
+      irrigation: null,
+      costs: null,
+      fireOperations: defaultFireOperationsPlan('2026-07-27T08:00:00.000Z'),
+      section: 'species' as const,
+    };
+
+    const accepted = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      fetchImpl: async (_input, init) => {
+        expect(JSON.parse(String(init?.body)).messages[0].content).toContain('"rowSpacingM":6');
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({
+            summary: 'Set the planting grid the grower asked for.',
+            rationale: 'Row and in-row distances are freely settable for every design system.',
+            warnings: [],
+            actions: [
+              { type: 'set_design_spacing', rowSpacingM: 6, plantSpacingM: 3 },
+              { type: 'set_design_spacing', rowSpacingM: null, plantSpacingM: null },
+              { type: 'regenerate_layout' },
+              { type: 'recalculate_water_and_costs' },
+            ],
+          }) } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    const response = await request(accepted).post('/api/assistant/plan').send({ message: 'Plant 6 m between rows and 3 m between plants.', context }).expect(200);
+    expect(response.body.actions).toEqual([
+      { type: 'set_design_spacing', rowSpacingM: 6, plantSpacingM: 3 },
+      { type: 'set_design_spacing', rowSpacingM: null, plantSpacingM: null },
+      { type: 'regenerate_layout' },
+      { type: 'recalculate_water_and_costs' },
+    ]);
+
+    const rejected = createApp({
+      skipDatabaseMigration: true,
+      aiProviderApiKey: 'server-only-test-key',
+      fetchImpl: async () => new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          summary: 'Set an impossible grid.',
+          rationale: 'The requested distance is outside the supported range.',
+          warnings: [],
+          actions: [{ type: 'set_design_spacing', rowSpacingM: 120 }],
+        }) } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    });
+    const refused = await request(rejected).post('/api/assistant/plan').send({ message: 'Plant 120 m between rows.', context }).expect(502);
+    expect(refused.body.error.status).toBe('AI_PROVIDER_INVALID_RESPONSE');
+    expect(refused.body.error.message).toContain('Row spacing');
+  });
+
+  it('generates a layout with the requested planting distances', async () => {
+    const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
+    const app = createApp({ skipDatabaseMigration: true });
+    const response = await request(app).post('/api/layout/generate').send({
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds,
+      userSpecies: [],
+      designConfiguration: { ...DEFAULT_DESIGN_CONFIGURATION, rowSpacingM: 6, plantSpacingM: 3 },
+    }).expect(200);
+
+    expect(response.body.variants[0].rowSpacingM).toBe(6);
+    expect(response.body.variants[0].treeSpacingM).toBe(3);
+    expect(response.body.variants[0].design.rowSpacingM).toBe(6);
+    expect(response.body.variants[0].design.plantSpacingM).toBe(3);
   });
 
   it('runs a structured formal AI review grounded in the complete project context', async () => {

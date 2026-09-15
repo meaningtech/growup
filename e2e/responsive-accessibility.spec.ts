@@ -492,3 +492,36 @@ test('prevents focus zoom on a phone in landscape without disabling page zoom', 
   await expect(page.getByLabel('Search place or address')).toHaveCSS('font-size', '16px');
   await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', 'width=device-width, initial-scale=1.0');
 });
+
+test('keeps the planting-distance controls readable and inside a phone viewport', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPlanningApi(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.goto('/');
+  await importSiteFixture(page, TEMPERATE_OPEN_FIELD_FIXTURE);
+  await page.getByRole('button', { name: 'Analyse this field' }).click();
+  await page.getByTestId('step-species').click();
+  await page.getByTestId('species-tab-system').click();
+
+  const block = page.getByTestId('design-distances');
+  await block.scrollIntoViewIfNeeded();
+  await expect(block).toBeVisible();
+
+  const rowSpacing = page.getByTestId('design-row-spacing');
+  const plantSpacing = page.getByTestId('design-plant-spacing');
+  await expect(rowSpacing).toHaveCSS('font-size', '16px');
+  await expect(plantSpacing).toHaveCSS('font-size', '16px');
+
+  const [blockBox, rowBox, plantBox] = await Promise.all([block.boundingBox(), rowSpacing.boundingBox(), plantSpacing.boundingBox()]);
+  expect(blockBox).not.toBeNull();
+  expect(blockBox!.x).toBeGreaterThanOrEqual(12);
+  expect(blockBox!.x + blockBox!.width).toBeLessThanOrEqual(378);
+  expect(rowBox).not.toBeNull();
+  expect(plantBox).not.toBeNull();
+  expect(Math.abs(rowBox!.y - plantBox!.y)).toBeLessThan(2);
+  expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(plantBox!.x);
+
+  const pageScrollsSideways = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(pageScrollsSideways).toBe(false);
+
+  await page.screenshot({ path: testInfo.outputPath('growup-mobile-planting-distances.png'), fullPage: false });
+});
