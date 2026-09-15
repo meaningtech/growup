@@ -12,6 +12,15 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await page.getByTestId('step-species').click();
 
   await expect(page.getByTestId('design-objectives')).toBeVisible();
+  // Objective sliders live in the System subtab, which unmounts when Palette is selected.
+  const rerankResponse = page.waitForResponse((response) => response.url().endsWith('/api/recommendations') && response.request().method() === 'POST');
+  await page.getByRole('slider', { name: 'Native habitat' }).fill('100');
+  const response = await rerankResponse;
+  expect(response.ok()).toBeTruthy();
+  const ranking = await response.json() as { recommendations: SpeciesRecommendation[] };
+  expect(ranking.recommendations[0].components.reduce((sum, component) => sum + component.weight, 0)).toBeCloseTo(1, 8);
+  expect(ranking.recommendations.find((item) => item.status === 'blocked')?.score).toBe(0);
+
   await page.getByTestId('species-tab-palette').click();
   await expect(page.getByTestId('species-safety-gate')).toContainText('blocked');
   await expect(page.locator('.drawing-status')).toHaveCount(0);
@@ -29,14 +38,6 @@ test('applies objectives to suitability, filters the source catalogue and checks
   await page.getByTestId('species-inspector').getByRole('button', { name: 'Close' }).click();
   await expect(page.getByTestId('species-inspector')).toHaveCount(0);
 
-  const rerankResponse = page.waitForResponse((response) => response.url().endsWith('/api/recommendations') && response.request().method() === 'POST');
-  await page.getByRole('slider', { name: 'Native habitat' }).fill('100');
-  const response = await rerankResponse;
-  expect(response.ok()).toBeTruthy();
-  const ranking = await response.json() as { recommendations: SpeciesRecommendation[] };
-  expect(ranking.recommendations[0].components.reduce((sum, component) => sum + component.weight, 0)).toBeCloseTo(1, 8);
-  expect(ranking.recommendations.find((item) => item.status === 'blocked')?.score).toBe(0);
-
   await page.getByLabel('Search scientific catalogue').fill('Olea');
   await page.getByLabel('Design-ready').check();
   const catalogueResponse = page.waitForResponse((item) => item.url().includes('/api/catalog/search') && item.request().method() === 'GET');
@@ -44,6 +45,7 @@ test('applies objectives to suitability, filters the source catalogue and checks
   expect((await catalogueResponse).ok()).toBeTruthy();
   await expect(page.locator('.catalogue-results > span')).toHaveCount(1);
   await expect(page.locator('.catalogue-results')).toContainText('Olea europaea');
+  await page.getByTestId('species-tab-system').click();
   await page.getByTestId('design-objectives').scrollIntoViewIfNeeded();
   await page.locator('.panel-body').evaluate((element) => { element.scrollTop = 140; });
   await page.screenshot({ path: '/private/tmp/growup-checkpoint-objectives-species.png', fullPage: false });

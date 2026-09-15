@@ -34,7 +34,7 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
 
   await page.getByTestId('step-species').click();
   await expect(page.getByRole('heading', { name: 'Coordinate the living and working system' })).toBeVisible();
-  await expect(page.getByTestId('recommendation-basis')).toContainText('planning estimates, not field trials');
+  await expect(page.getByTestId('recommendation-basis')).toContainText('stay unknown until sourced');
   await page.getByRole('tab', { name: 'Work equipment' }).click();
   await expect(page.getByLabel('Reserve space')).not.toBeChecked();
   await page.getByLabel('Reserve space').check();
@@ -208,7 +208,7 @@ test('completes evidence, design, irrigation and costs, then protects persistenc
   }));
   expect(printMetrics.scrollWidth).toBeLessThanOrEqual(Math.ceil(printMetrics.width));
   expect(printMetrics.height).toBeGreaterThan(2_500);
-  expect(printMetrics.sections).toBe(5);
+  expect(printMetrics.sections).toBe(7);
   await page.pdf({ path: schedulePdf, format: 'A4', printBackground: true });
   expect((await stat(schedulePdf)).size).toBeGreaterThan(30_000);
   const pdfSource = (await readFile(schedulePdf)).toString('latin1');

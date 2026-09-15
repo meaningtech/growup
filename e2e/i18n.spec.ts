@@ -52,7 +52,7 @@ test('switches English and Italian through an extensible persisted locale', asyn
   await expect(page.getByLabel('Sistema di impianto')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Solo perimetro' })).toBeVisible();
   await page.getByTestId('species-tab-palette').click();
-  await expect(page.getByPlaceholder('Cerca un genere o nome scientifico')).toHaveValue('');
+  await expect(page.getByPlaceholder('Cerca nome comune o scientifico')).toHaveValue('');
   await page.setViewportSize({ width: 390, height: 844 });
   const workflowLabelsFit = await page.locator('.step-rail button > span:last-child').evaluateAll((labels) => labels.every((label) => {
     const labelBox = label.getBoundingClientRect();

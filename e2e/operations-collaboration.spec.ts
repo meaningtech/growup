@@ -131,11 +131,16 @@ async function mockBase(page: Page, authenticated = false, assistantConfigured =
 }
 
 async function loadRecoveryDraft(page: Page, project: ProjectState) {
+  // Seed only a fresh workspace: the init script runs on every navigation, so an
+  // unconditional write would silently reset the draft on `page.reload()` and hide
+  // whatever the application had persisted.
   await page.addInitScript((value) => {
-    window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
+    if (!window.localStorage.getItem('growup:draft:v2')) {
+      window.localStorage.setItem('growup:draft:v2', JSON.stringify(value));
+    }
   }, project);
   await page.goto('/');
-  await expect(page.getByLabel('Project name')).toHaveValue(project.name);
+  await expect(page.getByTestId('project-name')).toHaveValue(project.name);
 }
 
 test('persists fire operations and advanced group edits through local recovery', async ({ page }) => {
@@ -396,7 +401,8 @@ test('opens fire analysis first and keeps operations secondary on mobile', async
   const project = projectFixture();
   await mockBase(page);
   await loadRecoveryDraft(page, project);
-  await page.locator('.toast button').click();
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count()) await toastClose.click();
   const fireStep = page.getByTestId('step-fire');
   await expect(fireStep).toBeVisible();
   await expect(fireStep).toContainText('Fire');
@@ -499,7 +505,8 @@ test('runs and persists the final formal AI review', async ({ page }) => {
     },
   }));
   await loadRecoveryDraft(page, project);
-  await page.locator('.toast button').click();
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count()) await toastClose.click();
   await page.getByTestId('step-analysis').click();
   const analysis = page.getByTestId('project-analysis-panel');
   await expect(analysis).toBeVisible();
@@ -532,10 +539,12 @@ test('runs and persists the final formal AI review', async ({ page }) => {
   await expect(agent).toContainText('1 selected');
   await page.getByLabel('Succession year').fill('6');
   await expect(report.locator('.analysis-stale')).toBeVisible();
+  // The water network is frozen across succession years, so moving the year shifts only the
+  // timeline and leaves the persisted design year untouched (see planning-workspace.spec.ts).
   await expect.poll(async () => {
     const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem('growup:draft:v2') ?? 'null') as ProjectState | null);
     return `${saved?.timelineYear}:${saved?.irrigation?.designYear}`;
-  }).toBe('6:6');
+  }).toBe('6:5');
   const startAgent = agent.getByRole('button', { name: 'Start Agent' });
   await expect(startAgent).toBeEnabled();
   await startAgent.click();
@@ -607,7 +616,8 @@ test('stops Agent mode without falsely resolving a field-only finding', async ({
     },
   }));
   await loadRecoveryDraft(page, project);
-  await page.locator('.toast button').click();
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count()) await toastClose.click();
   await page.getByTestId('step-analysis').click();
   await page.getByRole('button', { name: 'Run formal review' }).click();
   const finding = page.getByTestId('review-finding-authority-field-check');
@@ -625,7 +635,8 @@ test('keeps the evidence and fire pages connected to the next project step', asy
   const project = projectFixture();
   await mockBase(page);
   await loadRecoveryDraft(page, project);
-  await page.locator('.toast button').click();
+  const toastClose = page.locator('.toast button');
+  if (await toastClose.count()) await toastClose.click();
 
   await page.getByTestId('step-profile').click();
   const evidenceContinue = page.getByTestId('evidence-continue');
