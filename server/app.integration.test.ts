@@ -585,6 +585,16 @@ describe('Growup API integration', () => {
     expect(filteredCatalogue.body.results).toEqual([
       expect.objectContaining({ scientificName: 'Olea europaea', treeLike: true, designReady: true }),
     ]);
+    const pines = await request(app).get('/api/catalog/search?q=pinus&tree=true&limit=8').expect(200);
+    expect(pines.body.total).toBeGreaterThan(20);
+    expect(pines.body.results.map((species: { scientificName: string }) => species.scientificName)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^Pinus /)]),
+    );
+    expect(pines.body.results.every((species: { scientificName: string }) => species.scientificName.startsWith('Pinus '))).toBe(true);
+    const buriedOlive = await request(app).get('/api/catalog/search?q=olea&tree=true&limit=8').expect(200);
+    expect(buriedOlive.body.results.every((species: { scientificName: string }) => species.scientificName.toLocaleLowerCase('en').startsWith('olea '))).toBe(true);
+    const lemon = await request(app).get('/api/catalog/search?q=Citrus%20limon&limit=5').expect(200);
+    expect(lemon.body.results[0]).toEqual(expect.objectContaining({ scientificName: 'Citrus limon', designReady: true }));
     const login = await request(app).post('/api/auth/google').send({ credential: 'signed-google-token' }).expect(200);
     const sessionCookie = String(login.headers['set-cookie'][0]).split(';')[0];
     expect(login.body.user.email).toBe(testUser.email);

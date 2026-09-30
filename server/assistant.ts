@@ -3,6 +3,7 @@ import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
 import { MAX_PLANTING_DISTANCE_M, MIN_PLANTING_DISTANCE_M } from '../src/lib/layout.js';
 import { projectAnalysisFingerprint } from '../src/lib/projectAnalysis.js';
 import { rankSpecies } from '../src/lib/recommendations.js';
+import { normalizeScientificName } from '../src/lib/scientificName.js';
 import type {
   AssistantAction,
   AssistantProjectContext,
@@ -682,8 +683,11 @@ function boundedActionNumber(value: unknown, minimum: number, maximum: number, l
 
 function resolveSpeciesId(value: string) {
   const normalized = normalize(value);
+  const scientific = normalizeScientificName(value);
   const species = DESIGN_SPECIES.find((candidate) => (
-    normalize(candidate.id) === normalized || normalize(candidate.scientificName) === normalized || normalize(candidate.commonName) === normalized
+    normalize(candidate.id) === normalized
+    || normalizeScientificName(candidate.scientificName) === scientific
+    || normalize(candidate.commonName) === normalized
   ));
   return species && species.invasiveStatus !== 'blocked' ? species.id : null;
 }

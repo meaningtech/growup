@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DESIGN_SPECIES } from '../src/data/designSpecies.js';
+import { normalizeScientificName, scientificNameTokens } from '../src/lib/scientificName.js';
 import type { CatalogueSpecies } from '../src/types.js';
 
 const SWITCHBOARD_PATH = fileURLToPath(
@@ -12,11 +13,23 @@ const GLOBUNT_PATH = fileURLToPath(
 
 let catalogueCache: CatalogueSpecies[] | null = null;
 let globUntCache: Set<string> | null = null;
-let normalizedNamesCache: string[] | null = null;
+let nameIndexCache: Array<{ normalized: string; tokens: string[] }> | null = null;
 let catalogueCountsCache: { total: number; treeLike: number; globUnt: number } | null = null;
 
-function normalizeName(value: string): string {
+function normalizeLabel(value: string): string {
   return value.trim().toLocaleLowerCase('en').replace(/\s+/g, ' ');
+}
+
+function indexedNameRank(entry: { normalized: string; tokens: string[] }, query: string, queryTokens: string[]): number | null {
+  if (entry.normalized === query) return 0;
+  if (entry.normalized.startsWith(`${query} `)) return 1;
+  if (!queryTokens.length || queryTokens.length > entry.tokens.length) return null;
+  for (let start = 0; start <= entry.tokens.length - queryTokens.length; start += 1) {
+    const matches = queryTokens.every((token, index) => entry.tokens[start + index].startsWith(token));
+    if (!matches) continue;
+    return start === 0 ? 2 : 3;
+  }
+  return null;
 }
 
 function parseGlobUnt(): Set<string> {
@@ -31,7 +44,7 @@ function parseGlobUnt(): Set<string> {
   globUntCache = new Set(
     lines
       .filter(Boolean)
-      .map((line) => normalizeName(line.split('|')[speciesIndex] ?? ''))
+      .map((line) => normalizeScientificName(line.split('|')[speciesIndex] ?? ''))
       .filter(Boolean),
   );
 
@@ -42,7 +55,7 @@ export function loadCatalogue(): CatalogueSpecies[] {
   if (catalogueCache) return catalogueCache;
 
   const globUnt = parseGlobUnt();
-  const designReady = new Map(DESIGN_SPECIES.map((species) => [normalizeName(species.scientificName), species]));
+  const designReady = new Map(DESIGN_SPECIES.map((species) => [normalizeScientificName(species.scientificName), species]));
   const lines = readFileSync(SWITCHBOARD_PATH, 'utf8').split(/\r?\n/);
   const header = lines.shift()?.split('|') ?? [];
   const column = (name: string) => {
@@ -57,17 +70,17 @@ export function loadCatalogue(): CatalogueSpecies[] {
   const sid = column('SID');
   const wcvp = column('WCVP');
 
-  const normalizedNames: string[] = [];
+  const nameIndex: Array<{ normalized: string; tokens: string[] }> = [];
   let treeLikeCount = 0;
   let globUntCount = 0;
   catalogueCache = lines.filter(Boolean).map((line) => {
     const fields = line.split('|');
     const scientificName = fields[species] ?? '';
-    const normalized = normalizeName(scientificName);
+    const normalized = normalizeScientificName(scientificName);
     const designSpecies = designReady.get(normalized);
     const treeLike = fields[tree] === 'YES';
     const isGlobUnt = globUnt.has(normalized);
-    normalizedNames.push(normalized);
+    nameIndex.push({ normalized, tokens: scientificNameTokens(scientificName) });
     if (treeLike) treeLikeCount += 1;
     if (isGlobUnt) globUntCount += 1;
 
@@ -89,7 +102,7 @@ export function loadCatalogue(): CatalogueSpecies[] {
       evidenceCount: designSpecies?.sources.length ?? Number(fields[sources] || 0) + Number(isGlobUnt),
     };
   });
-  normalizedNamesCache = normalizedNames;
+  nameIndexCache = nameIndex;
   catalogueCountsCache = { total: catalogueCache.length, treeLike: treeLikeCount, globUnt: globUntCount };
 
   return catalogueCache;
@@ -124,13 +137,13 @@ export function searchCatalogue(options: {
   limit?: number;
   offset?: number;
 }) {
-  const query = normalizeName(options.query ?? '');
+  const query = normalizeScientificName(options.query ?? '');
+  const queryTokens = query ? query.split(/[\s-]+/).filter(Boolean) : [];
   const limit = Math.min(100, Math.max(1, options.limit ?? 30));
   const offset = Math.max(0, options.offset ?? 0);
   const catalogue = loadCatalogue();
-  if (!normalizedNamesCache) throw new Error('Catalogue search index was not initialized');
-  const results: CatalogueSpecies[] = [];
-  let total = 0;
+  if (!nameIndexCache) throw new Error('Catalogue search index was not initialized');
+  const matches: Array<{ species: CatalogueSpecies; rank: number; name: string }> = [];
   for (let index = 0; index < catalogue.length; index += 1) {
     const species = catalogue[index];
     if (options.treeOnly && !species.treeLike) continue;
@@ -138,15 +151,19 @@ export function searchCatalogue(options: {
     if (options.designReadyOnly && !species.designReady) continue;
     if (options.stratum && species.stratum !== options.stratum) continue;
     if (options.succession && species.succession !== options.succession) continue;
-    if (options.role && !species.roles.some((role) => normalizeName(role) === normalizeName(options.role ?? ''))) continue;
+    if (options.role && !species.roles.some((role) => normalizeLabel(role) === normalizeLabel(options.role ?? ''))) continue;
     if (options.evergreen !== undefined && species.evergreen !== options.evergreen) continue;
     if (options.nitrogenFixer !== undefined && species.nitrogenFixer !== options.nitrogenFixer) continue;
     if (options.droughtMinimum !== undefined && (species.droughtTolerance === null || species.droughtTolerance < options.droughtMinimum)) continue;
     if (options.evidenceMinimum !== undefined && species.evidenceCount < options.evidenceMinimum) continue;
-    if (query && !normalizedNamesCache[index].includes(query)) continue;
-    if (total >= offset && results.length < limit) results.push(species);
-    total += 1;
+    const entry = nameIndexCache[index];
+    const rank = query ? indexedNameRank(entry, query, queryTokens) : 1;
+    if (rank === null) continue;
+    matches.push({ species, rank, name: entry.normalized });
   }
+  if (query) matches.sort((left, right) => left.rank - right.rank || left.name.localeCompare(right.name, 'en'));
+  const results = matches.slice(offset, offset + limit).map((match) => match.species);
+  const total = matches.length;
 
   return {
     total,

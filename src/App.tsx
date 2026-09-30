@@ -94,6 +94,7 @@ import { rankSpecies } from './lib/recommendations';
 import { rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { normalizeUserSpecies, planningSpeciesFromCatalogue, speciesLibrary, suggestedCatalogueSpacingM } from './lib/userCatalogue';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
+import { commonNameMatches, normalizeScientificName, scientificNameMatches } from './lib/scientificName';
 import {
   STRATUM_BANDS,
   SUCCESSION_PROFILE_YEARS,
@@ -6345,7 +6346,7 @@ function parseSpacingDraft(raw: string): number | null | undefined {
 }
 
 function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, onToggle, onAddCatalogue, onGenerate, query, onQuery, onSearch, catalogueResults, stats, design, onDesign, onSystemChange, onPickMonoculture, onSearchCatalogue }: { recommendations: SpeciesRecommendation[]; siteProfile: SiteProfile | null; selectedIds: string[]; userSpecies: DesignSpecies[]; onToggle: (id: string) => void; onAddCatalogue: (item: CatalogueSpecies, spacingM: number) => void; onGenerate: () => void; query: string; onQuery: (value: string) => void; onSearch: (filters: CatalogueFilters) => void; catalogueResults: CatalogueSpecies[]; stats: CatalogueStats | null; design: DesignConfiguration; onDesign: (value: DesignConfiguration) => void; onSystemChange: (system: DesignConfiguration['system']) => void; onPickMonoculture: (id: string) => void; onSearchCatalogue: (query: string) => Promise<CatalogueSpecies[]> }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [planningTab, setPlanningTab] = useState<'species' | 'firebreak' | 'machinery'>('species');
   const [speciesTab, setSpeciesTab] = useState<'system' | 'palette' | 'mix'>('system');
@@ -6393,9 +6394,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
   const visible = recommendations.filter((item) => item.status !== 'blocked');
   const addQuery = query.trim().toLowerCase();
   const namedDesignHits = addQuery.length >= 2
-    ? DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && (
-      species.scientificName.toLowerCase().includes(addQuery) || speciesDisplayName(species, t).toLowerCase().includes(addQuery)
-    )).slice(0, 8)
+    ? DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && speciesNameMatches(species, addQuery, locale, t)).slice(0, 8)
     : [];
   const blocked = recommendations.filter((item) => item.status === 'blocked');
   const monitored = recommendations.filter((item) => item.species.invasiveStatus === 'monitor');
@@ -6454,9 +6453,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
     if (monoculture) setCropPickerOpen(false);
   };
   const cropQueryNormalized = cropQuery.trim().toLowerCase();
-  const matchesCropQuery = (species: DesignSpecies) => !cropQueryNormalized
-    || species.scientificName.toLowerCase().includes(cropQueryNormalized)
-    || speciesDisplayName(species, t).toLowerCase().includes(cropQueryNormalized);
+  const matchesCropQuery = (species: DesignSpecies) => !cropQueryNormalized || speciesNameMatches(species, cropQueryNormalized, locale, t);
   const namedCropHits = cropQueryNormalized.length >= 2
     ? [
       ...DESIGN_SPECIES.filter((species) => species.invasiveStatus !== 'blocked' && matchesCropQuery(species)),
@@ -8399,11 +8396,15 @@ function designSystemDescriptionKey(system: DesignConfiguration['system']) {
     'boundary-buffer': 'design.description.boundary',
   }[system];
 }
+function speciesNameMatches(species: DesignSpecies, query: string, locale: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  return scientificNameMatches(species.scientificName, query) || commonNameMatches(speciesDisplayName(species, t), query, locale);
+}
+
 function matchDesignSpecies(item: CatalogueSpecies): DesignSpecies | null {
   const byId = DESIGN_SPECIES_BY_ID.get(item.id);
   if (byId) return byId;
-  const name = item.scientificName.trim().toLocaleLowerCase('en');
-  return DESIGN_SPECIES.find((species) => species.scientificName.trim().toLocaleLowerCase('en') === name) ?? null;
+  const name = normalizeScientificName(item.scientificName);
+  return DESIGN_SPECIES.find((species) => normalizeScientificName(species.scientificName) === name) ?? null;
 }
 
 function speciesDisplayName(species: DesignSpecies, t: (key: string, values?: Record<string, string | number>) => string) {
