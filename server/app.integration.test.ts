@@ -1326,6 +1326,70 @@ describe('Growup API integration', () => {
     expect(refused.body.error.message).toContain('Row spacing');
   });
 
+  it('generates exact orchard quantities through the API and reports constrained shortfalls', async () => {
+    const selectedSpeciesIds = ['morus-nigra', 'prunus-persica', 'prunus-dulcis'];
+    const counts = { 'morus-nigra': 10, 'prunus-persica': 5, 'prunus-dulcis': 20 };
+    let stored: ProjectState | null = null;
+    const app = createApp({
+      skipDatabaseMigration: true,
+      ...testAuth,
+      database: {
+        ...readOnlyTestDatabase(),
+        getUser: async (id) => id === testUser.id ? testUser : null,
+        getProject: async (owner, id) => owner === testUser.id && id === stored?.id ? stored : null,
+        saveProject: async (owner, project) => {
+          stored = buildRevisionArtifacts(owner, project, 1).state;
+          return stored;
+        },
+      },
+    });
+    const input = {
+      site: TEMPERATE_OPEN_FIELD_FIXTURE,
+      siteProfile: siteProfile(),
+      selectedSpeciesIds,
+      designConfiguration: { ...DEFAULT_DESIGN_CONFIGURATION, system: 'mixed-orchard', speciesQuantityMode: 'count', speciesCounts: counts },
+    };
+    const response = await request(app).post('/api/layout/generate').send(input).expect(200);
+    for (const variant of response.body.variants) {
+      expect(variant.design).toMatchObject(input.designConfiguration);
+      expect(variant.trees).toHaveLength(35);
+      for (const id of selectedSpeciesIds) expect(variant.trees.filter((tree: { speciesId: string }) => tree.speciesId === id)).toHaveLength(counts[id as keyof typeof counts]);
+    }
+    const limited = await request(app).post('/api/layout/generate').send({
+      ...input, designConfiguration: { ...input.designConfiguration, speciesCounts: { 'morus-nigra': 100000 } },
+    }).expect(200);
+    expect(limited.body.variants[0].warnings.join(' ')).toMatch(/of 100000 requested plants/);
+    expect(limited.body.variants[0].trees.every((tree: { speciesId: string }) => tree.speciesId === 'morus-nigra')).toBe(true);
+    const locked = { ...response.body.variants[0].trees[0], locked: true };
+    const regenerated = await request(app).post('/api/layout/regenerate').send({
+      ...input, previousVariant: { ...response.body.variants[0], trees: [locked] },
+    }).expect(200);
+    expect(regenerated.body.variant.trees.filter((tree: { locked: boolean }) => tree.locked)).toEqual([locked]);
+    expect(regenerated.body.variant.trees).toHaveLength(35);
+    const login = await request(app).post('/api/auth/google').send({ credential: 'signed-google-token' }).expect(200);
+    const cookie = String(login.headers['set-cookie'][0]).split(';')[0];
+    const project: ProjectState = {
+      id: 'orchard-quantity-integration', name: 'Orchard quantities',
+      site: input.site, siteProfile: input.siteProfile, selectedSpeciesIds,
+      designConfiguration: response.body.variants[0].design,
+      irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
+      economicConfiguration: defaultEconomicConfiguration('XZ'),
+      variants: response.body.variants, selectedVariantId: response.body.variants[0].id,
+      timelineYear: 5, irrigation: null, costs: null,
+      fireOperations: defaultFireOperationsPlan(observedAt), collaboration: defaultProjectCollaboration(),
+      createdAt: observedAt, updatedAt: observedAt,
+    };
+    await request(app).put(`/api/projects/${project.id}`).set('Cookie', cookie).send(project).expect(200);
+    const reopened = await request(app).get(`/api/projects/${project.id}`).set('Cookie', cookie).expect(200);
+    expect(reopened.body.designConfiguration).toMatchObject({ speciesQuantityMode: 'count', speciesCounts: counts });
+    expect(reopened.body.variants[0].design.speciesCounts).toEqual(counts);
+    const geojson = await request(app).get(`/api/projects/${project.id}/export.geojson`).set('Cookie', cookie).expect(200);
+    expect(geojson.body).toMatchObject({ speciesQuantityMode: 'count', speciesCounts: counts });
+    const csv = await request(app).get(`/api/projects/${project.id}/export.csv`).set('Cookie', cookie).expect(200);
+    expect(csv.text).toContain('species_quantity_mode,species_requested_count');
+    expect(csv.text).toContain(',count,10,');
+  });
+
   it('generates a layout with the requested planting distances', async () => {
     const selectedSpeciesIds = DESIGN_SPECIES.slice(0, 3).map((species) => species.id);
     const app = createApp({ skipDatabaseMigration: true });

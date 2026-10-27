@@ -78,6 +78,10 @@ flowchart LR
 
 The production application runs as a two-stage Node.js container on Google Cloud Run. PostGIS is authoritative for spatial validation and measurement; project documents and immutable revisions remain separate from the geometry database.
 
+## Tutorial
+
+[Choose plant quantities: percentages or exact counts](https://growup.earth/tutorials/quantita-piante.mp4) — an Italian video with an illustrated guide, showing a demonstration orchard with 10 mulberries, 5 peaches and 20 almonds.
+
 ## Run locally
 
 ### Requirements

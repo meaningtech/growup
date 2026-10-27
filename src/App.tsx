@@ -91,7 +91,7 @@ import { SITE_PROFILE_OVERRIDE_DEFINITIONS, overrideValue } from './lib/siteOver
 import { createLocalProjection, haversineM, pointInPolygon, polygonCentroid } from './lib/geometry';
 import { DEFAULT_DESIGN_CONFIGURATION, MAX_PLANTING_DISTANCE_M, MIN_PLANTING_DISTANCE_M, designSpacingDefaults, normalizeDesignConfiguration, recalculateLayoutMetrics } from './lib/layout';
 import { rankSpecies } from './lib/recommendations';
-import { rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
+import { MAX_SPECIES_PLANT_COUNT, rebalanceSpeciesMix, resolvedSpeciesMix, speciesMixFromObjectives, synchronizeSpeciesMix } from './lib/speciesPlan';
 import { normalizeUserSpecies, planningSpeciesFromCatalogue, speciesLibrary, suggestedCatalogueSpacingM } from './lib/userCatalogue';
 import { plantMarkerLabelColor, plantingRowLabel, plantPositionCode, plantSpeciesInitials } from './lib/plantIdentity';
 import { commonNameMatches, normalizeScientificName, scientificNameMatches } from './lib/scientificName';
@@ -3323,6 +3323,7 @@ function WorkspaceApp() {
       if (action.type === 'set_species_mix') {
         nextDesignConfiguration = normalizeDesignConfiguration({
           ...nextDesignConfiguration,
+          speciesQuantityMode: 'percentage',
           speciesMix: Object.fromEntries(action.entries.map((entry) => [entry.speciesId, {
             targetPercent: entry.targetPercent,
             successionOverride: entry.successionOverride,
@@ -6477,6 +6478,8 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
     return !namedCropIds.has(item.id);
   });
   const selectedMix = resolvedSpeciesMix(selectedSpecies, design.speciesMix);
+  const countMode = design.speciesQuantityMode === 'count';
+  const requestedPlants = selectedSpecies.reduce((sum, species) => sum + (design.speciesCounts[species.id] ?? 0), 0);
   const update = (patch: Partial<DesignConfiguration>) => onDesign({ ...design, ...patch });
   const spacingDefaults = designSpacingDefaults(selectedSpecies, design);
   useEffect(() => { setRowSpacingDraft(null); }, [design.rowSpacingM]);
@@ -6717,16 +6720,18 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
       {inspected?.status === 'blocked' && matchCard}
       </>}
       {speciesTab === 'mix' && <div className="species-mix-config" data-testid="species-mix-config">
-        <p className="species-step-lead">{t('planning.mixLead')}</p>
-        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.mixEyebrow')}</small><strong>{t('species.mixTitle')}</strong></span></div>{selectedSpecies.length > 0 && <output>{t('species.mixTotal', { total: formatNumber(Object.values(selectedMix).reduce((sum, item) => sum + item.targetPercent, 0), 1) })}</output>}</div>
-        <p>{t('species.mixBody')}</p>
+        <div className="card-heading"><div><Sprout size={17} /><span><small>{t('species.mixEyebrow')}</small><strong>{t('species.mixTitle')}</strong></span></div>{selectedSpecies.length > 0 && <output>{countMode ? t('species.countTotal', { count: formatNumber(requestedPlants, 0) }) : t('species.mixTotal', { total: formatNumber(Object.values(selectedMix).reduce((sum, item) => sum + item.targetPercent, 0), 1) })}</output>}</div>
+        <div className="species-quantity-mode" role="group" aria-label={t('species.quantityMode')}>
+          {(['percentage', 'count'] as const).map((mode) => <button key={mode} type="button" aria-pressed={design.speciesQuantityMode === mode} onClick={() => update({ speciesQuantityMode: mode })}>{t(`species.quantityMode.${mode}`)}</button>)}
+        </div>
+        <p>{t(countMode ? 'species.countBody' : 'species.mixBody')}</p>
         {selectedSpecies.length === 0 ? <p className="inline-empty">{t('species.noneSelected')}</p> : <div className="species-mix-rows">
           {selectedSpecies.map((species) => {
             const entry = selectedMix[species.id];
             const displayName = speciesDisplayName(species, t);
             return <article key={species.id} data-species-id={species.id}>
               <span className="species-mix-name"><i style={{ background: species.color }} /><span><strong>{displayName}</strong><small>{species.scientificName}</small></span></span>
-              <label><span>{t('species.mixTarget')}</span><span className="species-mix-number"><input aria-label={t('species.mixTargetFor', { name: displayName })} type="number" min="0" max="100" step="1" value={entry.targetPercent} onChange={(event) => update({ speciesMix: rebalanceSpeciesMix(selectedSpecies, selectedMix, species.id, Number(event.target.value)) })} /><b>%</b></span></label>
+              {countMode ? <label><span>{t('species.countTarget')}</span><input aria-label={t('species.countTargetFor', { name: displayName })} type="number" min="0" max={MAX_SPECIES_PLANT_COUNT} step="1" value={design.speciesCounts[species.id] ?? 0} onChange={(event) => update({ speciesCounts: { ...design.speciesCounts, [species.id]: Number(event.target.value) } })} /></label> : <label><span>{t('species.mixTarget')}</span><span className="species-mix-number"><input aria-label={t('species.mixTargetFor', { name: displayName })} type="number" min="0" max="100" step="1" value={entry.targetPercent} onChange={(event) => update({ speciesMix: rebalanceSpeciesMix(selectedSpecies, selectedMix, species.id, Number(event.target.value)) })} /><b>%</b></span></label>}
               <label><span>{t('species.mixSuccession')}</span><select aria-label={t('species.mixSuccessionFor', { name: displayName })} value={entry.successionOverride ?? ''} onChange={(event) => update({ speciesMix: {
                 ...selectedMix,
                 [species.id]: {
@@ -6794,7 +6799,7 @@ function SpeciesPanel({ recommendations, siteProfile, selectedIds, userSpecies, 
       </div>
       </div>
       <div className="panel-action-bar">
-      <button className="button primary wide sticky-action generate-design-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies}>{t('actions.generate')} <ChevronRight size={18} /></button>
+      <button className="button primary wide sticky-action generate-design-action" onClick={onGenerate} disabled={selectedIds.length < minimumSpecies || (countMode && requestedPlants === 0)}>{t('actions.generate')} <ChevronRight size={18} /></button>
       </div>
       {cropPickerOpen && <div className="care-modal-layer" data-testid="monoculture-picker">
         <button type="button" className="care-modal-backdrop" aria-label={t('actions.close')} onClick={() => setCropPickerOpen(false)} />
@@ -7078,8 +7083,10 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
       count,
       actualPercent: selectedVariant.trees.length ? count / selectedVariant.trees.length * 100 : 0,
       targetPercent: selectedVariant.design.speciesMix[species.id]?.targetPercent ?? null,
+      targetCount: selectedVariant.design.speciesQuantityMode === 'count' ? selectedVariant.design.speciesCounts[species.id] ?? 0 : null,
     };
-  }).filter((item) => item.count > 0).sort((a, b) => b.count - a.count || a.species.id.localeCompare(b.species.id));
+  }).filter((item) => item.count > 0 || (item.targetCount ?? 0) > 0).sort((a, b) => b.count - a.count || a.species.id.localeCompare(b.species.id));
+  const requestedCount = plantedSpecies.reduce((sum, item) => sum + (item.targetCount ?? 0), 0);
   const layoutTabs = [
     { id: 'summary' as const, label: t('layout.tab.summary'), icon: ClipboardCheck },
     { id: 'plants' as const, label: t('layout.tab.plants'), icon: Sprout },
@@ -7123,17 +7130,18 @@ function LayoutPanel({ variants, selectedVariant, onSelect, selectedTree, select
         <Metric label={t('shared.rowSpacing')} value={`${formatNumber(selectedVariant.rowSpacingM, 1)} m`} detail={t(selectedVariant.design.rowSpacingM === null ? 'layout.distanceDerived' : 'layout.distanceManual')} />
         <Metric label={t('shared.treeSpacing')} value={`${formatNumber(selectedVariant.treeSpacingM, 1)} m`} detail={t(selectedVariant.design.plantSpacingM === null ? 'layout.distanceDerived' : 'layout.distanceManual')} />
       </div>}
+      {layoutTab === 'summary' && selectedVariant.design.speciesQuantityMode === 'count' && <p className="quantity-result" data-testid="quantity-result">{t('layout.countResult', { placed: selectedVariant.trees.length, requested: requestedCount })} {selectedVariant.trees.length < requestedCount && t('layout.countShortfall')}</p>}
       {layoutTab === 'plants' && <div className="plan-species-summary" data-testid="plan-species-summary">
         <div className="card-heading"><div><Sprout size={17} /><span><small>{t('layout.speciesPlanEyebrow')}</small><strong>{t('layout.speciesPlanTitle')}</strong></span></div><output>{t('layout.speciesPlanTotal', { count: selectedVariant.trees.length })}</output></div>
         <p>{t('layout.speciesPlanBody')}</p>
         <div className="plan-species-list">
-          {plantedSpecies.map(({ species, count, actualPercent, targetPercent }) => {
+          {plantedSpecies.map(({ species, count, actualPercent, targetPercent, targetCount }) => {
             const visible = !hiddenSpeciesIds.includes(species.id);
             return <button key={species.id} data-species-id={species.id} className={visible ? 'active' : ''} aria-pressed={visible} aria-label={t(visible ? 'layout.hideSpeciesOnMap' : 'layout.showSpeciesOnMap', { name: speciesDisplayName(species, t) })} onClick={() => onToggleSpeciesVisibility(species.id)}>
               <i style={{ background: species.color }} />
               <span><strong>{speciesDisplayName(species, t)}</strong><small>{species.scientificName}</small></span>
               <span className="plan-species-count"><strong>{count}</strong><small>{t('layout.exactPlants')}</small></span>
-              <span className="plan-species-percent"><strong>{formatNumber(actualPercent, 1)}%</strong><small>{targetPercent === null ? t('layout.actualShare') : t('layout.targetShare', { target: formatNumber(targetPercent, 1) })}</small></span>
+              <span className="plan-species-percent"><strong>{targetCount === null ? `${formatNumber(actualPercent, 1)}%` : targetCount}</strong><small>{targetCount === null ? targetPercent === null ? t('layout.actualShare') : t('layout.targetShare', { target: formatNumber(targetPercent, 1) }) : t('layout.requestedPlants')}</small></span>
               {visible ? <Eye size={16} /> : <EyeOff size={16} />}
             </button>;
           })}
@@ -8290,6 +8298,10 @@ function localizedEconomicRate(value: string, t: (key: string, values?: Record<s
   return keys[value] ? t(keys[value]) : value;
 }
 function localizedDomainMessage(value: string, t: (key: string, values?: Record<string, string | number>) => string) {
+  const countShortfall = value.match(/^(.+): placed (\d+) of (\d+) requested plants; spacing and hard site constraints take precedence\.$/);
+  if (countShortfall) return t('layout.warning.countShortfall', { name: countShortfall[1], placed: countShortfall[2], requested: countShortfall[3] });
+  const countLocked = value.match(/^(.+): (\d+) locked plants exceed the requested count of (\d+); locked plants were preserved\.$/);
+  if (countLocked) return t('layout.warning.countLocked', { name: countLocked[1], placed: countLocked[2], requested: countLocked[3] });
   if (value === 'No existing woody patch met the multi-source detection threshold; field verification remains mandatory.') return t('profile.woodyNone');
   const woodyReject = value.match(/^Reject this parcel for a blank-slate layout: ([\d.]+)% is classified as existing woody vegetation\.$/);
   if (woodyReject) return t('profile.woodyReject', { value: woodyReject[1] });

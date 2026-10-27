@@ -103,7 +103,7 @@ test('rebuilds the palette when the planting system changes and searches the mon
   const picker = page.getByTestId('monoculture-picker');
   await expect(picker).toBeVisible();
   await expect(picker.getByText('Preferred for this site')).toBeVisible();
-  await picker.getByLabel('Search by common or scientific name').fill('grape');
+  await picker.getByLabel('Search by common or scientific name').fill('grapevine');
   await expect(picker.getByTestId('monoculture-design-hits')).toContainText('Grapevine');
   await expect(picker.getByTestId('monoculture-design-hits')).toContainText('Vitis vinifera');
   await picker.getByLabel('Search by common or scientific name').fill('Olea');

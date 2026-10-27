@@ -43,7 +43,11 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       site: TEMPERATE_OPEN_FIELD_FIXTURE,
       siteProfile: null,
       selectedSpeciesIds: [],
-      designConfiguration: DEFAULT_DESIGN_CONFIGURATION,
+      designConfiguration: {
+        ...DEFAULT_DESIGN_CONFIGURATION,
+        speciesQuantityMode: 'count',
+        speciesCounts: { 'morus-nigra': 10, 'prunus-persica': 5, 'prunus-dulcis': 20 },
+      },
       irrigationConfiguration: DEFAULT_IRRIGATION_CONFIGURATION,
       economicConfiguration: defaultEconomicConfiguration(''),
       variants: [],
@@ -81,10 +85,12 @@ describe.runIf(runLive)('existing Mongo live persistence integration', () => {
       expect(list.body).toContainEqual(expect.objectContaining({ id: marker, name: project.name }));
       const reopened = await request(app).get(`/api/projects/${marker}`).set('Cookie', cookie).expect(200);
       expect(reopened.body).toEqual(expect.objectContaining({ id: marker, name: project.name, revision: 1 }));
+      expect(reopened.body.designConfiguration).toEqual(project.designConfiguration);
       const revisions = await request(app).get(`/api/projects/${marker}/revisions`).set('Cookie', cookie).expect(200);
       expect(revisions.body).toEqual([expect.objectContaining({ revision: 1 })]);
       const revision = await request(app).get(`/api/projects/${marker}/revisions/1`).set('Cookie', cookie).expect(200);
       expect(revision.body).toEqual(expect.objectContaining({ id: marker, revision: 1 }));
+      expect(revision.body.designConfiguration).toEqual(project.designConfiguration);
       const updated = { ...saved.body, name: 'Growup live persistence test · revised', updatedAt: new Date(Date.now() + 1_000).toISOString() };
       const savedAgain = await request(app).put(`/api/projects/${marker}`).set('Cookie', cookie).send(updated).expect(200);
       expect(savedAgain.body.revision).toBe(2);

@@ -6,7 +6,7 @@ import { growthState } from './growth';
 import { compositionTargets, DEFAULT_DESIGN_OBJECTIVES, normalizeDesignObjectives, speciesObjectiveScore } from './objectives';
 import { distanceToSiteBoundaryM, distanceToSitePathM, estimatedPlantableAreaM2, siteContainsCoordinate, sitePolygons } from './siteGeometry';
 import { assessSolarOrientation, orientationScore } from './solar';
-import { effectiveSpacingM, effectiveSuccession, normalizeSpeciesMix, resolvedSpeciesMix } from './speciesPlan';
+import { effectiveSpacingM, effectiveSuccession, normalizeSpeciesCounts, normalizeSpeciesMix, resolvedSpeciesMix } from './speciesPlan';
 import { eligibleSpeciesForSystem } from './systemPalette';
 import {
   bounds,
@@ -43,7 +43,7 @@ type LockedPlacement = {
   species: DesignSpecies;
 };
 
-export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.5.0';
+export const LAYOUT_ENGINE_VERSION = 'growup-layout-1.6.0';
 
 export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   system: 'syntropic',
@@ -60,6 +60,8 @@ export const DEFAULT_DESIGN_CONFIGURATION: DesignConfiguration = {
   seed: 41,
   objectives: DEFAULT_DESIGN_OBJECTIVES,
   speciesMix: {},
+  speciesQuantityMode: 'percentage',
+  speciesCounts: {},
   plantingLines: [],
   machinery: DEFAULT_MACHINERY_CONFIGURATION,
   firebreak: DEFAULT_FIREBREAK_CONFIGURATION,
@@ -116,6 +118,8 @@ export function normalizeDesignConfiguration(value?: Partial<DesignConfiguration
     seed: Math.round(clamp(Number(value?.seed ?? 41), 1, 2_147_483_647)),
     objectives: normalizeDesignObjectives(value?.objectives),
     speciesMix: normalizeSpeciesMix(value?.speciesMix),
+    speciesQuantityMode: value?.speciesQuantityMode === 'count' ? 'count' : 'percentage',
+    speciesCounts: normalizeSpeciesCounts(value?.speciesCounts),
     plantingLines: normalizePlantingLines(value?.plantingLines),
     machinery: normalizeMachineryConfiguration(value?.machinery),
     firebreak: normalizeFirebreakConfiguration(value?.firebreak),
@@ -132,6 +136,9 @@ export function generateLayoutVariants(
   assertLayoutInputs(site, siteProfile, selectedSpecies, design);
   const permitted = systemSpecies(selectedSpecies, design);
   if (!permitted.length) throw new Error('The selected palette has no species compatible with this design system');
+  if (design.speciesQuantityMode === 'count' && !permitted.some((item) => (design.speciesCounts[item.id] ?? 0) > 0)) {
+    throw new Error('Enter a plant count above zero for at least one compatible species.');
+  }
 
   const definitions = variantDefinitions(site, siteProfile, permitted, design);
   return definitions.map((definition) => generateVariant(site, siteProfile, permitted, definition, design, { mode: 'full', lockedTrees: [] }));
@@ -227,13 +234,23 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const placedBySpecies = new Map<string, PointM[]>();
   for (const locked of lockedPlacements) placedBySpecies.set(locked.tree.speciesId, [...(placedBySpecies.get(locked.tree.speciesId) ?? []), locked.point]);
   const trees: TreeInstance[] = options.lockedTrees.map((tree) => ({ ...tree, coordinate: { ...tree.coordinate } }));
-  const speciesMix = resolvedSpeciesMix(permitted, design.speciesMix);
+  const countMode = design.speciesQuantityMode === 'count';
+  const requestedTotal = permitted.reduce((sum, item) => sum + (design.speciesCounts[item.id] ?? 0), 0);
+  const speciesMix = resolvedSpeciesMix(permitted, countMode ? Object.fromEntries(permitted.map((item) => [item.id, {
+    ...design.speciesMix[item.id],
+    targetPercent: requestedTotal ? (design.speciesCounts[item.id] ?? 0) / requestedTotal * 100 : 0,
+  }])) : design.speciesMix);
+  const remainingCount = permitted.reduce((sum, item) => sum + Math.max(0, (design.speciesCounts[item.id] ?? 0) - (placedBySpecies.get(item.id)?.length ?? 0)), 0);
+  const placementCandidates = countMode ? spreadCountCandidates(candidates, remainingCount) : candidates;
   let lockedCandidateSkips = 0;
 
-  for (const candidate of candidates) {
-    const missing = permitted.filter((item) => speciesMix[item.id].targetPercent > 0 && !placedBySpecies.has(item.id));
-    const ordered = speciesOrder(missing.length ? missing : permitted, candidate.rowIndex, candidate.positionIndex, design, placedBySpecies, speciesMix);
-    const selected = ordered.find((item) => canPlaceSpecies(item, candidate, placedBySpecies, speciesMix)) ?? ordered[0];
+  for (const candidate of placementCandidates) {
+    const available = countMode ? permitted.filter((item) => (placedBySpecies.get(item.id)?.length ?? 0) < (design.speciesCounts[item.id] ?? 0)) : permitted;
+    if (!available.length) break;
+    const missing = available.filter((item) => speciesMix[item.id].targetPercent > 0 && !placedBySpecies.has(item.id));
+    const ordered = speciesOrder(!countMode && missing.length ? missing : available, candidate.rowIndex, candidate.positionIndex, design, placedBySpecies, speciesMix);
+    const selected = ordered.find((item) => canPlaceSpecies(item, candidate, placedBySpecies, speciesMix, countMode ? design.plantSpacingM : null)
+      && (!countMode || !lockedPlacements.some((locked) => lockedTreeConflict(candidate, item, locked, definition)))) ?? (countMode ? undefined : ordered[0]);
     if (!selected) continue;
     if (lockedPlacements.some((locked) => lockedTreeConflict(candidate, selected, locked, definition))) {
       lockedCandidateSkips += 1;
@@ -269,6 +286,13 @@ function generateVariant(site: SiteBoundary, siteProfile: SiteProfile, species: 
   const representedStrata = new Set(permitted.filter((item) => representedSpecies.has(item.id)).map((item) => item.stratum));
   const warnings: string[] = [];
   for (const item of permitted) {
+    if (countMode) {
+      const requested = design.speciesCounts[item.id] ?? 0;
+      const placed = placedBySpecies.get(item.id)?.length ?? 0;
+      if (placed < requested) warnings.push(`${item.scientificName}: placed ${placed} of ${requested} requested plants; spacing and hard site constraints take precedence.`);
+      if (placed > requested) warnings.push(`${item.scientificName}: ${placed} locked plants exceed the requested count of ${requested}; locked plants were preserved.`);
+      continue;
+    }
     const targetPercent = speciesMix[item.id].targetPercent;
     const actualPercent = trees.length ? trees.filter((tree) => tree.speciesId === item.id).length / trees.length * 100 : 0;
     if (Math.abs(actualPercent - targetPercent) <= 5) continue;
@@ -563,6 +587,14 @@ function speciesOrder(
   });
 }
 
+function spreadCountCandidates<T>(candidates: T[], requested: number): T[] {
+  const count = Math.min(requested, candidates.length);
+  if (count === 0 || count === candidates.length) return candidates;
+  const indices = Array.from({ length: count }, (_, index) => Math.floor((index + 0.5) * candidates.length / count));
+  const preferred = new Set(indices);
+  return [...indices.map((index) => candidates[index]), ...candidates.filter((_candidate, index) => !preferred.has(index))];
+}
+
 function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], design: DesignConfiguration, profile: SiteProfile): LayoutVariant['composition'] {
   const byId = new Map(species.map((item) => [item.id, item]));
   const byStratum: LayoutVariant['composition']['byStratum'] = {};
@@ -590,8 +622,8 @@ function layoutComposition(trees: TreeInstance[], species: DesignSpecies[], desi
   };
 }
 
-function canPlaceSpecies(species: DesignSpecies, candidate: PointM, placedBySpecies: Map<string, PointM[]>, mix: ReturnType<typeof resolvedSpeciesMix>): boolean {
-  const minimum = Math.max(1.6, effectiveSpacingM(species, mix) * 0.72);
+function canPlaceSpecies(species: DesignSpecies, candidate: PointM, placedBySpecies: Map<string, PointM[]>, mix: ReturnType<typeof resolvedSpeciesMix>, plantingDistanceM: number | null = null): boolean {
+  const minimum = Math.max(1.6, plantingDistanceM ?? effectiveSpacingM(species, mix) * 0.72);
   return (placedBySpecies.get(species.id) ?? []).every((point) => Math.hypot(point.x - candidate.x, point.y - candidate.y) >= minimum);
 }
 
@@ -654,7 +686,7 @@ function generationAssumptions(
     { label: 'Boundary rule', value: boundaryRule },
     { label: 'Grid geometry', value: `${definition.rowSpacingM.toFixed(1)} m rows × ${definition.treeSpacingM.toFixed(1)} m plants at ${Math.round(definition.directionDegrees)}°` },
     { label: 'Planting extent', value: extent },
-    { label: 'Species targets', value: Object.entries(speciesMix).map(([speciesId, entry]) => `${speciesId} ${entry.targetPercent.toFixed(1)}%${entry.successionOverride ? ` (${entry.successionOverride})` : ''}${entry.spacingOverrideM ? ` ${entry.spacingOverrideM}m` : ''}`).join(' · ') },
+    { label: 'Species targets', value: Object.entries(speciesMix).map(([speciesId, entry]) => `${speciesId} ${design.speciesQuantityMode === 'count' ? `${design.speciesCounts[speciesId] ?? 0} plants` : `${entry.targetPercent.toFixed(1)}%`}${entry.successionOverride ? ` (${entry.successionOverride})` : ''}${entry.spacingOverrideM ? ` ${entry.spacingOverrideM}m` : ''}`).join(' · ') },
     { label: 'Planting rows', value: design.plantingLines.length ? `${design.plantingLines.length} drawn` : 'automatic' },
     { label: 'Hard constraints', value: `holes, exclusions, paths, observed trees, detected woody vegetation${design.firebreak.enabled ? ' and perimeter firebreak' : ''}` },
   ];

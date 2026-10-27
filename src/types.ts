@@ -914,6 +914,8 @@ export type DesignConfiguration = {
   seed: number;
   objectives: DesignObjectives;
   speciesMix: Record<string, SpeciesMixEntry>;
+  speciesQuantityMode: 'percentage' | 'count';
+  speciesCounts: Record<string, number>;
   plantingLines: PlantingLine[];
   machinery: MachineryConfiguration;
   firebreak: FirebreakConfiguration;

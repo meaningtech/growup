@@ -3,6 +3,16 @@ import { speciesObjectiveScore } from './objectives';
 
 const SUCCESSION_PHASES: SuccessionPhase[] = ['placenta', 'secondary', 'climax'];
 
+export const MAX_SPECIES_PLANT_COUNT = 100_000;
+
+export function normalizeSpeciesCounts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([id, count]) => id.length > 0 && id.length <= 160 && typeof count === 'number' && Number.isFinite(count))
+    .slice(0, 200)
+    .map(([id, count]) => [id, Math.floor(clamp(count as number, 0, MAX_SPECIES_PLANT_COUNT))]));
+}
+
 export function normalizeSpeciesMix(value: unknown): Record<string, SpeciesMixEntry> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const entries = Object.entries(value as Record<string, unknown>)

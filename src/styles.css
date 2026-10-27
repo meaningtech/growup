@@ -546,8 +546,13 @@ a.text-button { text-decoration: none; }
 .species-mix-config .card-heading { margin-bottom: 6px; }
 .species-mix-config .card-heading output { padding: 4px 7px; color: var(--forest); background: var(--lime); border-radius: 7px; font: var(--text-caption) 'DM Mono', monospace; white-space: nowrap; }
 .species-mix-config > p { margin: 0 0 11px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
+.species-quantity-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 10px 0; padding: 4px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }
+.species-quantity-mode button { min-height: 36px; padding: 5px 8px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; font-size: var(--text-label); font-weight: 800; cursor: pointer; }
+.species-quantity-mode button[aria-pressed="true"] { color: var(--forest); background: var(--lime); border-color: rgba(113,140,44,.2); }
+.quantity-result { margin: 10px 0; padding: 11px; color: var(--forest); background: #e9edda; border: 1px solid var(--line); border-radius: 9px; font-size: var(--text-small); line-height: 1.5; }
 .species-mix-rows { display: grid; gap: 6px; }
-.species-mix-rows article { display: grid; grid-template-columns: minmax(0,1.2fr) 70px minmax(110px,.8fr) 72px 34px; align-items: end; gap: 8px; padding: 9px; background: #f5f5ee; border: 1px solid #e1e3d7; border-radius: 9px; }
+.species-mix-rows article { display: grid; grid-template-columns: minmax(60px,.7fr) minmax(0,1.4fr) minmax(60px,.7fr) 34px; align-items: end; gap: 8px; padding: 9px; background: #f5f5ee; border: 1px solid #e1e3d7; border-radius: 9px; }
+.species-mix-rows article > .species-mix-name { grid-column: 1 / -1; }
 .species-add { margin: 0 0 12px; padding: 13px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .species-add > p { margin: 0 0 10px; color: var(--muted); font-size: var(--text-label); line-height: 1.45; }
 .species-add-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #eceadf; }

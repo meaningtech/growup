@@ -42,7 +42,7 @@ The source tokens live in `src/styles.css`.
 - Buttons have 9 px corners, 12 px bold labels and a 38 px minimum height. Primary actions use lime, forest text and a 46 px minimum height.
 - Secondary actions use white or transparent paper surfaces and subtle dividers. Active options use forest text with lime or pale green backgrounds.
 - Inspector configuration cards use white surfaces, subtle borders and 12 px corners. Group related controls with 6–8 px gaps rather than adding nested cards.
-- Species mix rows use pale paper (`#f5f5ee`), a fine border, 9 px corners and paired species names. Numeric inputs use white backgrounds and 7 px corners.
+- Species mix rows use pale paper (`#f5f5ee`), a fine border, 9 px corners and paired species names above the controls. Numeric inputs use white backgrounds and 7 px corners. The quantity mode is a two-option group with a lime selected state; percentage shares and explicit plant counts remain independent.
 - Numeric fields retain visible labels and units. Controls must have accessible names, selected states and keyboard focus.
 - Floating map controls use translucent paper, 11 px corners and the shared shadow. Tooltips use dark forest and readable, short guidance.
 - Reserve red for actionable errors and gold for attention. Unknown evidence remains explicitly unknown; data shown to users retains its source, date/version and confidence.

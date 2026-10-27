@@ -101,6 +101,8 @@ export function exportProjectGeoJson(project: ProjectState) {
     timelineYear: year,
     generatedAt: project.updatedAt,
     generation: variant?.generation ?? null,
+    speciesQuantityMode: (variant?.design ?? project.designConfiguration).speciesQuantityMode,
+    speciesCounts: (variant?.design ?? project.designConfiguration).speciesCounts,
     maintenance: project.irrigation?.systemMaintenance ?? null,
     operations: project.operations ?? null,
     fireOperations: project.fireOperations,
@@ -114,7 +116,7 @@ export function exportProjectCsv(project: ProjectState): string {
   const variant = selectedVariant(project);
   const headers = [
     'project_id', 'project_name', 'variant_id', 'generation_mode', 'generation_seed', 'growth_year',
-    'tree_id', 'plant_code', 'species_id', 'scientific_name', 'common_name', 'latitude', 'longitude', 'row_index',
+    'tree_id', 'plant_code', 'species_id', 'species_quantity_mode', 'species_requested_count', 'scientific_name', 'common_name', 'latitude', 'longitude', 'row_index',
     'position_index', 'planted_year', 'removed_year', 'locked', 'active', 'height_low_m', 'height_base_m',
     'height_high_m', 'crown_low_m', 'crown_base_m', 'crown_high_m', 'growth_model', 'growth_confidence',
     'currency_code', 'unit_purchase_cost', 'planting_labor_hours', 'planting_labor_cost',
@@ -149,6 +151,8 @@ export function exportProjectCsv(project: ProjectState): string {
         tree.id,
         plantPositionCode(tree),
         tree.speciesId,
+        variant.design.speciesQuantityMode,
+        variant.design.speciesQuantityMode === 'count' ? variant.design.speciesCounts[tree.speciesId] ?? 0 : '',
         species?.scientificName ?? '',
         species?.commonName ?? '',
         fixed(tree.coordinate.lat, 7),
